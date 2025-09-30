@@ -1,0 +1,36 @@
+@startuml dispatcher-ordering-seq
+skinparam monochrome true
+
+participant "Dispatcher" as Dispatcher
+participant "Stream Buffer" as Buffer
+participant "Coalescer" as Coalescer
+participant "Limiter" as Limiter
+participant "Data Bus" as DataBus
+participant "Consumer" as Consumer
+
+Dispatcher -> Buffer : Push(event)
+Buffer -> Buffer : Heap insert by seq_provider
+Buffer -> Dispatcher : Ready batch (<= lateness tolerance)
+Dispatcher -> Coalescer : Handle(event)
+alt coalescable
+  Coalescer -> Coalescer : Replace latest
+  Coalescer --> Dispatcher : Suppress emit
+else non-coalescable
+  Coalescer --> Dispatcher : Emit immediately
+end
+
+Dispatcher -> Limiter : Allow(event)
+alt allowed
+  Limiter --> Dispatcher : ok
+  Dispatcher -> DataBus : Publish(event)
+  DataBus --> Consumer : Deliver(event)
+else throttled
+  Limiter --> Dispatcher : wait/backpressure
+  alt exec report
+    Dispatcher -> DataBus : Queue without dropping
+  else market data
+    Dispatcher -> Coalescer : Latest wins
+  end
+end
+
+@enduml

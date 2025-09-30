@@ -1,0 +1,20 @@
+@startuml subscription-seq
+skinparam monochrome true
+
+actor Consumer
+participant "Control Bus" as ControlBus
+participant "Dispatcher" as Dispatcher
+participant "Routing Table" as Routing
+participant "Orchestrator" as Orchestrator
+
+Consumer -> ControlBus : Subscribe(symbol, providers)
+ControlBus -> Dispatcher : ControlMessage(Subscribe)
+Dispatcher -> Routing : AddSubscription
+Routing --> Dispatcher : RoutingVersion++
+Dispatcher -> ControlBus : Ack(success, routingVersion)
+ControlBus --> Consumer : Ack(success, routingVersion)
+
+Dispatcher -> Orchestrator : UpdateMergeRules (if merged)
+Orchestrator --> Dispatcher : ConfirmMergeRule
+
+@enduml

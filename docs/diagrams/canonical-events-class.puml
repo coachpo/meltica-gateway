@@ -1,0 +1,126 @@
+@startuml canonical-events-class
+skinparam classAttributeIconSize 0
+skinparam monochrome true
+
+class Event {
+  +EventID: string
+  +MergeID: string?
+  +RoutingVersion: int
+  +Provider: string
+  +Symbol: string
+  +Type: EventType
+  +SeqProvider: uint64
+  +IngestTS: time.Time
+  +EmitTS: time.Time
+}
+
+enum EventType {
+  BookSnapshot
+  BookUpdate
+  Trade
+  Ticker
+  ExecReport
+  KlineSummary
+}
+
+class BookSnapshotPayload {
+  +Bids: []PriceLevel
+  +Asks: []PriceLevel
+  +Checksum: string
+  +LastUpdate: time.Time
+}
+
+class BookUpdatePayload {
+  +UpdateType: BookUpdateType
+  +Bids: []PriceLevel
+  +Asks: []PriceLevel
+  +Checksum: string
+}
+
+enum BookUpdateType {
+  Delta
+  Full
+}
+
+class TradePayload {
+  +TradeID: string
+  +Side: TradeSide
+  +Price: string
+  +Quantity: string
+  +Timestamp: time.Time
+}
+
+enum TradeSide {
+  Buy
+  Sell
+}
+
+class TickerPayload {
+  +LastPrice: string
+  +BidPrice: string
+  +AskPrice: string
+  +Volume24h: string
+  +Timestamp: time.Time
+}
+
+class ExecReportPayload {
+  +ClientOrderID: string
+  +ExchangeOrderID: string
+  +State: ExecReportState
+  +Side: TradeSide
+  +OrderType: OrderType
+  +Price: string
+  +Quantity: string
+  +FilledQuantity: string
+  +RemainingQty: string
+  +AvgFillPrice: string
+  +Timestamp: time.Time
+  +RejectReason: string?
+}
+
+enum ExecReportState {
+  ACK
+  PARTIAL
+  FILLED
+  CANCELLED
+  REJECTED
+  EXPIRED
+}
+
+enum OrderType {
+  Limit
+  Market
+}
+
+class KlineSummaryPayload {
+  +OpenPrice: string
+  +ClosePrice: string
+  +HighPrice: string
+  +LowPrice: string
+  +Volume: string
+  +OpenTime: time.Time
+  +CloseTime: time.Time
+}
+
+class PriceLevel {
+  +Price: string
+  +Quantity: string
+}
+
+Event --> EventType
+Event *-- "1" BookSnapshotPayload
+Event *-- "1" BookUpdatePayload
+Event *-- "1" TradePayload
+Event *-- "1" TickerPayload
+Event *-- "1" ExecReportPayload
+Event *-- "1" KlineSummaryPayload
+
+BookSnapshotPayload *-- "*" PriceLevel
+BookUpdatePayload *-- "*" PriceLevel
+ExecReportPayload --> ExecReportState
+ExecReportPayload --> TradeSide
+ExecReportPayload --> OrderType
+BookUpdatePayload --> BookUpdateType
+TradePayload --> TradeSide
+
+@enduml

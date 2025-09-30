@@ -1,0 +1,20 @@
+@startuml order-lifecycle-state
+skinparam monochrome true
+
+[*] --> Submitted
+Submitted --> Acked : ExecReport(ACK)
+Acked --> PartiallyFilled : ExecReport(PARTIAL)
+PartiallyFilled --> PartiallyFilled : ExecReport(PARTIAL)
+PartiallyFilled --> Filled : ExecReport(FILLED)
+Acked --> Filled : ExecReport(FILLED)
+Submitted --> Rejected : ExecReport(REJECTED)
+Acked --> Cancelled : ExecReport(CANCELLED)
+PartiallyFilled --> Cancelled : ExecReport(CANCELLED)
+Acked --> Expired : ExecReport(EXPIRED)
+PartiallyFilled --> Expired : ExecReport(EXPIRED)
+Filled --> [*]
+Cancelled --> [*]
+Rejected --> [*]
+Expired --> [*]
+
+@enduml

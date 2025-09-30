@@ -1,0 +1,34 @@
+@startuml windowed-merge-seq
+skinparam monochrome true
+
+participant "Provider A" as ProviderA
+participant "Provider B" as ProviderB
+participant "Orchestrator" as Orchestrator
+participant "Merge Window" as Window
+participant "Telemetry" as Telemetry
+participant "Dispatcher" as Dispatcher
+
+ProviderA -> Orchestrator : Event(symbol, type, seqA)
+Orchestrator -> Window : Open(symbol,type)
+Window -> Window : Record(providerA,eventA)
+
+loop events until close
+  ProviderB -> Orchestrator : Event(symbol, type, seqB)
+  Orchestrator -> Window : Record(providerB,eventB)
+end
+
+Orchestrator -> Window : Check thresholds
+alt complete window
+  Window --> Orchestrator : Complete(all providers)
+  Orchestrator -> Dispatcher : Emit merged event
+else partial window
+  Window --> Orchestrator : Missing providers
+  Orchestrator -> Telemetry : merge.suppressed_partial
+end
+
+alt late fragment
+  ProviderA -> Orchestrator : Late event
+  Orchestrator -> Telemetry : late_event.dropped
+end
+
+@enduml

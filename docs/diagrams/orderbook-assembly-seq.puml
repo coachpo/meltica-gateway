@@ -1,0 +1,27 @@
+@startuml orderbook-assembly-seq
+skinparam monochrome true
+
+participant "WS Client" as WS
+participant "REST Snapshot" as REST
+participant "Book Assembler" as Assembler
+participant "Telemetry" as Telemetry
+participant "Orchestrator" as Orchestrator
+
+REST -> REST : GET snapshot(symbol)
+REST --> Assembler : Snapshot(book, seq)
+Assembler -> Assembler : Load snapshot state
+
+loop Diff Stream
+  WS --> Assembler : BookDiff(seq, bids, asks, checksum)
+  Assembler -> Assembler : ApplyDiff(seq)
+  Assembler -> Assembler : VerifyChecksum(expected)
+  alt checksum mismatch or gap
+    Assembler -> Telemetry : book.resync(reason)
+    Assembler -> REST : GET snapshot(symbol)
+    REST --> Assembler : Snapshot(book, seq)
+  end
+end
+
+Assembler --> Orchestrator : BookUpdate canonical event
+
+@enduml

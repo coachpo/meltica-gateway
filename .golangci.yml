@@ -1,0 +1,55 @@
+version: "2"
+
+linters:
+  enable:
+    - wrapcheck
+    - revive
+    - nilerr
+    - gosec
+    - exhaustruct
+    - exhaustive
+    - forbidigo
+    - depguard
+
+  # v2 exclusions live under linters.exclusions
+  exclusions:
+    # Keep generated-file handling strict (official default in v2 docs)
+    generated: strict
+    # Turn off exhaustruct only in tests / tests dir
+    rules:
+      - path: '(.+)_test\.go'
+        linters:
+          - exhaustruct
+      - path: '^tests/'
+        linters:
+          - exhaustruct
+          - depguard
+          - errcheck
+          - gosec
+          - revive
+          - wrapcheck
+
+  # v2 linter settings live under linters.settings
+  settings:
+    # moved from: linters-settings.forbidigo
+    forbidigo:
+      forbid:
+        - pattern: '^legacy$'
+          msg: "constitution ban: remove backward-compat paths"
+        - pattern: '^deprecated$'
+          msg: "constitution ban: remove backward-compat paths"
+        - pattern: '^shim$'
+          msg: "constitution ban: remove backward-compat paths"
+        - pattern: '^feature_flag$'
+          msg: "constitution ban: remove backward-compat paths"
+        - pattern: '^featureFlag$'
+          msg: "constitution ban: remove backward-compat paths"
+    depguard:
+      rules:
+        no-banned-libs:
+          deny:
+            - pkg: "encoding/json"
+              desc: "Use github.com/goccy/go-json instead"
+            - pkg: "github.com/gorilla/websocket"
+              desc: "Use github.com/coder/websocket instead"
+    # exhaustruct test exclusions are handled above; no per-linter exclude needed

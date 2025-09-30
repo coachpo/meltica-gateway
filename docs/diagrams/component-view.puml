@@ -1,0 +1,46 @@
+@startuml component-view
+skinparam componentStyle rectangle
+skinparam monochrome true
+
+component "Provider Adapter" as Provider {
+  [WS Client]
+  [REST Snapshot]
+  [Parser]
+  [Book Assembler]
+}
+
+component "Orchestrator" as Orchestrator {
+  [Window Manager]
+  [Merge Evaluator]
+}
+
+component "Dispatcher" as Dispatcher {
+  [Stream Ordering]
+  [Routing Table]
+  [Backpressure]
+  [Coalescer]
+}
+
+component "Data Bus" as DataBus
+component "Control Bus" as ControlBus
+component "Telemetry Bus" as TelemetryBus
+
+component "Consumers" as Consumers {
+  [Strategy α]
+  [Strategy β]
+  [CLI]
+}
+
+Provider --> Orchestrator : Canonical Events
+Orchestrator --> Dispatcher : Merged Events
+Dispatcher --> DataBus
+DataBus --> Consumers
+Consumers --> ControlBus : Subscribe / Orders / Trading Switch
+ControlBus --> Orchestrator : Merge Rules
+ControlBus --> Dispatcher : Routing Updates
+Dispatcher --> Provider : Order Requests
+Provider --> TelemetryBus
+Orchestrator --> TelemetryBus
+Dispatcher --> TelemetryBus
+
+@enduml
