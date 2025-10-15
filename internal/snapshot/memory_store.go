@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coachpo/meltica/errs"
+	"github.com/coachpo/meltica/internal/errs"
 )
 
 // MemoryStore is an in-memory implementation of the snapshot Store.

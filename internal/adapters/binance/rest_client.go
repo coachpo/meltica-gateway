@@ -2,10 +2,10 @@ package binance
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/coachpo/meltica/internal/schema"
+	"github.com/sourcegraph/conc"
 )
 
 // SnapshotFetcher retrieves REST snapshot payloads.
@@ -52,16 +52,13 @@ func (c *RESTClient) Poll(ctx context.Context, pollers []RESTPoller) (<-chan *sc
 		return events, errs
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(len(pollers))
+	var wg conc.WaitGroup
 
 	for _, poller := range pollers {
-		poller := poller
 		if poller.Interval <= 0 {
 			poller.Interval = time.Second
 		}
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ticker := time.NewTicker(poller.Interval)
 			defer ticker.Stop()
 			for {
@@ -104,13 +101,13 @@ func (c *RESTClient) Poll(ctx context.Context, pollers []RESTPoller) (<-chan *sc
 					}
 				}
 			}
-		}()
+		})
 	}
 
 	go func() {
+		defer close(events)
+		defer close(errs)
 		wg.Wait()
-		close(events)
-		close(errs)
 	}()
 
 	return events, errs

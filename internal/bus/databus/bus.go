@@ -4,6 +4,7 @@ package databus
 import (
 	"context"
 
+	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/schema"
 )
 
@@ -20,12 +21,17 @@ type Bus interface {
 
 // MemoryConfig configures the in-memory bus buffers.
 type MemoryConfig struct {
-	BufferSize int
+	BufferSize    int
+	FanoutWorkers int
+	Pools         *pool.PoolManager
 }
 
 func (c MemoryConfig) normalize() MemoryConfig {
 	if c.BufferSize <= 0 {
 		c.BufferSize = 64
+	}
+	if c.FanoutWorkers <= 0 {
+		c.FanoutWorkers = 4
 	}
 	return c
 }

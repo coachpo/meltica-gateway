@@ -1,24 +1,15 @@
 // Package schema defines canonical event types and helper utilities.
 package schema
 
-// CloneEvent creates a deep copy of the provided event suitable for fan-out
-// delivery. The returned event is detached from any pool ownership semantics
-// and includes deep copies of mutable payload structures.
-func CloneEvent(evt *Event) *Event {
-	if evt == nil {
-		return nil
+// CopyEvent copies the contents of src into dst, performing deep copies of
+// mutable payload fields. dst must not be nil.
+func CopyEvent(dst, src *Event) {
+	if dst == nil || src == nil {
+		return
 	}
-
-	clone := *evt
-	clone.returned = false
-
-	if evt.MergeID != nil {
-		merge := *evt.MergeID
-		clone.MergeID = &merge
-	}
-
-	clone.Payload = clonePayload(evt.Payload)
-	return &clone
+	*dst = *src
+	dst.returned = false
+	dst.Payload = clonePayload(src.Payload)
 }
 
 func clonePayload(payload any) any {
@@ -69,15 +60,6 @@ func clonePayload(payload any) any {
 		return append([]byte(nil), v...)
 	case map[string]any:
 		return cloneMapStringAny(v)
-	case *MergedEvent:
-		return cloneMergedEvent(v)
-	case MergedEvent:
-		cloned := cloneMergedEvent(&v)
-		if cloned == nil {
-			var emptyMerged MergedEvent
-			return emptyMerged
-		}
-		return *cloned
 	default:
 		return v
 	}
@@ -165,25 +147,4 @@ func cloneSliceAny(src []any) []any {
 		out[i] = cloneInterface(src[i])
 	}
 	return out
-}
-
-func cloneMergedEvent(src *MergedEvent) *MergedEvent {
-	if src == nil {
-		return nil
-	}
-	clone := *src
-	clone.returned = false
-	if len(src.Fragments) > 0 {
-		clone.Fragments = make([]CanonicalEvent, len(src.Fragments))
-		for i := range src.Fragments {
-			fragmentClone := CloneEvent((*Event)(&src.Fragments[i]))
-			if fragmentClone != nil {
-				clone.Fragments[i] = CanonicalEvent(*fragmentClone)
-			} else {
-				var empty CanonicalEvent
-				clone.Fragments[i] = empty
-			}
-		}
-	}
-	return &clone
 }

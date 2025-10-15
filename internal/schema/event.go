@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coachpo/meltica/errs"
+	"github.com/coachpo/meltica/internal/errs"
 )
 
 // CanonicalType identifies canonical Meltica event categories (e.g. TICKER, ORDERBOOK.SNAPSHOT).
@@ -123,11 +123,10 @@ func (r RawInstance) Clone() RawInstance {
 	return out
 }
 
-// Event represents a canonical event emitted by providers, orchestrator, or dispatcher.
+// Event represents a canonical event emitted by providers or dispatcher.
 type Event struct {
 	returned       bool
 	EventID        string    `json:"event_id"`
-	MergeID        *string   `json:"merge_id,omitempty"`
 	RoutingVersion int       `json:"routing_version"`
 	Provider       string    `json:"provider"`
 	Symbol         string    `json:"symbol"`
@@ -145,7 +144,6 @@ func (e *Event) Reset() {
 		return
 	}
 	e.EventID = ""
-	e.MergeID = nil
 	e.RoutingVersion = 0
 	e.Provider = ""
 	e.Symbol = ""
@@ -193,6 +191,10 @@ const (
 	EventTypeExecReport EventType = "ExecReport"
 	// EventTypeKlineSummary identifies candlestick summary events.
 	EventTypeKlineSummary EventType = "KlineSummary"
+	// EventTypeControlAck identifies control-plane acknowledgements.
+	EventTypeControlAck EventType = "ControlAck"
+	// EventTypeControlResult identifies control-plane command results.
+	EventTypeControlResult EventType = "ControlResult"
 )
 
 // Coalescable reports whether an event type can be coalesced under backpressure.
@@ -200,11 +202,36 @@ func (et EventType) Coalescable() bool {
 	switch et {
 	case EventTypeTicker, EventTypeBookUpdate, EventTypeKlineSummary:
 		return true
-	case EventTypeBookSnapshot, EventTypeTrade, EventTypeExecReport:
+	case EventTypeBookSnapshot,
+		EventTypeTrade,
+		EventTypeExecReport,
+		EventTypeControlAck,
+		EventTypeControlResult:
 		return false
 	default:
 		return false
 	}
+}
+
+// ControlAckPayload carries control acknowledgement metadata delivered over the data bus.
+type ControlAckPayload struct {
+	MessageID      string             `json:"message_id"`
+	ConsumerID     string             `json:"consumer_id"`
+	CommandType    ControlMessageType `json:"command_type"`
+	Success        bool               `json:"success"`
+	RoutingVersion int                `json:"routing_version"`
+	ErrorMessage   string             `json:"error_message,omitempty"`
+	Timestamp      time.Time          `json:"timestamp"`
+}
+
+// ControlResultPayload carries control command results delivered over the data bus.
+type ControlResultPayload struct {
+	MessageID      string             `json:"message_id"`
+	ConsumerID     string             `json:"consumer_id"`
+	CommandType    ControlMessageType `json:"command_type"`
+	RoutingVersion int                `json:"routing_version"`
+	Result         any                `json:"result,omitempty"`
+	Timestamp      time.Time          `json:"timestamp"`
 }
 
 // PriceLevel describes an order book price level using decimal strings.

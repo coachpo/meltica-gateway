@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ type Parser struct {
 	pools        *pool.PoolManager
 	providerName string
 }
+
+const parserAcquireWarnDelay = 250 * time.Millisecond
 
 // NewParser creates a Binance payload parser.
 func NewParser() *Parser {
@@ -247,19 +250,26 @@ func (p *Parser) acquireProviderRaw(ctx context.Context) (*schema.ProviderRaw, f
 
 func (p *Parser) acquireCanonicalEvent(ctx context.Context) (*schema.Event, error) {
 	if p.pools == nil {
-		return new(schema.Event), nil
+		return nil, errors.New("canonical event pool unavailable")
 	}
-	getCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	defer cancel()
-	obj, err := p.pools.Get(getCtx, "CanonicalEvent")
+	requestCtx := ctx
+	if requestCtx == nil {
+		requestCtx = context.Background()
+	}
+	start := time.Now()
+	obj, err := p.pools.Get(requestCtx, "CanonicalEvent")
 	if err != nil {
 		return nil, fmt.Errorf("acquire canonical event: %w", err)
+	}
+	if waited := time.Since(start); waited >= parserAcquireWarnDelay {
+		log.Printf("parser: waited %s for CanonicalEvent pool", waited)
 	}
 	evt, ok := obj.(*schema.Event)
 	if !ok {
 		p.pools.Put("CanonicalEvent", obj)
 		return nil, errors.New("canonical event pool returned unexpected type")
 	}
+	evt.Reset()
 	return evt, nil
 }
 

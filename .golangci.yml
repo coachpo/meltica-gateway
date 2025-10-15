@@ -15,6 +15,9 @@ linters:
   exclusions:
     # Keep generated-file handling strict (official default in v2 docs)
     generated: strict
+    paths:
+      - '(.+)_test\.go'
+      - '^tests/'
     # Turn off exhaustruct only in tests / tests dir
     rules:
       - path: '(.+)_test\.go'

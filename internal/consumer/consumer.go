@@ -4,11 +4,11 @@ package consumer
 import (
 	"context"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/coachpo/meltica/internal/bus/databus"
 	"github.com/coachpo/meltica/internal/schema"
+	"github.com/sourcegraph/conc"
 )
 
 // Consumer subscribes to dispatcher events over the data bus and exposes them downstream.
@@ -66,12 +66,9 @@ func (c *Consumer) consume(ctx context.Context, types []schema.EventType) {
 		subs = append(subs, subscription{id: id, typ: typ, ch: ch})
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(len(subs))
+	var wg conc.WaitGroup
 	for _, sub := range subs {
-		sub := sub
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -91,24 +88,16 @@ func (c *Consumer) consume(ctx context.Context, types []schema.EventType) {
 					}
 				}
 			}
-		}()
+		})
 	}
 
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-ctx.Done():
-	case <-done:
-	}
+	<-ctx.Done()
 
 	for _, sub := range subs {
 		c.bus.Unsubscribe(sub.id)
 	}
-	<-done
+
+	wg.Wait()
 }
 
 func (c *Consumer) logEvent(typ schema.EventType, evt *schema.Event) {

@@ -4,9 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/coachpo/meltica/config"
 	"github.com/coachpo/meltica/internal/bus/databus"
-	"github.com/coachpo/meltica/internal/observability"
+	"github.com/coachpo/meltica/internal/config"
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/schema"
 )
@@ -14,9 +13,9 @@ import (
 // Runtime coordinates dispatcher ingestion and delivery.
 type Runtime struct {
 	bus            databus.Bus
+	table          *Table
 	pools          *pool.PoolManager
 	cfg            config.DispatcherRuntimeConfig
-	metrics        *observability.RuntimeMetrics
 	ordering       *StreamOrdering
 	clock          func() time.Time
 	dedupe         map[string]time.Time
@@ -25,17 +24,15 @@ type Runtime struct {
 }
 
 // NewRuntime constructs a dispatcher runtime instance.
-func NewRuntime(bus databus.Bus, pools *pool.PoolManager, cfg config.DispatcherRuntimeConfig, metrics *observability.RuntimeMetrics) *Runtime {
-	if metrics == nil {
-		metrics = observability.NewRuntimeMetrics()
-	}
+func NewRuntime(bus databus.Bus, table *Table, pools *pool.PoolManager, cfg config.DispatcherRuntimeConfig, metrics interface{}) *Runtime {
+	// metrics parameter is ignored - observability removed
 	clock := time.Now
 	ordering := NewStreamOrdering(cfg.StreamOrdering, clock)
 	runtime := new(Runtime)
 	runtime.bus = bus
+	runtime.table = table
 	runtime.pools = pools
 	runtime.cfg = cfg
-	runtime.metrics = metrics
 	runtime.ordering = ordering
 	runtime.clock = clock
 	runtime.dedupe = make(map[string]time.Time, 1024)
@@ -69,16 +66,13 @@ func (r *Runtime) run(ctx context.Context, events <-chan *schema.Event, errCh ch
 			if evt.Provider == "" {
 				evt.Provider = "binance"
 			}
-			clone := cloneEventForFanOut(evt)
-			if clone != nil {
-				if err := r.bus.Publish(ctx, clone); err != nil {
-					select {
-					case errCh <- err:
-					default:
-					}
+			// Pass original event to bus; bus handles routing and cloning
+			if err := r.bus.Publish(ctx, evt); err != nil {
+				select {
+				case errCh <- err:
+				default:
 				}
 			}
-			r.releaseEvent(evt)
 			batch[i] = nil
 		}
 	}
@@ -96,6 +90,12 @@ func (r *Runtime) run(ctx context.Context, events <-chan *schema.Event, errCh ch
 			if evt == nil {
 				continue
 			}
+			if rv := r.currentRoutingVersion(); rv > 0 {
+				evt.RoutingVersion = rv
+			}
+			if evt.EmitTS.IsZero() {
+				evt.EmitTS = r.clock().UTC()
+			}
 			if !r.markSeen(evt.EventID) {
 				r.releaseEvent(evt)
 				continue
@@ -104,10 +104,7 @@ func (r *Runtime) run(ctx context.Context, events <-chan *schema.Event, errCh ch
 			if !buffered {
 				r.releaseEvent(evt)
 			}
-			if r.metrics != nil {
-				key := StreamKey{Provider: evt.Provider, Symbol: evt.Symbol, EventType: evt.Type}
-				r.metrics.RecordBufferDepth(key.String(), r.ordering.Depth(key))
-			}
+			// metrics removed - observability package deleted
 			publish(ready)
 		case <-ticker.C:
 			publish(r.ordering.Flush(r.clock()))
@@ -141,9 +138,15 @@ func (r *Runtime) gcDedupe(now time.Time) {
 	}
 }
 
-func (r *Runtime) releaseEvent(evt *schema.Event) {
-	if evt == nil || r.pools == nil {
-		return
+func (r *Runtime) currentRoutingVersion() int {
+	if r.table == nil {
+		return 0
 	}
-	r.pools.Put("CanonicalEvent", evt)
+	return int(r.table.Version())
+}
+
+func (r *Runtime) releaseEvent(evt *schema.Event) {
+	if r.pools != nil {
+		r.pools.RecycleCanonicalEvent(evt)
+	}
 }

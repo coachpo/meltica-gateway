@@ -31,24 +31,14 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
-- Respect immutable component boundaries (LM-01): Providers (WS+REST+Adapter+Book Assembler), Orchestrator (windowed merge), Dispatcher (ordering+routing), Data Bus, Consumers (with local Trading Switch). Control Bus feeds Orchestrator and Dispatcher.
-- Use canonical, versioned event schemas (LM-02); treat merged events as first-class on the Data Bus.
-- Enforce strong per-stream ordering in Dispatcher with small `seq_provider` buffer; fallback to `ingest_ts` on gaps; no global ordering (LM-03).
-- Apply backpressure: latest-wins coalescing for market data; NEVER drop execution lifecycle events (LM-04).
-- Implement windowed merge: open on first, close by time or count; late=drop; partial=suppress (LM-05).
-- Ensure idempotent orders via `client_order_id` and a lossless ExecReport path (LM-06).
-- Assemble orderbooks provider-side using snapshot+diff with checksums and periodic event-driven refresh (LM-07).
-- Observability is ops-only with trace_id/decision_id propagation and DLQ; consumers MUST NOT ingest telemetry (LM-08).
-- On restart, discard in-flight merges and do not replay windows (LM-09).
-- ALWAYS use goccy/go-json for JSON; FORBID encoding/json (PERF-04).
-- Use coder/websocket for WebSocket; FORBID gorilla/websocket (PERF-05).
-- Use sync.Pool for canonical events and hot-path structs; race-free, bounded pools. Fan-out duplicates from sync.Pool; deliver in parallel; recycle original via Recycler (PERF-06).
-- Recycler is the single return gateway for all structs (Orchestrator partials, Dispatcher originals, Consumer deliveries). Enable debug poisoning; guard against double-put. Dispatcher fan-out: clone per-subscriber as heap objects (unpooled); Put() original to Recycler after enqueue; consumers own clones (PERF-07).
-- Consumers are pure lambdas; may ignore market-data based on routing_version. Critical kinds (ExecReport, ControlAck, ControlResult) are ALWAYS delivered (PERF-08).
-- Use github.com/sourcegraph/conc for all worker pools; FORBID async/pool (PERF-09).
-- Honor `/lib` boundaries (ARCH-01/02) and the no-backward-compatibility policy (CQ-08/GOV-04).
-- When using Cursor/agents, append "use context7" for current library docs (GOV-06).
+[Derived from the Universal Engineering Constitution]
+- Capture a single-sentence problem statement and measurable outcomes in this plan/spec before execution (FA-01, FA-02).
+- Name the accountable decision owner and confirm this artifact is the canonical record of scope/changes (DW-01, DW-02).
+- Provide a boundary map describing components/modules and permitted dependencies; version any external contracts and note migration expectations (AI-01, AI-02).
+- Identify critical paths plus the automated verification strategy required to satisfy coverage and determinism mandates (TV-01, TV-02).
+- Outline observability signals (logs, metrics, traces) and document the recovery/rollback procedure for incidents (OP-01, OP-02).
+- Declare least-privilege access needs, sensitive data handling requirements, and the anticipated security review gate (SP-01, SP-02, SP-03).
+- Plan compliance checkpoints and record how material changes will be logged with rationale and timestamps (GOV-03, DW-03).
 
 ## Project Structure
 

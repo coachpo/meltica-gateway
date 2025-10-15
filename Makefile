@@ -30,10 +30,10 @@ contract-ws-routing:
 	go test ./tests/contract/ws-routing -race -count=1
 
 build:
-	go build -o out/ ./...
+	go build -o bin/ ./...
 
 build-linux-arm64:
-	GOOS=linux GOARCH=arm64 go build -o out/linux-arm64/ ./...
+	GOOS=linux GOARCH=arm64 go build -o bin/linux-arm64/ ./...
 
 tidy:
 	go mod tidy
@@ -47,5 +47,5 @@ coverage-full:
 	go test ./... -covermode=atomic -coverprofile=coverage/full.out
 
 clean:
-	rm -rf out/
 	rm -rf bin/
+	rm -rf coverage/

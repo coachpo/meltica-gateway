@@ -13,6 +13,7 @@ type OrderRequest struct {
 	OrderType     OrderType `json:"order_type"`
 	Price         *string   `json:"price,omitempty"`
 	Quantity      string    `json:"quantity"`
+	TIF           string    `json:"tif"`
 	Timestamp     time.Time `json:"timestamp"`
 }
 
@@ -29,6 +30,7 @@ func (o *OrderRequest) Reset() {
 	o.OrderType = ""
 	o.Price = nil
 	o.Quantity = ""
+	o.TIF = ""
 	o.Timestamp = time.Time{}
 	o.returned = false
 }

@@ -1,0 +1,18 @@
+@startuml
+title Consumer Runtime Wrapper (Lambda) - Activity
+
+start
+:Receive event evt from Data Bus;
+if (evt.Type in {ExecReport, ControlAck, ControlResult}?) then (yes)
+  :Invoke lambda with evt;
+else (no)
+  if (evt.RoutingVersion < MinAcceptVersion?) then (yes)
+    :Ignore evt (no lambda call);
+  else (no)
+    :Invoke lambda with evt;
+  endif
+endif
+:On return or panic -> recycle via Recycler;
+stop
+@enduml
+

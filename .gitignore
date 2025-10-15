@@ -11,6 +11,9 @@ coverage/
 # But not these files...
 !/.gitignore
 
+#Config
+!config/*.yaml
+
 !*.go
 !go.sum
 !go.mod

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coachpo/meltica/errs"
+	"github.com/coachpo/meltica/internal/errs"
 	"github.com/coachpo/meltica/internal/schema"
 )
 
@@ -57,6 +57,9 @@ func (r Record) Clone() Record {
 		for k, v := range r.Data {
 			clone.Data[k] = v
 		}
+	} else {
+		// Initialize empty map instead of leaving nil
+		clone.Data = make(map[string]any)
 	}
 	return clone
 }

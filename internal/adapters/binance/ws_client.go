@@ -126,6 +126,7 @@ func (c *WSClient) handleFrame(ctx context.Context, events chan<- *schema.Event,
 		if evt == nil {
 			continue
 		}
+		
 		if evt.IngestTS.IsZero() {
 			evt.IngestTS = ingestTS
 		}

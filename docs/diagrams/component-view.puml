@@ -1,46 +1,34 @@
-@startuml component-view
-skinparam componentStyle rectangle
-skinparam monochrome true
+@startuml
+title Component View (Monolith Boundaries)
 
-component "Provider Adapter" as Provider {
-  [WS Client]
-  [REST Snapshot]
-  [Parser]
-  [Book Assembler]
+package "Monolith Process" {
+  [Control Bus Handler] as Ctrl
+  [Dispatcher] as Disp
+  [Data Bus] as DBus
+  [Recycler] as Recycler
+
+  package "Provider" {
+    component "Binance\nWS+REST+Adapter\n+ Book Assembler" as PO
+  }
+
+  package "Consumers" {
+    component "Trade\nLambda" as Trade
+    component "Ticker\nLambda" as Ticker
+    component "OrderBook\nLambda" as OrderBook
+  }
 }
 
-component "Orchestrator" as Orchestrator {
-  [Window Manager]
-  [Merge Evaluator]
-}
+PO --> Disp : Canonical Events
+Disp --> DBus
+DBus --> Trade
+DBus --> Ticker
+DBus --> OrderBook
 
-component "Dispatcher" as Dispatcher {
-  [Stream Ordering]
-  [Routing Table]
-  [Backpressure]
-  [Coalescer]
-}
+Trade --> Ctrl : Control Commands
+Ticker --> Ctrl : Control Commands
+OrderBook --> Ctrl : Control Commands
+Ctrl --> Disp : Routing Tables (versioned)
 
-component "Data Bus" as DataBus
-component "Control Bus" as ControlBus
-component "Telemetry Bus" as TelemetryBus
-
-component "Consumers" as Consumers {
-  [Strategy α]
-  [Strategy β]
-  [CLI]
-}
-
-Provider --> Orchestrator : Canonical Events
-Orchestrator --> Dispatcher : Merged Events
-Dispatcher --> DataBus
-DataBus --> Consumers
-Consumers --> ControlBus : Subscribe / Orders / Trading Switch
-ControlBus --> Orchestrator : Merge Rules
-ControlBus --> Dispatcher : Routing Updates
-Dispatcher --> Provider : Order Requests
-Provider --> TelemetryBus
-Orchestrator --> TelemetryBus
-Dispatcher --> TelemetryBus
+Disp --> PO : Provider Orders (idempotent)
 
 @enduml

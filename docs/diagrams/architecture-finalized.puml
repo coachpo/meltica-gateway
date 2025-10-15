@@ -1,0 +1,39 @@
+@startuml
+title Finalized Architecture (Providers -> Dispatcher -> Data Bus -> Consumers)
+
+actor "Trade Lambda" as Trade
+actor "Ticker Lambda" as Ticker
+actor "OrderBook Lambda" as OrderBook
+
+queue "Control Bus" as ControlBus
+queue "Data Bus (Meltica Events)" as DataBus
+
+box "Provider (WS + REST + Adapter + Book Assembler)"
+  participant "Binance" as PRV_O
+end box
+
+participant "Dispatcher\n(route + per-stream ordering + deduplication)" as Dispatcher
+
+' Ingress
+PRV_O -> Dispatcher : canonical events (BookUpdate/Snapshot/Trade/Ticker/ExecReport)
+
+' Dispatch
+Dispatcher -> Dispatcher : order (seq_provider -> ingest_ts) + deduplicate + stamp routing_version
+Dispatcher --> DataBus : publish (fan-out)
+
+' Delivery
+DataBus --> Trade : deliver Trade events only
+DataBus --> Ticker : deliver Ticker events only
+DataBus --> OrderBook : deliver BookSnapshot/BookUpdate events only
+
+' Control plane
+Trade -> ControlBus : control commands (Subscribe, SubmitOrder, QueryOrder, ...)
+Ticker -> ControlBus : control commands
+OrderBook -> ControlBus : control commands
+ControlBus -> Dispatcher : routing updates (versioned)
+
+note over Dispatcher,DataBus
+Always deliver critical kinds: ExecReport, ControlAck, ControlResult.
+Consumers may ignore market-data based on routing_version for non-critical events.
+end note
+@enduml

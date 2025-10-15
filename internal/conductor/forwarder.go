@@ -45,7 +45,6 @@ func (f *Forwarder) Run(ctx context.Context, events <-chan schema.MelticaEvent) 
 func convertEvent(evt schema.MelticaEvent) *schema.Event {
 	converted := schema.Event{
 		EventID:        evt.Key,
-		MergeID:        nil,
 		RoutingVersion: evt.RoutingVersion,
 		Provider:       evt.Source,
 		Symbol:         evt.Instrument,

@@ -6,7 +6,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/coachpo/meltica/errs"
+	concpool "github.com/sourcegraph/conc/pool"
+
+	"github.com/coachpo/meltica/internal/errs"
+	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/schema"
 )
 
@@ -16,11 +19,13 @@ type MemoryBus struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	pools  *pool.PoolManager
 
 	mu           sync.RWMutex
 	subscribers  map[schema.EventType]map[SubscriptionID]*subscriber
 	shutdownOnce sync.Once
 	nextID       uint64
+	workers      int
 }
 
 type subscriber struct {
@@ -38,11 +43,14 @@ func NewMemoryBus(cfg MemoryConfig) *MemoryBus {
 	bus.cfg = cfg
 	bus.ctx = ctx
 	bus.cancel = cancel
+	bus.pools = cfg.Pools
 	bus.subscribers = make(map[schema.EventType]map[SubscriptionID]*subscriber)
+	bus.workers = cfg.FanoutWorkers
 	return bus
 }
 
 // Publish fan-outs the event to all subscribers of its type.
+// Route-first: counts subscribers before any pool work, short-circuits when n==0.
 func (b *MemoryBus) Publish(ctx context.Context, evt *schema.Event) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -54,26 +62,40 @@ func (b *MemoryBus) Publish(ctx context.Context, evt *schema.Event) error {
 		return errs.New("databus/publish", errs.CodeInvalid, errs.WithMessage("event type required"))
 	}
 
-	// Snapshot subscribers to avoid holding lock during delivery.
+	// ROUTE FIRST: snapshot subscribers before any pool operations.
 	b.mu.RLock()
-	subscribers := make([]*subscriber, 0, len(b.subscribers[evt.Type]))
-	for _, sub := range b.subscribers[evt.Type] {
+	subMap := b.subscribers[evt.Type]
+	n := len(subMap)
+	subscribers := make([]*subscriber, 0, n)
+	for _, sub := range subMap {
 		subscribers = append(subscribers, sub)
 	}
 	b.mu.RUnlock()
 
-	if len(subscribers) == 0 {
+	// SHORT-CIRCUIT: no subscribers means no pool work, no delivery.
+	if n == 0 {
+		b.recycle(evt)
 		return nil
 	}
 
-	for _, sub := range subscribers {
-		if sub == nil {
-			continue
-		}
-		if err := b.deliver(ctx, sub, evt); err != nil {
-			return err
-		}
+	// ALLOCATE-IF-SOME: pre-borrow exactly n clones for n subscribers.
+	clones, err := b.borrowBatchForFanout(ctx, evt, n)
+	if err != nil {
+		// Source event not cloned; bus must recycle it.
+		b.recycle(evt)
+		return err
 	}
+
+	// DELIVER: dispatch with pre-borrowed clones.
+	// dispatch handles recycling: deliverWithRecycle recycles on failure,
+	// and dispatch recycles unused clones on early validation errors.
+	if err := b.dispatch(ctx, subscribers, clones); err != nil {
+		// Source event must still be recycled; clones already handled by dispatch.
+		b.recycle(evt)
+		return err
+	}
+	// Source event is no longer needed; recycle it.
+	b.recycle(evt)
 	return nil
 }
 
@@ -159,22 +181,122 @@ func (b *MemoryBus) observe(typ schema.EventType, id SubscriptionID, sub *subscr
 	sub.close()
 }
 
-func (b *MemoryBus) deliver(ctx context.Context, sub *subscriber, evt *schema.Event) error {
+// deliverWithRecycle delivers an event and recycles it only on failure paths.
+// On success ownership transfers to the subscriber.
+func (b *MemoryBus) deliverWithRecycle(ctx context.Context, sub *subscriber, evt *schema.Event) error {
 	if err := sub.ctx.Err(); err != nil {
+		b.recycle(evt)
 		return fmt.Errorf("subscriber context: %w", err)
 	}
 	select {
 	case <-b.ctx.Done():
+		b.recycle(evt)
 		return errs.New("databus/publish", errs.CodeUnavailable, errs.WithMessage("bus closed"))
 	case <-ctx.Done():
+		b.recycle(evt)
 		return fmt.Errorf("deliver context: %w", ctx.Err())
 	case <-sub.ctx.Done():
+		b.recycle(evt)
 		return nil
-	case sub.ch <- schema.CloneEvent(evt):
+	case sub.ch <- evt:
 		return nil
 	default:
+		b.recycle(evt)
 		return errs.New("databus/publish", errs.CodeUnavailable, errs.WithMessage("subscriber buffer full"))
 	}
+}
+
+// dispatch delivers pre-borrowed clones to subscribers.
+// Each subscriber gets its dedicated clone; deliverWithRecycle handles recycling.
+func (b *MemoryBus) dispatch(ctx context.Context, subs []*subscriber, clones []*schema.Event) error {
+	if len(subs) == 0 {
+		// No subscribers, recycle all pre-borrowed clones.
+		b.pools.RecycleCanonicalEvents(clones)
+		return nil
+	}
+	if len(clones) != len(subs) {
+		// Validation failure, recycle all clones before returning error.
+		b.pools.RecycleCanonicalEvents(clones)
+		return fmt.Errorf("databus/dispatch: clone count (%d) != subscriber count (%d)", len(clones), len(subs))
+	}
+
+	workerLimit := b.workers
+	if workerLimit <= 0 {
+		workerLimit = 1
+	}
+
+	p := concpool.New().WithMaxGoroutines(workerLimit)
+	errCh := make(chan error, len(subs))
+
+	for idx, subscriber := range subs {
+		if subscriber == nil {
+			// Recycle the unused clone for this nil subscriber.
+			b.recycle(clones[idx])
+			continue
+		}
+		i := idx
+		sub := subscriber
+		clone := clones[i]
+		p.Go(func() {
+			if err := b.deliverWithRecycle(ctx, sub, clone); err != nil {
+				errCh <- err
+			}
+		})
+	}
+
+	p.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *MemoryBus) recycle(evt *schema.Event) {
+	if evt == nil {
+		return
+	}
+	if b.pools != nil {
+		b.pools.RecycleCanonicalEvent(evt)
+	}
+}
+
+// borrowBatchForFanout pre-allocates exactly n clones from the pool.
+// Returns the slice of clones and any error.
+// Caller (dispatch) is responsible for recycling via deliverWithRecycle.
+func (b *MemoryBus) borrowBatchForFanout(ctx context.Context, src *schema.Event, n int) ([]*schema.Event, error) {
+	if b.pools == nil {
+		return nil, fmt.Errorf("databus/publish: canonical event pool unavailable")
+	}
+	if src == nil {
+		return nil, fmt.Errorf("databus/publish: source event is nil")
+	}
+	if n <= 0 {
+		return nil, nil
+	}
+
+	clones, err := b.pools.BorrowCanonicalEvents(ctx, n)
+	if err != nil {
+		return nil, fmt.Errorf("databus/publish: borrow batch: %w", err)
+	}
+	if len(clones) != n {
+		b.pools.RecycleCanonicalEvents(clones)
+		return nil, fmt.Errorf("databus/publish: expected %d clones, got %d", n, len(clones))
+	}
+
+	// Copy source payload into each clone.
+	for _, clone := range clones {
+		if clone == nil {
+			b.pools.RecycleCanonicalEvents(clones)
+			return nil, fmt.Errorf("databus/publish: nil clone in batch")
+		}
+		schema.CopyEvent(clone, src)
+	}
+
+	return clones, nil
 }
 
 func (s *subscriber) close() {

@@ -246,21 +246,11 @@ With multiple developers:
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence
-- Add tasks that enforce immutable component boundaries: Providers (WS+REST+Adapter+Book Assembler), Orchestrator (windowed merge), Dispatcher (ordering+routing), Data Bus, Consumers with local Trading Switch; Control Bus integration (LM-01).
-- Normalize payloads into canonical, versioned event schemas; treat merged events as first-class on the Data Bus (LM-02).
-- Implement Dispatcher ordering with small `seq_provider` buffer and `ingest_ts` fallback; no global ordering (LM-03). Add backpressure tasks: latest-wins for market data; NEVER drop execution lifecycle events (LM-04).
-- Implement windowed merge tasks: open on first, close by time or count; late=drop; partial=suppress (LM-05).
-- Ensure idempotent order handling via `client_order_id` and a lossless ExecReport path (LM-06).
-- Provider-side orderbook assembly via snapshot+diff, checksums, periodic event-driven refresh (LM-07).
-- Observability tasks: trace_id/decision_id propagation, metrics, DLQ/telemetry for ops; consumers do not ingest telemetry (LM-08).
-- Restart behavior tasks: discard in-flight merges; do not replay windows (LM-09).
-- Replace all JSON operations with goccy/go-json; remove encoding/json imports (PERF-04).
-- Replace all WebSocket code with coder/websocket; remove gorilla/websocket (PERF-05).
-- Implement sync.Pool for canonical Meltica Events and hot-path message structs; ensure race-free, bounded pools. Implement fan-out duplicates from sync.Pool with parallel delivery; recycle original via Recycler after enqueue loop (PERF-06).
-- Implement Recycler as single return gateway for all structs (Orchestrator partials, Dispatcher originals, Consumer deliveries). Enable debug poisoning to catch use-after-put; guard against double-put. Implement Dispatcher fan-out with per-subscriber heap clones (unpooled); Put() original to Recycler after enqueue; consumers own clones (PERF-07).
-- Implement consumers as pure lambdas; add routing_version-based logic to ignore market-data during flips. Ensure critical kinds (ExecReport, ControlAck, ControlResult) are ALWAYS delivered and never ignored (PERF-08).
-- Replace all async/pool usage with github.com/sourcegraph/conc (e.g., conc.Group, conc/pool) for Dispatcher fan-out workers and other worker pools. Remove all async/pool integrations; no shims or dual paths (PERF-09).
-- Configure CI static checks to forbid banned imports (encoding/json, gorilla/websocket, async/pool) and enforce ≥70% coverage (GOV-02b).
-- When breaking changes are beneficial, add minimal migration notes if helpful; no shims or legacy feature flags (CQ-08, GOV-04). Eradicate async/pool; migrate to conc with no backward compatibility. Keep reusable infrastructure in `/lib` (ARCH-01/02).
-- When using Cursor or supported agents, append "use context7" to prompts for current, version-specific library docs (GOV-06).
+- Add tasks that capture or update the problem statement, measurable outcomes, and stakeholder confirmations in shared artifacts (FA-01, FA-02, FA-03, DW-02).
+- Include work to document component boundaries, allowed dependencies, and versioned external contracts (AI-01, AI-02).
+- Schedule automated test coverage for critical journeys and ensure tests are deterministic and isolated (TV-01, TV-02).
+- Add tasks for continuous verification gates (lint, static analysis, CI execution) and compliance checkpoints (TV-03, GOV-03).
+- Plan observability instrumentation and write the recovery/rollback procedure (OP-01, OP-02).
+- Capture security tasks covering least-privilege access, sensitive data handling, and pre-launch reviews (SP-01, SP-02, SP-03).
+- Track decision logs and change records so scope adjustments remain transparent (DW-03, GOV-04).
 

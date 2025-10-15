@@ -1,20 +1,19 @@
-@startuml order-lifecycle-state
-skinparam monochrome true
+@startuml
+title Order Lifecycle (ExecReport State Machine)
 
-[*] --> Submitted
-Submitted --> Acked : ExecReport(ACK)
-Acked --> PartiallyFilled : ExecReport(PARTIAL)
-PartiallyFilled --> PartiallyFilled : ExecReport(PARTIAL)
-PartiallyFilled --> Filled : ExecReport(FILLED)
-Acked --> Filled : ExecReport(FILLED)
-Submitted --> Rejected : ExecReport(REJECTED)
-Acked --> Cancelled : ExecReport(CANCELLED)
-PartiallyFilled --> Cancelled : ExecReport(CANCELLED)
-Acked --> Expired : ExecReport(EXPIRED)
-PartiallyFilled --> Expired : ExecReport(EXPIRED)
-Filled --> [*]
-Cancelled --> [*]
-Rejected --> [*]
-Expired --> [*]
-
+[*] --> NEW
+NEW --> ACK : status=ACK
+ACK --> PARTIAL : fill>0 && remaining>0
+ACK --> FILLED : remaining==0
+PARTIAL --> PARTIAL : more fills
+PARTIAL --> FILLED : remaining==0
+NEW --> REJECTED : status=REJECTED
+ACK --> CANCELLED : status=CANCELLED
+PARTIAL --> CANCELLED : status=CANCELLED
+ACK --> EXPIRED : status=EXPIRED
+PARTIAL --> EXPIRED : status=EXPIRED
+FILLED --> [*]
+CANCELLED --> [*]
+REJECTED --> [*]
+EXPIRED --> [*]
 @enduml

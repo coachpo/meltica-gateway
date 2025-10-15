@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coachpo/meltica/config"
+	"github.com/coachpo/meltica/internal/config"
 	"github.com/coachpo/meltica/internal/schema"
 )
 
@@ -214,8 +214,4 @@ func (h *eventHeap) Pop() any {
 	x := old[n-1]
 	*h = old[0 : n-1]
 	return x
-}
-
-func cloneEventForFanOut(evt *schema.Event) *schema.Event {
-	return schema.CloneEvent(evt)
 }

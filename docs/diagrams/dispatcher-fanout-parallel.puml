@@ -1,0 +1,51 @@
+@startuml
+title Dispatcher Parallel Fan-out (Simultaneous)
+
+participant "Dispatcher" as D
+database "Event Pool (sync.Pool)" as Pool
+queue "Data Bus" as Bus
+actor "Consumer A (lambda)" as A
+actor "Consumer B (lambda)" as B
+actor "Consumer C (lambda)" as C
+control "Recycler\n(reset + put back)" as R
+
+note over D,R
+Confirmed: Dispatcher duplicates and publishes to all subscribed consumers in parallel.
+Each consumer runs concurrently. After the lambda returns or panics, the runtime
+wrapper recycles the event struct via Recycler back to the Pool.
+end note
+
+D -> D : receive *x (original from Pool)
+D -> D : subscribers = {A,B,C}
+
+par Fan-out A
+  D -> Pool : Get() *x1
+  D -> D : clone x -> x1
+  D -> Bus : publish *x1
+  Bus --> A : deliver *x1
+  A -> R : done(*x1)
+  R -> R : Reset(*x1)
+  R -> Pool : Put(*x1)
+else Fan-out B
+  D -> Pool : Get() *x2
+  D -> D : clone x -> x2
+  D -> Bus : publish *x2
+  Bus --> B : deliver *x2
+  B -> R : done(*x2)
+  R -> R : Reset(*x2)
+  R -> Pool : Put(*x2)
+else Fan-out C
+  D -> Pool : Get() *x3
+  D -> D : clone x -> x3
+  D -> Bus : publish *x3
+  Bus --> C : deliver *x3
+  C -> R : done(*x3)
+  R -> R : Reset(*x3)
+  R -> Pool : Put(*x3)
+end
+
+D -> R : recycle(original *x)
+R -> R : Reset(*x)
+R -> Pool : Put(*x)
+@enduml
+

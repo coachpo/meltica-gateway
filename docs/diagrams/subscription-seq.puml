@@ -1,20 +1,34 @@
-@startuml subscription-seq
-skinparam monochrome true
+@startuml
+title Control Bus: Subscribe, SubmitOrder, QueryOrder
 
-actor Consumer
-participant "Control Bus" as ControlBus
-participant "Dispatcher" as Dispatcher
-participant "Routing Table" as Routing
-participant "Orchestrator" as Orchestrator
+actor "Consumer lambda" as CON
+queue "Control Bus" as CB
+participant "Control Handler" as Ctrl
+participant "Dispatcher" as Disp
+participant "Provider Adapter" as Prov
+queue "Data Bus" as DBus
 
-Consumer -> ControlBus : Subscribe(symbol, providers)
-ControlBus -> Dispatcher : ControlMessage(Subscribe)
-Dispatcher -> Routing : AddSubscription
-Routing --> Dispatcher : RoutingVersion++
-Dispatcher -> ControlBus : Ack(success, routingVersion)
-ControlBus --> Consumer : Ack(success, routingVersion)
+' Subscribe
+CON -> CB : ControlCommand{cmd=Subscribe, reply_to=CON}
+CB -> Ctrl : deliver
+Ctrl -> Disp : update routing table (v+1)
+Ctrl -> CB : CommandAck{accepted}
 
-Dispatcher -> Orchestrator : UpdateMergeRules (if merged)
-Orchestrator --> Dispatcher : ConfirmMergeRule
+' Submit Order (immediate)
+CON -> CB : ControlCommand{cmd=SubmitOrder, reply_to=CON, client_order_id=xyz}
+CB -> Ctrl : deliver
+Ctrl -> CB : CommandAck{accepted}
+Ctrl -> Prov : ProviderOrder{client_order_id=xyz}
+Prov -> Disp : ExecReport{ACK}
+Disp -> DBus : publish
+DBus --> CON : ExecReport
 
+' Query Order (immediate)
+CON -> CB : ControlCommand{cmd=QueryOrder, reply_to=CON}
+CB -> Ctrl : deliver
+Ctrl -> Prov : QueryREST{...}
+Prov -> Ctrl : QueryResultRaw{...}
+Ctrl -> Disp : CommandResult{reply_to=CON}
+Disp -> DBus : publish
+DBus --> CON : CommandResult
 @enduml
