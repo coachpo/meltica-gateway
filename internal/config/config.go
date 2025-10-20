@@ -22,17 +22,6 @@ const (
 	EnvProd Environment = "prod"
 )
 
-const (
-	// ExchangeBinance represents the Binance integration key.
-	ExchangeBinance Exchange = "binance"
-	// BinanceRESTSurfaceSpot identifies the spot REST surface.
-	BinanceRESTSurfaceSpot string = "spot"
-	// BinanceRESTSurfaceLinear identifies the linear futures REST surface.
-	BinanceRESTSurfaceLinear string = "linear"
-	// BinanceRESTSurfaceInverse identifies the inverse futures REST surface.
-	BinanceRESTSurfaceInverse string = "inverse"
-)
-
 // Credentials captures API credentials used for authenticated requests.
 type Credentials struct {
 	APIKey    string
@@ -65,23 +54,7 @@ type Settings struct {
 func Default() Settings {
 	return Settings{
 		Environment: EnvProd,
-		Exchanges: map[Exchange]ExchangeSettings{
-			ExchangeBinance: {
-				REST: map[string]string{
-					BinanceRESTSurfaceSpot:    "https://api.binance.com",
-					BinanceRESTSurfaceLinear:  "https://fapi.binance.com",
-					BinanceRESTSurfaceInverse: "https://dapi.binance.com",
-				},
-				Websocket: WebsocketSettings{
-					PublicURL:  "wss://stream.binance.com:9443/stream",
-					PrivateURL: "wss://stream.binance.com:9443/ws",
-				},
-				Credentials:           Credentials{APIKey: "", APISecret: ""},
-				HTTPTimeout:           10 * time.Second,
-				HandshakeTimeout:      10 * time.Second,
-				SymbolRefreshInterval: 0,
-			},
-		},
+		Exchanges:   make(map[Exchange]ExchangeSettings),
 	}
 }
 
@@ -92,44 +65,6 @@ func FromEnv() Settings {
 		cfg.Environment = Environment(strings.ToLower(env))
 	}
 
-	bin := cfg.Exchanges[ExchangeBinance]
-	if bin.REST == nil {
-		bin.REST = make(map[string]string)
-	}
-
-	if v := strings.TrimSpace(os.Getenv("BINANCE_SPOT_BASE_URL")); v != "" {
-		bin.REST[BinanceRESTSurfaceSpot] = v
-	}
-	if v := strings.TrimSpace(os.Getenv("BINANCE_LINEAR_BASE_URL")); v != "" {
-		bin.REST[BinanceRESTSurfaceLinear] = v
-	}
-	if v := strings.TrimSpace(os.Getenv("BINANCE_INVERSE_BASE_URL")); v != "" {
-		bin.REST[BinanceRESTSurfaceInverse] = v
-	}
-	if v := strings.TrimSpace(os.Getenv("BINANCE_WS_PUBLIC_URL")); v != "" {
-		bin.Websocket.PublicURL = v
-	}
-	if v := strings.TrimSpace(os.Getenv("BINANCE_WS_PRIVATE_URL")); v != "" {
-		bin.Websocket.PrivateURL = v
-	}
-	if v := strings.TrimSpace(os.Getenv("BINANCE_HTTP_TIMEOUT")); v != "" {
-		if dur, err := time.ParseDuration(v); err == nil {
-			bin.HTTPTimeout = dur
-		}
-	}
-	if v := strings.TrimSpace(os.Getenv("BINANCE_WS_HANDSHAKE_TIMEOUT")); v != "" {
-		if dur, err := time.ParseDuration(v); err == nil {
-			bin.HandshakeTimeout = dur
-		}
-	}
-	if v := strings.TrimSpace(os.Getenv("BINANCE_API_KEY")); v != "" {
-		bin.Credentials.APIKey = v
-	}
-	if v := strings.TrimSpace(os.Getenv("BINANCE_API_SECRET")); v != "" {
-		bin.Credentials.APISecret = v
-	}
-
-	cfg.Exchanges[ExchangeBinance] = bin
 	return cfg
 }
 
@@ -228,46 +163,6 @@ func WithExchangeCredentials(exchange, key, secret string) Option {
 		if secret != "" {
 			es.Credentials.APISecret = secret
 		}
-	})
-}
-
-// WithBinanceRESTEndpoints overrides the REST base URLs for Binance surfaces.
-func WithBinanceRESTEndpoints(spot, linear, inverse string) Option {
-	spot = strings.TrimSpace(spot)
-	linear = strings.TrimSpace(linear)
-	inverse = strings.TrimSpace(inverse)
-	return mutateExchangeOption(string(ExchangeBinance), func(es *ExchangeSettings) {
-		if spot != "" {
-			es.REST[BinanceRESTSurfaceSpot] = spot
-		}
-		if linear != "" {
-			es.REST[BinanceRESTSurfaceLinear] = linear
-		}
-		if inverse != "" {
-			es.REST[BinanceRESTSurfaceInverse] = inverse
-		}
-	})
-}
-
-// WithBinanceWebsocketEndpoints overrides Binance websocket endpoints and handshake timeout.
-func WithBinanceWebsocketEndpoints(public, private string, handshake time.Duration) Option {
-	return WithExchangeWebsocketEndpoints(string(ExchangeBinance), public, private, handshake)
-}
-
-// WithBinanceHTTPTimeout overrides the HTTP timeout for Binance REST calls.
-func WithBinanceHTTPTimeout(timeout time.Duration) Option {
-	return WithExchangeHTTPTimeout(string(ExchangeBinance), timeout)
-}
-
-// WithBinanceAPI configures Binance API credentials.
-func WithBinanceAPI(key, secret string) Option {
-	return WithExchangeCredentials(string(ExchangeBinance), key, secret)
-}
-
-// WithBinanceSymbolRefreshInterval sets how frequently Binance symbols are refreshed.
-func WithBinanceSymbolRefreshInterval(interval time.Duration) Option {
-	return mutateExchangeOption(string(ExchangeBinance), func(es *ExchangeSettings) {
-		es.SymbolRefreshInterval = interval
 	})
 }
 

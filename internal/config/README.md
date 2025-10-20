@@ -60,11 +60,6 @@ func main() {
 # Override environment
 export MELTICA_ENV=dev
 
-# Override exchange settings
-export BINANCE_API_KEY=your_key
-export BINANCE_API_SECRET=your_secret
-export BINANCE_WS_PUBLIC_URL=wss://testnet.binance.vision/ws
-
 # Override telemetry
 export OTEL_SERVICE_NAME=my-service
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
@@ -133,7 +128,7 @@ Legacy setups required stitching together `config.FromEnv()` with bespoke stream
 cfg, _ := config.Load(ctx, path)
 
 // Everything in one place
-bin, _ := cfg.Exchanges[config.ExchangeBinance]
+bin, _ := cfg.Exchanges["binance"]
 routes := cfg.Dispatcher.Routes
 telemetry := cfg.Telemetry
 ```
@@ -170,9 +165,5 @@ go test ./internal/config/...
 |----------|-------------|---------|
 | `MELTICA_ENV` | Runtime environment | `dev`, `staging`, `prod` |
 | `MELTICA_CONFIG` | Config file path | `config/app.yaml` |
-| `BINANCE_API_KEY` | Binance API key | `abc123...` |
-| `BINANCE_API_SECRET` | Binance API secret | `xyz789...` |
-| `BINANCE_WS_PUBLIC_URL` | Binance WebSocket URL | `wss://stream.binance.com:9443/stream` |
-| `BINANCE_HTTP_TIMEOUT` | HTTP timeout | `10s` |
 | `OTEL_SERVICE_NAME` | Telemetry service name | `meltica-gateway` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint | `http://localhost:4318` |
