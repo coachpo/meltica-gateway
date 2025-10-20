@@ -3,6 +3,7 @@ package strategies
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -38,52 +39,52 @@ func (s *Delay) SubscribedEvents() []schema.CanonicalType {
 }
 
 func (s *Delay) sleep() {
-	min := s.MinDelay
-	max := s.MaxDelay
-	if min == 0 && max == 0 {
-		min = DefaultMinDelay
-		max = DefaultMaxDelay
+	minDelay := s.MinDelay
+	maxDelay := s.MaxDelay
+	if minDelay == 0 && maxDelay == 0 {
+		minDelay = DefaultMinDelay
+		maxDelay = DefaultMaxDelay
 	}
-	if min < 0 {
-		min = 0
+	if minDelay < 0 {
+		minDelay = 0
 	}
-	if max < 0 {
-		max = 0
+	if maxDelay < 0 {
+		maxDelay = 0
 	}
-	if max < min {
-		max = min
+	if maxDelay < minDelay {
+		maxDelay = minDelay
 	}
 
 	delayRandMu.Lock()
 	defer delayRandMu.Unlock()
 
-	delayRange := max - min
+	delayRange := maxDelay - minDelay
 	if delayRange <= 0 {
-		time.Sleep(min)
+		time.Sleep(minDelay)
 		return
 	}
 
 	offset, err := randDuration(delayRange)
 	if err != nil {
 		// Fallback to midpoint delay if crypto/rand fails
-		time.Sleep(min + delayRange/2)
+		time.Sleep(minDelay + delayRange/2)
 		return
 	}
-	time.Sleep(min + offset)
+	time.Sleep(minDelay + offset)
 }
 
-func randDuration(max time.Duration) (time.Duration, error) {
-	if max <= 0 {
+func randDuration(maxDuration time.Duration) (time.Duration, error) {
+	if maxDuration <= 0 {
 		return 0, nil
 	}
-	nanos := max.Nanoseconds()
+	nanos := maxDuration.Nanoseconds()
 	if nanos <= 0 {
 		return 0, nil
 	}
 	limit := big.NewInt(nanos + 1)
 	value, err := rand.Int(rand.Reader, limit)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("crypto rand int: %w", err)
 	}
 	return time.Duration(value.Int64()), nil
 }
