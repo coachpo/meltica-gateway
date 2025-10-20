@@ -13,35 +13,7 @@ import (
 )
 
 // AdapterSet encapsulates adapter-specific configuration.
-type AdapterSet struct {
-	Binance BinanceAdapterConfig `yaml:"binance"`
-}
-
-// BinanceAdapterConfig declares Binance transport configuration.
-type BinanceAdapterConfig struct {
-	WS                  BinanceWSConfig   `yaml:"ws"`
-	REST                BinanceRESTConfig `yaml:"rest"`
-	BookRefreshInterval time.Duration     `yaml:"book_refresh_interval"`
-}
-
-// BinanceWSConfig controls websocket connectivity.
-type BinanceWSConfig struct {
-	PublicURL        string        `yaml:"publicUrl"`
-	HandshakeTimeout time.Duration `yaml:"handshakeTimeout"`
-}
-
-// BinanceRESTConfig governs REST polling settings by name.
-type BinanceRESTConfig struct {
-	BaseURL  string             `yaml:"baseUrl"`
-	Snapshot RESTSnapshotConfig `yaml:"snapshot"`
-}
-
-// RESTSnapshotConfig defines a REST polling schedule.
-type RESTSnapshotConfig struct {
-	Endpoint string        `yaml:"endpoint"`
-	Interval time.Duration `yaml:"interval"`
-	Limit    int           `yaml:"limit"`
-}
+type AdapterSet struct{}
 
 // DispatcherConfig manages route configuration.
 type DispatcherConfig struct {
@@ -105,7 +77,6 @@ type DispatcherRuntimeConfig struct {
 type AppConfig struct {
 	Environment  Environment
 	Exchanges    map[Exchange]ExchangeSettings
-	Adapters     AdapterSet
 	Dispatcher   DispatcherConfig
 	Eventbus     EventbusConfig
 	Pools        PoolConfig
@@ -117,7 +88,6 @@ type AppConfig struct {
 type appConfigYAML struct {
 	Environment string                          `yaml:"environment"`
 	Exchanges   map[string]exchangeSettingsYAML `yaml:"exchanges"`
-	Adapters    AdapterSet                      `yaml:"adapter"`
 	Dispatcher  DispatcherConfig                `yaml:"dispatcher"`
 	Eventbus    EventbusConfig                  `yaml:"eventbus"`
 	Pools       PoolConfig                      `yaml:"pools"`
@@ -168,40 +138,7 @@ func isConfigNotFoundError(err error) bool {
 func defaultAppConfig() AppConfig {
 	return AppConfig{
 		Environment: EnvProd,
-		Exchanges: map[Exchange]ExchangeSettings{
-			ExchangeBinance: {
-				REST: map[string]string{
-					BinanceRESTSurfaceSpot:    "https://api.binance.com",
-					BinanceRESTSurfaceLinear:  "https://fapi.binance.com",
-					BinanceRESTSurfaceInverse: "https://dapi.binance.com",
-				},
-				Websocket: WebsocketSettings{
-					PublicURL:  "wss://stream.binance.com:9443/stream",
-					PrivateURL: "wss://stream.binance.com:9443/ws",
-				},
-				Credentials:           Credentials{APIKey: "", APISecret: ""},
-				HTTPTimeout:           10 * time.Second,
-				HandshakeTimeout:      10 * time.Second,
-				SymbolRefreshInterval: 0,
-			},
-		},
-		Adapters: AdapterSet{
-			Binance: BinanceAdapterConfig{
-				WS: BinanceWSConfig{
-					PublicURL:        "wss://stream.binance.com:9443/stream",
-					HandshakeTimeout: 10 * time.Second,
-				},
-				REST: BinanceRESTConfig{
-					BaseURL: "https://api.binance.com",
-					Snapshot: RESTSnapshotConfig{
-						Endpoint: "/api/v3/depth",
-						Interval: 5 * time.Second,
-						Limit:    100,
-					},
-				},
-				BookRefreshInterval: 1 * time.Minute,
-			},
-		},
+		Exchanges:   make(map[Exchange]ExchangeSettings),
 		Dispatcher: DispatcherConfig{
 			Routes: make(map[string]RouteConfig),
 		},
@@ -319,8 +256,7 @@ func (c *AppConfig) loadYAML(ctx context.Context, path string) error {
 		c.Exchanges[exchange] = existing
 	}
 
-	// Merge streaming-specific config
-	c.Adapters = yamlCfg.Adapters
+	// Merge dispatcher config
 	c.Dispatcher = yamlCfg.Dispatcher
 	c.Eventbus = yamlCfg.Eventbus
 	if yamlCfg.Pools.EventSize != 0 || yamlCfg.Pools.OrderRequestSize != 0 {
@@ -339,47 +275,6 @@ func (c *AppConfig) loadEnv() {
 	// Environment
 	if env := strings.TrimSpace(os.Getenv("MELTICA_ENV")); env != "" {
 		c.Environment = Environment(strings.ToLower(env))
-	}
-
-	// Binance exchange settings
-	if bin, ok := c.Exchanges[ExchangeBinance]; ok {
-		if bin.REST == nil {
-			bin.REST = make(map[string]string)
-		}
-
-		if v := strings.TrimSpace(os.Getenv("BINANCE_SPOT_BASE_URL")); v != "" {
-			bin.REST[BinanceRESTSurfaceSpot] = v
-		}
-		if v := strings.TrimSpace(os.Getenv("BINANCE_LINEAR_BASE_URL")); v != "" {
-			bin.REST[BinanceRESTSurfaceLinear] = v
-		}
-		if v := strings.TrimSpace(os.Getenv("BINANCE_INVERSE_BASE_URL")); v != "" {
-			bin.REST[BinanceRESTSurfaceInverse] = v
-		}
-		if v := strings.TrimSpace(os.Getenv("BINANCE_WS_PUBLIC_URL")); v != "" {
-			bin.Websocket.PublicURL = v
-		}
-		if v := strings.TrimSpace(os.Getenv("BINANCE_WS_PRIVATE_URL")); v != "" {
-			bin.Websocket.PrivateURL = v
-		}
-		if v := strings.TrimSpace(os.Getenv("BINANCE_HTTP_TIMEOUT")); v != "" {
-			if dur, err := time.ParseDuration(v); err == nil {
-				bin.HTTPTimeout = dur
-			}
-		}
-		if v := strings.TrimSpace(os.Getenv("BINANCE_WS_HANDSHAKE_TIMEOUT")); v != "" {
-			if dur, err := time.ParseDuration(v); err == nil {
-				bin.HandshakeTimeout = dur
-			}
-		}
-		if v := strings.TrimSpace(os.Getenv("BINANCE_API_KEY")); v != "" {
-			bin.Credentials.APIKey = v
-		}
-		if v := strings.TrimSpace(os.Getenv("BINANCE_API_SECRET")); v != "" {
-			bin.Credentials.APISecret = v
-		}
-
-		c.Exchanges[ExchangeBinance] = bin
 	}
 
 	// Telemetry overrides
@@ -401,21 +296,6 @@ func (c *AppConfig) Validate(ctx context.Context) error {
 	// Validate environment
 	if c.Environment != EnvDev && c.Environment != EnvStaging && c.Environment != EnvProd {
 		return fmt.Errorf("invalid environment: %s", c.Environment)
-	}
-
-	// Validate exchanges
-	for name, ex := range c.Exchanges {
-		if len(ex.REST) == 0 {
-			return fmt.Errorf("exchange %s: REST endpoints required", name)
-		}
-		if ex.Websocket.PublicURL == "" {
-			return fmt.Errorf("exchange %s: websocket public URL required", name)
-		}
-	}
-
-	// Validate adapters
-	if c.Adapters.Binance.BookRefreshInterval == 0 {
-		c.Adapters.Binance.BookRefreshInterval = 1 * time.Minute
 	}
 
 	// Validate dispatcher routes
