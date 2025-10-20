@@ -301,7 +301,7 @@
       "datasource": {
         "uid": "$datasource"
       },
-      "description": "Duplicate events detected",
+      "description": "p95 publish latency across selected filters",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -316,15 +316,15 @@
               },
               {
                 "color": "yellow",
-                "value": 100
+                "value": 5
               },
               {
                 "color": "red",
-                "value": 1000
+                "value": 20
               }
             ]
           },
-          "unit": "short"
+          "unit": "ms"
         }
       },
       "gridPos": {
@@ -336,7 +336,7 @@
       "id": 125,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -345,11 +345,11 @@
       },
       "targets": [
         {
-          "expr": "sum(meltica_dispatcher_events_duplicate{environment=\"$environment\"})",
+          "expr": "histogram_quantile(0.95, sum(rate(meltica_eventbus_publish_duration_bucket{environment=\"$environment\",event_type=~\"$event_type\"}[5m])) by (le))",
           "refId": "A"
         }
       ],
-      "title": "Duplicate Events",
+      "title": "Publish Latency p95",
       "type": "stat"
     },
     {
@@ -917,7 +917,7 @@
       "datasource": {
         "uid": "$datasource"
       },
-      "description": "Duplicate events detected",
+      "description": "Event publish rate per provider",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -927,7 +927,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Duplicates/sec",
+            "axisLabel": "Events/sec",
             "axisPlacement": "auto",
             "drawStyle": "line",
             "fillOpacity": 20,
@@ -947,7 +947,8 @@
       "options": {
         "legend": {
           "calcs": [
-            "sum"
+            "mean",
+            "lastNotNull"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -959,12 +960,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_dispatcher_events_duplicate{environment=\"$environment\"}[5m])) by (event_type)",
-          "legendFormat": "{{event_type}}",
+          "expr": "sum(rate(meltica_eventbus_events_published{environment=\"$environment\",event_type=~\"$event_type\"}[5m])) by (provider)",
+          "legendFormat": "{{provider}}",
           "refId": "A"
         }
       ],
-      "title": "Duplicate Event Rate",
+      "title": "Publish Rate by Provider",
       "type": "timeseries"
     },
     {
@@ -1338,7 +1339,7 @@
       },
       "id": 120,
       "options": {
-        "content": "## Control Bus",
+        "content": "## Pipeline Health",
         "mode": "markdown"
       },
       "type": "text"
@@ -1347,7 +1348,7 @@
       "datasource": {
         "uid": "$datasource"
       },
-      "description": "Active control bus consumers",
+      "description": "p95 latency comparison between publish and dispatch stages",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1357,7 +1358,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Consumers",
+            "axisLabel": "Duration (ms)",
             "axisPlacement": "auto",
             "drawStyle": "line",
             "fillOpacity": 10,
@@ -1365,7 +1366,7 @@
             "lineWidth": 2,
             "showPoints": "never"
           },
-          "unit": "short"
+          "unit": "ms"
         }
       },
       "gridPos": {
@@ -1390,19 +1391,24 @@
       },
       "targets": [
         {
-          "expr": "meltica_controlbus_consumers_active{environment=\"$environment\"}",
-          "legendFormat": "{{command_type}}",
+          "expr": "histogram_quantile(0.95, sum(rate(meltica_eventbus_publish_duration_bucket{environment=\"$environment\",event_type=~\"$event_type\"}[5m])) by (le))",
+          "legendFormat": "Publish p95",
           "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(meltica_dispatcher_processing_duration_bucket{environment=\"$environment\",event_type=~\"$event_type\"}[5m])) by (le))",
+          "legendFormat": "Dispatch p95",
+          "refId": "B"
         }
       ],
-      "title": "Control Bus Consumers",
+      "title": "Publish vs Dispatch Latency p95",
       "type": "timeseries"
     },
     {
       "datasource": {
         "uid": "$datasource"
       },
-      "description": "Control bus queue depth",
+      "description": "Compare overall event publish and ingest throughput",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1412,7 +1418,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Queue Depth",
+            "axisLabel": "Events/sec",
             "axisPlacement": "auto",
             "drawStyle": "line",
             "fillOpacity": 10,
@@ -1425,18 +1431,10 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 10
-              },
-              {
-                "color": "red",
-                "value": 50
               }
             ]
           },
-          "unit": "short"
+          "unit": "ops"
         }
       },
       "gridPos": {
@@ -1462,12 +1460,17 @@
       },
       "targets": [
         {
-          "expr": "meltica_controlbus_queue_depth{environment=\"$environment\"}",
-          "legendFormat": "{{command_type}}",
+          "expr": "sum(rate(meltica_eventbus_events_published{environment=\"$environment\",event_type=~\"$event_type\"}[5m]))",
+          "legendFormat": "Published",
           "refId": "A"
+        },
+        {
+          "expr": "sum(rate(meltica_dispatcher_events_ingested{environment=\"$environment\",event_type=~\"$event_type\"}[5m]))",
+          "legendFormat": "Ingested",
+          "refId": "B"
         }
       ],
-      "title": "Control Bus Queue Depth",
+      "title": "Publish vs Ingest Rate",
       "type": "timeseries"
     }
   ],
@@ -1488,8 +1491,8 @@
       },
       {
         "current": {
-          "text": "development",
-          "value": "development"
+          "text": "dev",
+          "value": "dev"
         },
         "datasource": {
           "uid": "$datasource"
