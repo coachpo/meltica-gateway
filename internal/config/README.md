@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Meltica configuration system provides a single, unified entry point for all application configuration with clear precedence rules.
+The Meltica configuration system provides a single, unified entry point for all application configuration sourced directly from YAML.
 
 ## Architecture
 
@@ -14,21 +14,12 @@ All configuration is managed through `AppConfig` in `app_config.go`:
 cfg, err := config.Load(ctx, "config/app.yaml")
 ```
 
-### Configuration Precedence
-
-Settings are applied in order (later overrides earlier):
-
-1. **Code Defaults** (`app_config.go`)
-2. **YAML File** (`app.yaml`)
-3. **Environment Variables**
-
 ### Configuration Structure
 
 ```go
 type AppConfig struct {
     Environment Environment                   // dev, staging, prod
     Exchanges   map[Exchange]map[string]any   // Exchange-specific blobs
-    Dispatcher  DispatcherConfig              // Routing configuration
     Eventbus    EventbusConfig                // Message bus sizing
     Pools       PoolConfig                    // Object pooling capacities
     APIServer   APIServerConfig               // Control server settings
@@ -56,29 +47,17 @@ func main() {
 }
 ```
 
-### Environment Variable Overrides
-
-```bash
-# Override environment
-export MELTICA_ENV=dev
-
-# Override telemetry
-export OTEL_SERVICE_NAME=my-service
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-```
-
 ### YAML Configuration
 
 See `config/app.example.yaml` for a complete sample. Key sections include:
 
 - `environment`: Deployment environment string (`dev`, `staging`, `prod`).
-- `exchanges`: Arbitrary blobs forwarded to each exchange adapter.
-- `dispatcher.routes`: Topic routing, REST polling, and filters.
+- `exchanges`: Arbitrary blobs forwarded to each exchange adapter; each entry must include an `exchange` field referencing a registered provider name (aliases map to the same exchange by using the same `exchange` value).
 - `eventbus`: In-memory event bus sizing.
 - `pools`: Object pool capacities.
 - `apiServer`: Control API bind address.
 - `telemetry`: OTLP exporter configuration.
-- `manifest`: Path to the runtime manifest (`config/runtime.yaml` by default).
+- `manifest`: Path to the lambda manifest (`config/lambda-manifest.yaml` by default).
 
 ## Migration from Old System
 
@@ -94,14 +73,13 @@ cfg, _ := config.Load(ctx, path)
 
 // Everything in one place
 bin, _ := cfg.Exchanges["binance"]
-routes := cfg.Dispatcher.Routes
 telemetry := cfg.Telemetry
 ```
 
 ## Benefits
 
 1. **Single Source of Truth**: One config structure for all concerns
-2. **Clear Precedence**: Defaults → YAML → Env vars
+2. **Deterministic Input**: Configuration comes entirely from YAML
 3. **Type Safety**: Compile-time validation of config structure
 4. **Easier Testing**: Mock entire config or individual sections
 5. **Better Validation**: Validate all settings together in one pass
@@ -109,9 +87,9 @@ telemetry := cfg.Telemetry
 
 ## File Organization
 
-- `app_config.go` - Unified config structure, streaming types, and loading logic
+- `app_config.go` - Unified config structure, YAML loading, and validation
 - `types.go` - Shared config primitives (environment, exchange identifiers)
-- `app_test.go` - Tests for unified config loading
+- `app_config_test.go` - Tests for unified config loading
 
 ## Testing
 
@@ -122,12 +100,3 @@ go test ./internal/config -run TestLoad
 # Test all config functionality
 go test ./internal/config/...
 ```
-
-## Environment Variables Reference
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `MELTICA_ENV` | Runtime environment | `dev`, `staging`, `prod` |
-| `MELTICA_CONFIG` | Config file path | `config/app.yaml` |
-| `OTEL_SERVICE_NAME` | Telemetry service name | `meltica-gateway` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint | `http://localhost:4318` |

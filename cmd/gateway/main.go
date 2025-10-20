@@ -60,12 +60,12 @@ func main() {
 	logger.Printf("configuration loaded: env=%s, exchanges=%d",
 		appCfg.Environment, len(appCfg.Exchanges))
 
-	manifest, err := config.LoadRuntimeManifest(ctx, appCfg.ManifestPath)
+	lambdaManifest, err := config.LoadLambdaManifest(ctx, appCfg.ManifestPath)
 	if err != nil {
-		logger.Fatalf("load runtime manifest: %v", err)
+		logger.Fatalf("load lambda manifest: %v", err)
 	}
-	logger.Printf("runtime manifest loaded: providers=%d, lambdas=%d",
-		len(manifest.Providers), len(manifest.Lambdas))
+	logger.Printf("lambda manifest loaded: lambdas=%d", len(lambdaManifest.Lambdas))
+	logger.Printf("providers configured: %d", len(appCfg.Exchanges))
 
 	telemetryProvider, err := initTelemetry(ctx, logger, appCfg)
 	if err != nil {
@@ -82,14 +82,14 @@ func main() {
 	bus := newEventBus(appCfg.Eventbus, poolMgr)
 
 	table := dispatcher.NewTable()
-	providerManager, err := initProviders(ctx, logger, manifest, poolMgr, table, bus, &lifecycle)
+	providerManager, err := initProviders(ctx, logger, appCfg, poolMgr, table, bus, &lifecycle)
 	if err != nil {
 		logger.Fatalf("initialise providers: %v", err)
 	}
 
 	registrar := dispatcher.NewRegistrar(table, providerManager)
 
-	lambdaManager, err := startLambdaManager(ctx, manifest, bus, poolMgr, providerManager, registrar, logger)
+	lambdaManager, err := startLambdaManager(ctx, lambdaManifest, bus, poolMgr, providerManager, registrar, logger)
 	if err != nil {
 		logger.Fatalf("initialise lambdas: %v", err)
 	}
@@ -177,17 +177,21 @@ func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager) eventbus.Bu
 	})
 }
 
-func initProviders(ctx context.Context, logger *log.Logger, manifest config.RuntimeManifest, poolMgr *pool.PoolManager, table *dispatcher.Table, bus eventbus.Bus, lifecycle *conc.WaitGroup) (*provider.Manager, error) {
+func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppConfig, poolMgr *pool.PoolManager, table *dispatcher.Table, bus eventbus.Bus, lifecycle *conc.WaitGroup) (*provider.Manager, error) {
 	registry := provider.NewRegistry()
 	factories.Register(registry)
 
 	manager := provider.NewManager(registry, poolMgr)
-	providers, err := manager.StartFromManifest(ctx, manifest)
+	specs, err := config.BuildProviderSpecs(appCfg.Exchanges)
+	if err != nil {
+		return nil, fmt.Errorf("build provider specs: %w", err)
+	}
+	providers, err := manager.Start(ctx, specs)
 	if err != nil {
 		return nil, fmt.Errorf("start providers: %w", err)
 	}
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("runtime manifest did not start any providers")
+		return nil, fmt.Errorf("no providers started from configuration")
 	}
 
 	logger.Printf("providers started: %d", len(providers))
@@ -212,7 +216,7 @@ func startProviderPipelines(ctx context.Context, logger *log.Logger, providers m
 	}
 }
 
-func startLambdaManager(ctx context.Context, manifest config.RuntimeManifest, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
+func startLambdaManager(ctx context.Context, manifest config.LambdaManifest, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
 	manager := lambdaruntime.NewManager(bus, poolMgr, providers, logger, registrar)
 	if err := manager.StartFromManifest(ctx, manifest); err != nil {
 		return nil, fmt.Errorf("start manifest lambdas: %w", err)

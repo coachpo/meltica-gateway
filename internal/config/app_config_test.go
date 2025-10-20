@@ -21,21 +21,8 @@ func TestLoadFromYAML(t *testing.T) {
 environment: DEV
 exchanges:
   Fake:
+    exchange: fake
     option: value
-dispatcher:
-  routes:
-    TICKER:
-      wsTopics:
-        - ticker.BTCUSDT
-      restFns:
-        - name: price
-          endpoint: https://example.com
-          interval: 1s
-          parser: priceParser
-      filters:
-        - field: symbol
-          op: eq
-          value: BTC-USDT
 eventbus:
   bufferSize: 128
   fanoutWorkers: 4
@@ -49,7 +36,7 @@ telemetry:
   serviceName: test-service
   otlpInsecure: true
   enableMetrics: false
-manifest: config/runtime.yaml
+manifest: config/lambda-manifest.yaml
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write temp config: %v", err)
@@ -90,14 +77,10 @@ manifest: config/runtime.yaml
 		t.Fatalf("expected telemetry metrics disabled")
 	}
 
-	route, ok := cfg.Dispatcher.Routes["TICKER"]
-	if !ok {
-		t.Fatalf("expected dispatcher route TICKER")
+	if cfg.Pools.EventSize != 100 {
+		t.Fatalf("expected pool event size 100, got %d", cfg.Pools.EventSize)
 	}
-	if len(route.RestFns) != 1 {
-		t.Fatalf("expected one rest fn, got %d", len(route.RestFns))
-	}
-	if route.RestFns[0].Interval.String() != "1s" {
-		t.Fatalf("expected interval 1s, got %v", route.RestFns[0].Interval)
+	if cfg.Pools.OrderRequestSize != 50 {
+		t.Fatalf("expected pool order request size 50, got %d", cfg.Pools.OrderRequestSize)
 	}
 }

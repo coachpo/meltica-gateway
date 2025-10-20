@@ -7,39 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-// DispatcherConfig manages route configuration.
-type DispatcherConfig struct {
-	Routes map[string]RouteConfig `yaml:"routes"`
-}
-
-// RouteConfig describes canonical routing behaviour.
-type RouteConfig struct {
-	WSTopics []string           `yaml:"wsTopics"`
-	RestFns  []RestFnConfig     `yaml:"restFns"`
-	Filters  []FilterRuleConfig `yaml:"filters"`
-}
-
-// RestFnConfig defines a REST fetch routine triggered by dispatcher routes.
-type RestFnConfig struct {
-	Name     string        `yaml:"name"`
-	Endpoint string        `yaml:"endpoint"`
-	Interval time.Duration `yaml:"interval"`
-	Parser   string        `yaml:"parser"`
-}
-
-// FilterRuleConfig declares a single filter predicate.
-type FilterRuleConfig struct {
-	Field string `yaml:"field"`
-	Op    string `yaml:"op"`
-	Value any    `yaml:"value"`
-}
-
-// EventbusConfig sets event bus buffer sizing and worker fanout.
+// EventbusConfig sets in-memory event bus sizing characteristics.
 type EventbusConfig struct {
 	BufferSize    int `yaml:"bufferSize"`
 	FanoutWorkers int `yaml:"fanoutWorkers"`
@@ -61,26 +33,13 @@ type TelemetryConfig struct {
 	OTLPEndpoint  string `yaml:"otlpEndpoint"`
 	ServiceName   string `yaml:"serviceName"`
 	OTLPInsecure  bool   `yaml:"otlpInsecure"`
-	EnableMetrics bool   `yaml:"enableMetrics"` // Default: true
+	EnableMetrics bool   `yaml:"enableMetrics"`
 }
 
-// BackpressureConfig configures dispatcher token-bucket behaviour.
-type BackpressureConfig struct {
-	TokenRatePerStream int `yaml:"token_rate_per_stream"`
-	TokenBurst         int `yaml:"token_burst"`
-}
-
-// DispatcherRuntimeConfig aggregates dispatcher tunables for runtime configuration.
-type DispatcherRuntimeConfig struct {
-	Backpressure     BackpressureConfig `yaml:"backpressure"`
-	CoalescableTypes []string           `yaml:"coalescable_types"`
-}
-
-// AppConfig is the unified Meltica application configuration combining all concerns.
+// AppConfig is the unified Meltica application configuration sourced from YAML.
 type AppConfig struct {
 	Environment  Environment                 `yaml:"environment"`
 	Exchanges    map[Exchange]map[string]any `yaml:"exchanges"`
-	Dispatcher   DispatcherConfig            `yaml:"dispatcher"`
 	Eventbus     EventbusConfig              `yaml:"eventbus"`
 	Pools        PoolConfig                  `yaml:"pools"`
 	APIServer    APIServerConfig             `yaml:"apiServer"`
@@ -88,7 +47,7 @@ type AppConfig struct {
 	ManifestPath string                      `yaml:"manifest"`
 }
 
-// Load loads the unified Meltica configuration strictly from the provided YAML source.
+// Load reads and validates an AppConfig from the provided YAML file.
 func Load(ctx context.Context, configPath string) (AppConfig, error) {
 	_ = ctx
 
@@ -110,55 +69,36 @@ func Load(ctx context.Context, configPath string) (AppConfig, error) {
 
 	cfg.normalise()
 
-	if err := cfg.Validate(ctx); err != nil {
-		return AppConfig{}, fmt.Errorf("validate config: %w", err)
+	if err := cfg.Validate(); err != nil {
+		return AppConfig{}, err
 	}
 
 	return cfg, nil
 }
 
 func (c *AppConfig) normalise() {
-	if c.Exchanges == nil {
-		c.Exchanges = make(map[Exchange]map[string]any)
-	} else {
-		normalised := make(map[Exchange]map[string]any, len(c.Exchanges))
-		for key, value := range c.Exchanges {
-			normalizedKey := Exchange(normalizeExchangeName(string(key)))
-			normalised[normalizedKey] = value
-		}
-		c.Exchanges = normalised
-	}
+    normalised := make(map[Exchange]map[string]any, len(c.Exchanges))
+    for key, value := range c.Exchanges {
+        normalizedKey := Exchange(normalizeExchangeName(string(key)))
+        normalised[normalizedKey] = value
+    }
+    c.Exchanges = normalised
 
-	c.Environment = Environment(strings.ToLower(strings.TrimSpace(string(c.Environment))))
-	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
-	c.ManifestPath = strings.TrimSpace(c.ManifestPath)
-	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
-	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
+    c.Environment = Environment(normalizeExchangeName(string(c.Environment)))
+    c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
+    c.ManifestPath = strings.TrimSpace(c.ManifestPath)
+    c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
+    c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
 }
 
-// Validate performs comprehensive validation on the unified configuration.
-func (c *AppConfig) Validate(ctx context.Context) error {
-	_ = ctx
-
-	// Validate environment
-	if c.Environment != EnvDev && c.Environment != EnvStaging && c.Environment != EnvProd {
-		return fmt.Errorf("invalid environment: %s", c.Environment)
+// Validate performs semantic validation on the configuration.
+func (c AppConfig) Validate() error {
+	switch c.Environment {
+	case EnvDev, EnvStaging, EnvProd:
+	default:
+		return fmt.Errorf("environment must be one of dev, staging, prod")
 	}
 
-	// Validate dispatcher routes
-	if c.Dispatcher.Routes == nil {
-		// Routes are optional; empty map is valid
-		c.Dispatcher.Routes = make(map[string]RouteConfig)
-	}
-	for name, route := range c.Dispatcher.Routes {
-		for i := range route.RestFns {
-			if route.RestFns[i].Interval <= 0 {
-				return fmt.Errorf("dispatcher route %s restFns[%d]: interval must be >0", name, i)
-			}
-		}
-	}
-
-	// Validate eventbus
 	if c.Eventbus.BufferSize <= 0 {
 		return fmt.Errorf("eventbus bufferSize must be >0")
 	}
@@ -167,19 +107,18 @@ func (c *AppConfig) Validate(ctx context.Context) error {
 	}
 
 	if c.Pools.EventSize <= 0 {
-		return fmt.Errorf("pool eventSize must be >0")
+		return fmt.Errorf("pools eventSize must be >0")
 	}
 	if c.Pools.OrderRequestSize <= 0 {
-		return fmt.Errorf("pool orderRequestSize must be >0")
+		return fmt.Errorf("pools orderRequestSize must be >0")
 	}
 
 	if strings.TrimSpace(c.APIServer.Addr) == "" {
-		return fmt.Errorf("api server addr required")
+		return fmt.Errorf("apiServer addr required")
 	}
 
-	// Validate telemetry
-	if c.Telemetry.ServiceName == "" {
-		return fmt.Errorf("telemetry service name required")
+	if strings.TrimSpace(c.Telemetry.ServiceName) == "" {
+		return fmt.Errorf("telemetry serviceName required")
 	}
 
 	if strings.TrimSpace(c.ManifestPath) == "" {
@@ -190,58 +129,12 @@ func (c *AppConfig) Validate(ctx context.Context) error {
 }
 
 func openConfigFile(path string) (io.Reader, func(), error) {
-	var (
-		closeFn    func()
-		candidates []string
-		seen       = make(map[string]struct{})
-	)
-	addCandidate := func(candidate string) {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			return
-		}
-		candidate = filepath.Clean(candidate)
-		if _, ok := seen[candidate]; ok {
-			return
-		}
-		seen[candidate] = struct{}{}
-		candidates = append(candidates, candidate)
-	}
-	addCandidate(path)
-	for _, fallback := range []string{
-		"config/app.yaml",
-		"internal/config/app.yaml",
-		"config/app.example.yaml",
-		"internal/config/app.example.yaml",
-	} {
-		addCandidate(fallback)
-	}
+	candidate := strings.TrimSpace(path)
+	candidate = filepath.Clean(candidate)
 
-	var lastErr error
-	for _, candidate := range candidates {
-		file, err := os.Open(candidate) // #nosec G304 -- configuration paths are controlled by operators.
-		if err == nil {
-			closeFn = func() { _ = file.Close() }
-			return file, closeFn, nil
-		}
-		if !os.IsNotExist(err) {
-			return nil, nil, fmt.Errorf("open app config: %w", err)
-		}
-		lastErr = err
+	file, err := os.Open(candidate) // #nosec G304 -- path is operator controlled.
+	if err != nil {
+		return nil, nil, fmt.Errorf("open app config: %w", err)
 	}
-	if lastErr == nil {
-		lastErr = os.ErrNotExist
-	}
-	return nil, nil, fmt.Errorf("open app config: %w", lastErr)
-}
-
-func cloneStringAnyMap(src map[string]any) map[string]any {
-	if len(src) == 0 {
-		return make(map[string]any)
-	}
-	dst := make(map[string]any, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
-	return dst
+	return file, func() { _ = file.Close() }, nil
 }

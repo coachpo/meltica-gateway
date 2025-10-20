@@ -39,14 +39,14 @@ func (r *Registry) Register(typ string, factory Factory) {
 // Create creates a provider instance from the specification.
 func (r *Registry) Create(ctx context.Context, pools *pool.PoolManager, spec config.ProviderSpec) (Instance, error) {
 	r.mu.RLock()
-	factory, ok := r.factories[spec.Type]
+	factory, ok := r.factories[spec.Exchange]
 	r.mu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("provider type %q not registered", spec.Type)
+		return nil, fmt.Errorf("provider exchange %q not registered", spec.Exchange)
 	}
 	instance, err := factory(ctx, pools, spec.Config)
 	if err != nil {
-		return nil, fmt.Errorf("instantiate provider %s(%s): %w", spec.Name, spec.Type, err)
+		return nil, fmt.Errorf("instantiate provider %s(%s): %w", spec.Name, spec.Exchange, err)
 	}
 	return instance, nil
 }

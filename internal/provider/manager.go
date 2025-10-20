@@ -43,9 +43,9 @@ func (m *Manager) Registry() *Registry {
 	return m.registry
 }
 
-// StartFromManifest constructs all providers defined in the manifest.
-func (m *Manager) StartFromManifest(ctx context.Context, manifest config.RuntimeManifest) (map[string]Instance, error) {
-	for _, spec := range manifest.Providers {
+// Start constructs all providers from the supplied specifications.
+func (m *Manager) Start(ctx context.Context, specs []config.ProviderSpec) (map[string]Instance, error) {
+	for _, spec := range specs {
 		if err := m.addProvider(ctx, spec); err != nil {
 			return nil, err
 		}

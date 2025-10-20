@@ -1,18 +1,3 @@
-providers:
-  - name: fake
-    type: fake
-    config:
-      name: fake
-      ticker_interval: 100ms
-      trade_interval: 100ms
-      book_snapshot_interval: 100ms
-  - name: fake-slow
-    type: fake
-    config:
-      name: fake-slow
-      ticker_interval: 250ms
-      trade_interval: 500ms
-      book_snapshot_interval: 250ms
 lambdas:
   - id: lambda-fake-btc
     provider: fake

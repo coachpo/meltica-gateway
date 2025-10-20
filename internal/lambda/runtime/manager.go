@@ -347,8 +347,8 @@ func (m *Manager) StrategyDetail(name string) (StrategyMetadata, bool) {
 	return def.Metadata(), true
 }
 
-// StartFromManifest starts all lambdas defined in the runtime manifest.
-func (m *Manager) StartFromManifest(ctx context.Context, manifest config.RuntimeManifest) error {
+// StartFromManifest starts all lambdas defined in the lambda manifest.
+func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaManifest) error {
 	for _, definition := range manifest.Lambdas {
 		spec := sanitizeSpec(definition)
 		if err := m.ensureSpec(spec, false); err != nil {

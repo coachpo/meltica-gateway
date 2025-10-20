@@ -1,14 +1,41 @@
+# environment: deployment environment (dev | staging | prod)
+environment: dev
+
+exchanges:
+  # fake: synthetic market data source suitable for demos/tests
+  fake:
+    # exchange: canonical provider registered in code
+    exchange: fake
+    ticker_interval: 100ms
+    trade_interval: 100ms
+    book_snapshot_interval: 100ms
+  # fake-slow: alias targeting the same fake provider with different intervals
+  fake-slow:
+    exchange: fake
+    ticker_interval: 250ms
+    trade_interval: 500ms
+    book_snapshot_interval: 250ms
+
+# eventbus: in-memory event bus sizing
 eventbus:
   bufferSize: 5000
   fanoutWorkers: 8
+
+# pools: object pool capacities
 pools:
   eventSize: 25000
   orderRequestSize: 5000
+
+# apiServer: control API bind address (host:port or :port)
 apiServer:
   addr: ":8880"
+
+# telemetry: OTLP exporter configuration
 telemetry:
   otlpEndpoint: http://capy.lan:4318
   serviceName: meltica-gateway
   otlpInsecure: true
   enableMetrics: true
-manifest: runtime.yaml
+
+# manifest: path to lambda manifest file
+manifest: config/lambda-manifest.yaml
