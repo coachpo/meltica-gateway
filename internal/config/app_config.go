@@ -38,13 +38,13 @@ type TelemetryConfig struct {
 
 // AppConfig is the unified Meltica application configuration sourced from YAML.
 type AppConfig struct {
-	Environment  Environment                 `yaml:"environment"`
-	Exchanges    map[Exchange]map[string]any `yaml:"exchanges"`
-	Eventbus     EventbusConfig              `yaml:"eventbus"`
-	Pools        PoolConfig                  `yaml:"pools"`
-	APIServer    APIServerConfig             `yaml:"apiServer"`
-	Telemetry    TelemetryConfig             `yaml:"telemetry"`
-    ManifestPath string                      `yaml:"lambdaManifest"`
+	Environment    Environment                 `yaml:"environment"`
+	Exchanges      map[Exchange]map[string]any `yaml:"exchanges"`
+	Eventbus       EventbusConfig              `yaml:"eventbus"`
+	Pools          PoolConfig                  `yaml:"pools"`
+	APIServer      APIServerConfig             `yaml:"apiServer"`
+	Telemetry      TelemetryConfig             `yaml:"telemetry"`
+	LambdaManifest LambdaManifest              `yaml:"lambdaManifest"`
 }
 
 // Load reads and validates an AppConfig from the provided YAML file.
@@ -77,18 +77,17 @@ func Load(ctx context.Context, configPath string) (AppConfig, error) {
 }
 
 func (c *AppConfig) normalise() {
-    normalised := make(map[Exchange]map[string]any, len(c.Exchanges))
-    for key, value := range c.Exchanges {
-        normalizedKey := Exchange(normalizeExchangeName(string(key)))
-        normalised[normalizedKey] = value
-    }
-    c.Exchanges = normalised
+	normalised := make(map[Exchange]map[string]any, len(c.Exchanges))
+	for key, value := range c.Exchanges {
+		normalizedKey := Exchange(normalizeExchangeName(string(key)))
+		normalised[normalizedKey] = value
+	}
+	c.Exchanges = normalised
 
-    c.Environment = Environment(normalizeExchangeName(string(c.Environment)))
-    c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
-    c.ManifestPath = strings.TrimSpace(c.ManifestPath)
-    c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
-    c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
+	c.Environment = Environment(normalizeExchangeName(string(c.Environment)))
+	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
+	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
+	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
 }
 
 // Validate performs semantic validation on the configuration.
@@ -121,8 +120,8 @@ func (c AppConfig) Validate() error {
 		return fmt.Errorf("telemetry serviceName required")
 	}
 
-	if strings.TrimSpace(c.ManifestPath) == "" {
-		return fmt.Errorf("manifest path required")
+	if err := c.LambdaManifest.Validate(); err != nil {
+		return fmt.Errorf("lambda manifest: %w", err)
 	}
 
 	return nil

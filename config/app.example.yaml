@@ -56,5 +56,136 @@ telemetry:
   otlpInsecure: true
   enableMetrics: true
 
-# lambdaManifest: path to lambda manifest file
-lambdaManifest: config/lambda-manifest.yaml
+# lambdaManifest: inline lambda definitions that will be materialised at startup
+lambdaManifest:
+  lambdas:
+    - id: lambda-fake-btc
+      provider: fake
+      symbol: BTC-USDT
+      strategy: delay
+      config:
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-btc-logger
+      provider: fake
+      symbol: BTC-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-slow-eth
+      provider: fake-slow
+      symbol: ETH-USDT
+      strategy: delay
+      config:
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-eth-noop
+      provider: fake
+      symbol: ETH-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-xrp
+      provider: fake
+      symbol: XRP-USDT
+      strategy: delay
+      config:
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-xrp-noop
+      provider: fake
+      symbol: XRP-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-sol-1
+      provider: fake
+      symbol: SOL-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-sol-2
+      provider: fake
+      symbol: SOL-USDT
+      strategy: delay
+      config:
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-sol-3
+      provider: fake
+      symbol: SOL-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-sol-4
+      provider: fake
+      symbol: SOL-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-sol-logger
+      provider: fake
+      symbol: SOL-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-ada
+      provider: fake
+      symbol: ADA-USDT
+      strategy: delay
+      config:
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-ada-logger
+      provider: fake
+      symbol: ADA-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-doge
+      provider: fake
+      symbol: DOGE-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-doge-logger
+      provider: fake
+      symbol: DOGE-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-bnb
+      provider: fake
+      symbol: BNB-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-bnb-noop
+      provider: fake
+      symbol: BNB-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-ltc
+      provider: fake
+      symbol: LTC-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-ltc-logger
+      provider: fake
+      symbol: LTC-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-dot
+      provider: fake
+      symbol: DOT-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-dot-noop
+      provider: fake
+      symbol: DOT-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-avax
+      provider: fake
+      symbol: AVAX-USDT
+      strategy: delay
+      auto_start: true
+    - id: lambda-fake-avax-logger
+      provider: fake
+      symbol: AVAX-USDT
+      strategy: delay
+      auto_start: true

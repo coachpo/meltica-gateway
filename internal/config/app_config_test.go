@@ -37,7 +37,13 @@ telemetry:
   serviceName: test-service
   otlpInsecure: true
   enableMetrics: false
-lambdaManifest: config/lambda-manifest.yaml
+lambdaManifest:
+  lambdas:
+    - id: test-lambda
+      provider: fake
+      symbol: BTC-USDT
+      strategy: delay
+      auto_start: false
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write temp config: %v", err)
@@ -88,5 +94,16 @@ lambdaManifest: config/lambda-manifest.yaml
 	}
 	if cfg.Pools.OrderRequestSize != 50 {
 		t.Fatalf("expected pool order request size 50, got %d", cfg.Pools.OrderRequestSize)
+	}
+
+	if len(cfg.LambdaManifest.Lambdas) != 1 {
+		t.Fatalf("expected 1 lambda, got %d", len(cfg.LambdaManifest.Lambdas))
+	}
+	manifest := cfg.LambdaManifest.Lambdas[0]
+	if manifest.ID != "test-lambda" {
+		t.Fatalf("unexpected lambda id %s", manifest.ID)
+	}
+	if manifest.AutoStart {
+		t.Fatalf("expected test-lambda autostart disabled")
 	}
 }

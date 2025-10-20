@@ -60,11 +60,7 @@ func main() {
 	logger.Printf("configuration loaded: env=%s, exchanges=%d",
 		appCfg.Environment, len(appCfg.Exchanges))
 
-	lambdaManifest, err := config.LoadLambdaManifest(ctx, appCfg.ManifestPath)
-	if err != nil {
-		logger.Fatalf("load lambda manifest: %v", err)
-	}
-	logger.Printf("lambda manifest loaded: lambdas=%d", len(lambdaManifest.Lambdas))
+	logger.Printf("lambda manifest loaded: lambdas=%d", len(appCfg.LambdaManifest.Lambdas))
 	logger.Printf("providers configured: %d", len(appCfg.Exchanges))
 
 	telemetryProvider, err := initTelemetry(ctx, logger, appCfg)
@@ -89,7 +85,7 @@ func main() {
 
 	registrar := dispatcher.NewRegistrar(table, providerManager)
 
-	lambdaManager, err := startLambdaManager(ctx, lambdaManifest, bus, poolMgr, providerManager, registrar, logger)
+	lambdaManager, err := startLambdaManager(ctx, appCfg.LambdaManifest, bus, poolMgr, providerManager, registrar, logger)
 	if err != nil {
 		logger.Fatalf("initialise lambdas: %v", err)
 	}

@@ -1,45 +1,40 @@
 package config
 
-import (
-	"context"
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
-func TestLoadLambdaManifest(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "lambda-manifest.yaml")
-	yaml := `
-lambdas:
-  - id: test-lambda
-    provider: fake
-    symbol: BTC-USDT
-    strategy: delay
-    config: {}
-    auto_start: true
-`
-	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
-		t.Fatalf("write manifest: %v", err)
+func TestLambdaManifestValidate(t *testing.T) {
+	manifest := LambdaManifest{
+		Lambdas: []LambdaSpec{{
+			ID:        "test-lambda",
+			Provider:  "fake",
+			Symbol:    "BTC-USDT",
+			Strategy:  "delay",
+			Config:    map[string]any{"min_delay": "100ms"},
+			AutoStart: true,
+		}},
 	}
-
-	manifest, err := LoadLambdaManifest(context.Background(), path)
-	if err != nil {
-		t.Fatalf("LoadLambdaManifest failed: %v", err)
-	}
-	if len(manifest.Lambdas) != 1 {
-		t.Fatalf("expected 1 lambda, got %d", len(manifest.Lambdas))
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("manifest validation failed: %v", err)
 	}
 }
 
-func TestLoadLambdaManifestValidation(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "lambda-manifest.yaml")
-	yaml := `lambdas: []`
-	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
-		t.Fatalf("write manifest: %v", err)
+func TestLambdaManifestValidateMissingEntries(t *testing.T) {
+	manifest := LambdaManifest{}
+	if err := manifest.Validate(); err == nil {
+		t.Fatal("expected validation error for empty manifest")
 	}
-	if _, err := LoadLambdaManifest(context.Background(), path); err == nil {
-		t.Fatal("expected validation error")
+}
+
+func TestLambdaManifestValidateMissingFields(t *testing.T) {
+	manifest := LambdaManifest{
+		Lambdas: []LambdaSpec{{
+			ID:       "",
+			Provider: "fake",
+			Symbol:   "BTC-USDT",
+			Strategy: "delay",
+		}},
+	}
+	if err := manifest.Validate(); err == nil {
+		t.Fatal("expected validation error for missing id")
 	}
 }

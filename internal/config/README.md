@@ -24,7 +24,7 @@ type AppConfig struct {
     Pools       PoolConfig                    // Object pooling capacities
     APIServer   APIServerConfig               // Control server settings
     Telemetry   TelemetryConfig               // Observability settings
-    ManifestPath string                       // Runtime manifest path
+    LambdaManifest LambdaManifest             // Inline lambda definitions
 }
 ```
 
@@ -57,7 +57,7 @@ See `config/app.example.yaml` for a complete sample. Key sections include:
 - `pools`: Object pool capacities.
 - `apiServer`: Control API bind address.
 - `telemetry`: OTLP exporter configuration.
-- `lambdaManifest`: Path to the lambda manifest (`config/lambda-manifest.yaml` by default).
+- `lambdaManifest`: Inline lambda definitions materialised at startup.
 
 ## Migration from Old System
 
