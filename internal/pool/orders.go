@@ -25,31 +25,12 @@ func AcquireOrderRequest(ctx context.Context, pools *PoolManager) (*schema.Order
 	return request, release, nil
 }
 
-// AcquireExecReport obtains an ExecReport from the pool with a 100ms timeout.
-func AcquireExecReport(ctx context.Context, pools *PoolManager) (*schema.ExecReport, func(), error) {
-	obj, release, err := acquireFromPool(ctx, pools, "ExecReport")
-	if err != nil {
-		return nil, nil, err
-	}
-	report, ok := obj.(*schema.ExecReport)
-	if !ok {
-		release()
-		return nil, nil, fmt.Errorf("pool ExecReport: unexpected type %T", obj)
-	}
-	report.Reset()
-	return report, release, nil
-}
-
 func acquireFromPool(ctx context.Context, pools *PoolManager, poolName string) (PooledObject, func(), error) {
 	if pools == nil {
-		switch poolName {
-		case "OrderRequest":
+		if poolName == "OrderRequest" {
 			return new(schema.OrderRequest), func() {}, nil
-		case "ExecReport":
-			return new(schema.ExecReport), func() {}, nil
-		default:
-			return nil, func() {}, fmt.Errorf("pool %s not available", poolName)
 		}
+		return nil, func() {}, fmt.Errorf("pool %s not available", poolName)
 	}
 
 	var cancel context.CancelFunc

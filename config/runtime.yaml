@@ -1,0 +1,154 @@
+providers:
+  - name: fake
+    type: fake
+    config:
+      name: fake
+      ticker_interval: 100ms
+      trade_interval: 100ms
+      book_snapshot_interval: 100ms
+  - name: fake-slow
+    type: fake
+    config:
+      name: fake-slow
+      ticker_interval: 250ms
+      trade_interval: 500ms
+      book_snapshot_interval: 250ms
+lambdas:
+  - id: lambda-fake-btc
+    provider: fake
+    symbol: BTC-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-btc-logger
+    provider: fake
+    symbol: BTC-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-slow-eth
+    provider: fake-slow
+    symbol: ETH-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-eth-noop
+    provider: fake
+    symbol: ETH-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-xrp
+    provider: fake
+    symbol: XRP-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-xrp-noop
+    provider: fake
+    symbol: XRP-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-sol-1
+    provider: fake
+    symbol: SOL-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-sol-2
+    provider: fake
+    symbol: SOL-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-sol-3
+    provider: fake
+    symbol: SOL-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-sol-4
+    provider: fake
+    symbol: SOL-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-sol-logger
+    provider: fake
+    symbol: SOL-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-ada
+    provider: fake
+    symbol: ADA-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-ada-logger
+    provider: fake
+    symbol: ADA-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-doge
+    provider: fake
+    symbol: DOGE-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-doge-logger
+    provider: fake
+    symbol: DOGE-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-bnb
+    provider: fake
+    symbol: BNB-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-bnb-noop
+    provider: fake
+    symbol: BNB-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-ltc
+    provider: fake
+    symbol: LTC-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-ltc-logger
+    provider: fake
+    symbol: LTC-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-dot
+    provider: fake
+    symbol: DOT-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-dot-noop
+    provider: fake
+    symbol: DOT-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-avax
+    provider: fake
+    symbol: AVAX-USDT
+    strategy: delay
+    config: {}
+    auto_start: true
+  - id: lambda-fake-avax-logger
+    provider: fake
+    symbol: AVAX-USDT
+    strategy: delay
+    config: {}
+    auto_start: true

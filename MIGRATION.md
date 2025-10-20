@@ -16,7 +16,7 @@ This release replaces legacy network/serialization libraries and introduces boun
 
 ## Object Pooling
 
-Five canonical structs (`WsFrame`, `ProviderRaw`, `Event`, `OrderRequest`, `ExecReport`) are pooled via `pool.PoolManager`:
+Canonical structs (`Event`, `OrderRequest`) are pooled via `pool.PoolManager` for memory efficiency:
 
 ```go
 order, release, err := pool.AcquireOrderRequest(ctx, pools)

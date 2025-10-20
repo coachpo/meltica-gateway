@@ -147,9 +147,8 @@ func TestEventReset(t *testing.T) {
 		Provider:       "binance",
 		Symbol:         "BTC-USD",
 		Type:           EventTypeTrade,
-		SeqProvider:    100,
-		Payload:        map[string]interface{}{"price": "50000"},
-		TraceID:        "trace-123",
+		SeqProvider: 100,
+		Payload:     map[string]interface{}{"price": "50000"},
 	}
 	
 	ev.Reset()
@@ -174,9 +173,6 @@ func TestEventReset(t *testing.T) {
 	}
 	if ev.Payload != nil {
 		t.Error("expected nil Payload")
-	}
-	if ev.TraceID != "" {
-		t.Error("expected empty TraceID")
 	}
 }
 
@@ -207,7 +203,6 @@ func TestEventTypeCoalescable(t *testing.T) {
 		want bool
 	}{
 		{"ticker is coalescable", EventTypeTicker, true},
-		{"book update is coalescable", EventTypeBookUpdate, true},
 		{"kline is coalescable", EventTypeKlineSummary, true},
 		{"book snapshot is not coalescable", EventTypeBookSnapshot, false},
 		{"trade is not coalescable", EventTypeTrade, false},

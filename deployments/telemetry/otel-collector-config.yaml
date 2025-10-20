@@ -1,0 +1,77 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Resource detection - automatically detect environment metadata
+  resourcedetection:
+    detectors: [env, system, docker]
+    timeout: 5s
+    override: false
+
+  # Optimized batch processing for better throughput
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Resource attributes enrichment
+  resource:
+    attributes:
+      - key: service.name
+        value: meltica
+        action: upsert
+      - key: deployment.environment
+        value: development
+        action: upsert
+
+  # Transform processor for attribute normalization (optional)
+  transform:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          # Normalize environment attribute
+          - set(attributes["deployment.environment"], attributes["environment"]) where attributes["environment"] != nil
+
+exporters:
+  # Prometheus exporter for metrics with exemplar support
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: meltica
+    enable_open_metrics: true        # Enable OpenMetrics format for exemplars
+    resource_to_telemetry_conversion:
+      enabled: true                   # Convert resource attributes to metric labels
+    add_metric_suffixes: false        # Remove _total, _bucket suffixes for cleaner names
+    const_labels:
+      cluster: meltica-development
+
+  # Logging exporter for debugging
+  logging:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch, transform, resource]
+      exporters: [prometheus, logging]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: :8888
+      level: detailed

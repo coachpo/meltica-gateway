@@ -12,31 +12,49 @@ dispatcher:
   routes:
     TICKER:
       wsTopics:
-        - ticker.BTCUSDT
-        - ticker.ETHUSDT
+        - btcusdt@ticker
+        - ethusdt@ticker
+        - xrpusdt@ticker
       restFns: []
       filters:
         - field: instrument
-          op: eq
-          value: BTC-USDT
+          op: in
+          value:
+            - BTC-USDT
+            - ETH-USDT
+            - XRP-USDT
+    TRADE:
+      wsTopics:
+        - btcusdt@aggTrade
+        - ethusdt@aggTrade
+        - xrpusdt@aggTrade
+      restFns: []
+      filters:
+        - field: instrument
+          op: in
+          value:
+            - BTC-USDT
+            - ETH-USDT
+            - XRP-USDT
     ORDERBOOK.DELTA:
       wsTopics:
-        - depth.BTCUSDT
-        - depth.ETHUSDT
-      restFns:
-        - name: orderbookSnapshot
-          endpoint: /api/v3/depth
-          interval: 5s
-          parser: orderbook
+        - btcusdt@depth@100ms
+        - ethusdt@depth@100ms
+        - xrpusdt@depth@100ms
       filters:
-        - field: market
-          op: eq
-          value: BINANCE-SPOT
+        - field: instrument
+          op: in
+          value:
+            - BTC-USDT
+            - ETH-USDT
+            - XRP-USDT
 snapshot:
   ttl: 15m
-databus:
+eventbus:
   bufferSize: 1024
   perInstrument: 16
 telemetry:
-  otlpEndpoint: http://localhost:4318
+  otlpEndpoint: http://capy.lan:4318
   serviceName: meltica-gateway
+  otlpInsecure: true
+  enableMetrics: true # Metrics only - no traces/Jaeger

@@ -12,56 +12,33 @@ import (
 // CanonicalType identifies canonical Meltica event categories (e.g. TICKER, ORDERBOOK.SNAPSHOT).
 type CanonicalType string
 
-// MelticaEvent represents a canonical event emitted by the dispatcher or conductor.
-type MelticaEvent struct {
-	Type           CanonicalType
-	Source         string
-	Ts             time.Time
-	Instrument     string
-	Market         string
-	Seq            uint64
-	Key            string
-	Payload        any
-	Latency        time.Duration
-	TraceID        string
-	RoutingVersion int
-}
-
-// RawInstance is the pre-canonicalized payload produced by upstream adapters.
+// RawInstance is a pre-canonicalized payload produced by upstream adapters.
 type RawInstance map[string]any
+
+// Clone returns a deep copy of the raw instance.
+func (r RawInstance) Clone() RawInstance {
+	if len(r) == 0 {
+		return RawInstance{}
+	}
+	out := make(RawInstance, len(r))
+	for k, v := range r {
+		out[k] = v
+	}
+	return out
+}
 
 // Subscribe represents a control plane command to add a canonical route.
 type Subscribe struct {
 	Type      CanonicalType  `json:"type"`
 	Filters   map[string]any `json:"filters,omitempty"`
-	TraceID   string         `json:"traceId,omitempty"`
 	RequestID string         `json:"requestId,omitempty"`
 }
 
 // Unsubscribe represents a control plane command to remove a canonical route.
 type Unsubscribe struct {
 	Type      CanonicalType `json:"type"`
-	TraceID   string        `json:"traceId,omitempty"`
 	RequestID string        `json:"requestId,omitempty"`
 }
-
-// Command identifies a control bus command envelope.
-type Command interface {
-	commandKind() CommandKind
-}
-
-// CommandKind identifies command type names.
-type CommandKind string
-
-const (
-	// CommandKindSubscribe represents a subscribe request.
-	CommandKindSubscribe CommandKind = "subscribe"
-	// CommandKindUnsubscribe represents an unsubscribe request.
-	CommandKindUnsubscribe CommandKind = "unsubscribe"
-)
-
-func (Subscribe) commandKind() CommandKind   { return CommandKindSubscribe }
-func (Unsubscribe) commandKind() CommandKind { return CommandKindUnsubscribe }
 
 // Validate ensures the canonical type adheres to spec.
 func (c CanonicalType) Validate() error {
@@ -111,18 +88,6 @@ func BuildEventKey(instr string, typ CanonicalType, seq uint64) string {
 	return fmt.Sprintf("%s:%s:%d", strings.TrimSpace(instr), string(typ), seq)
 }
 
-// Clone returns a deep copy of the raw instance.
-func (r RawInstance) Clone() RawInstance {
-	if len(r) == 0 {
-		return RawInstance{}
-	}
-	out := make(RawInstance, len(r))
-	for k, v := range r {
-		out[k] = v
-	}
-	return out
-}
-
 // Event represents a canonical event emitted by providers or dispatcher.
 type Event struct {
 	returned       bool
@@ -132,10 +97,9 @@ type Event struct {
 	Symbol         string    `json:"symbol"`
 	Type           EventType `json:"type"`
 	SeqProvider    uint64    `json:"seq_provider"`
-	IngestTS       time.Time `json:"ingest_ts"`
-	EmitTS         time.Time `json:"emit_ts"`
-	Payload        any       `json:"payload"`
-	TraceID        string    `json:"trace_id,omitempty"`
+	IngestTS time.Time `json:"ingest_ts"`
+	EmitTS   time.Time `json:"emit_ts"`
+	Payload  any       `json:"payload"`
 }
 
 // Reset zeroes the event for pool reuse.
@@ -152,7 +116,6 @@ func (e *Event) Reset() {
 	e.IngestTS = time.Time{}
 	e.EmitTS = time.Time{}
 	e.Payload = nil
-	e.TraceID = ""
 	e.returned = false
 }
 
@@ -172,17 +135,14 @@ func (e *Event) IsReturned() bool {
 	return e.returned
 }
 
-// CanonicalEvent is an alias for Event, representing canonical events in pooling contexts.
-type CanonicalEvent = Event
-
 // EventType enumerates canonical event categories.
 type EventType string
 
 const (
 	// EventTypeBookSnapshot identifies full depth snapshots.
+	// NOTE: Adapters MUST always emit full orderbooks, never deltas.
+	// Exchange-specific delta handling should be done within the adapter.
 	EventTypeBookSnapshot EventType = "BookSnapshot"
-	// EventTypeBookUpdate identifies incremental depth updates.
-	EventTypeBookUpdate EventType = "BookUpdate"
 	// EventTypeTrade identifies trade executions.
 	EventTypeTrade EventType = "Trade"
 	// EventTypeTicker identifies ticker summary events.
@@ -200,7 +160,7 @@ const (
 // Coalescable reports whether an event type can be coalesced under backpressure.
 func (et EventType) Coalescable() bool {
 	switch et {
-	case EventTypeTicker, EventTypeBookUpdate, EventTypeKlineSummary:
+	case EventTypeTicker, EventTypeKlineSummary:
 		return true
 	case EventTypeBookSnapshot,
 		EventTypeTrade,
@@ -241,29 +201,17 @@ type PriceLevel struct {
 }
 
 // BookSnapshotPayload conveys a full snapshot of order book depth.
+// Adapters MUST always send the complete orderbook state, not deltas.
+// Any delta-based exchanges should maintain the full book state within the adapter.
 type BookSnapshotPayload struct {
 	Bids       []PriceLevel `json:"bids"`
 	Asks       []PriceLevel `json:"asks"`
 	Checksum   string       `json:"checksum"`
 	LastUpdate time.Time    `json:"last_update"`
-}
-
-// BookUpdateType differentiates delta vs full-book updates.
-type BookUpdateType string
-
-const (
-	// BookUpdateTypeDelta represents delta updates.
-	BookUpdateTypeDelta BookUpdateType = "Delta"
-	// BookUpdateTypeFull represents full book refreshes.
-	BookUpdateTypeFull BookUpdateType = "Full"
-)
-
-// BookUpdatePayload carries incremental or full updates to the order book.
-type BookUpdatePayload struct {
-	UpdateType BookUpdateType `json:"update_type"`
-	Bids       []PriceLevel   `json:"bids"`
-	Asks       []PriceLevel   `json:"asks"`
-	Checksum   string         `json:"checksum"`
+	
+	// Binance-specific sequence tracking (optional, used internally during assembly)
+	FirstUpdateID uint64 `json:"first_update_id,omitempty"` // U - First update ID in event
+	FinalUpdateID uint64 `json:"final_update_id,omitempty"` // u - Final update ID in event
 }
 
 // TradeSide captures the direction of a trade.

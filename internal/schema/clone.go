@@ -16,14 +16,6 @@ func clonePayload(payload any) any {
 	switch v := payload.(type) {
 	case nil:
 		return nil
-	case BookUpdatePayload:
-		return cloneBookUpdatePayload(v)
-	case *BookUpdatePayload:
-		if v == nil {
-			return nil
-		}
-		cloned := cloneBookUpdatePayload(*v)
-		return &cloned
 	case BookSnapshotPayload:
 		return cloneBookSnapshotPayload(v)
 	case *BookSnapshotPayload:
@@ -63,17 +55,6 @@ func clonePayload(payload any) any {
 	default:
 		return v
 	}
-}
-
-func cloneBookUpdatePayload(payload BookUpdatePayload) BookUpdatePayload {
-	cloned := payload
-	if len(payload.Bids) > 0 {
-		cloned.Bids = clonePriceLevels(payload.Bids)
-	}
-	if len(payload.Asks) > 0 {
-		cloned.Asks = clonePriceLevels(payload.Asks)
-	}
-	return cloned
 }
 
 func cloneBookSnapshotPayload(payload BookSnapshotPayload) BookSnapshotPayload {
@@ -117,14 +98,6 @@ func cloneInterface(value any) any {
 		return cloneMapStringAny(v)
 	case []any:
 		return cloneSliceAny(v)
-	case BookUpdatePayload:
-		return cloneBookUpdatePayload(v)
-	case *BookUpdatePayload:
-		if v == nil {
-			return nil
-		}
-		cloned := cloneBookUpdatePayload(*v)
-		return &cloned
 	case BookSnapshotPayload:
 		return cloneBookSnapshotPayload(v)
 	case *BookSnapshotPayload:

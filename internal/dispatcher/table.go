@@ -13,6 +13,7 @@ import (
 
 // Route captures dispatcher routing metadata for a canonical type.
 type Route struct {
+	Provider string
 	Type     schema.CanonicalType
 	WSTopics []string
 	RestFns  []RestFn
@@ -37,14 +38,27 @@ type FilterRule struct {
 // Table stores canonical routes keyed by type.
 type Table struct {
 	mu      sync.RWMutex
-	routes  map[schema.CanonicalType]Route
+	routes  map[RouteKey]Route
 	version atomic.Int64
+}
+
+// RouteKey uniquely identifies a route dimension for a provider and canonical type.
+type RouteKey struct {
+	Provider string
+	Type     schema.CanonicalType
+}
+
+func (k RouteKey) normalize() RouteKey {
+	return RouteKey{
+		Provider: strings.TrimSpace(strings.ToLower(k.Provider)),
+		Type:     k.Type,
+	}
 }
 
 // NewTable constructs an empty dispatch table.
 func NewTable() *Table {
 	table := new(Table)
-	table.routes = make(map[schema.CanonicalType]Route)
+	table.routes = make(map[RouteKey]Route)
 	return table
 }
 
@@ -52,6 +66,10 @@ func NewTable() *Table {
 func (t *Table) Upsert(route Route) error {
 	if err := route.Type.Validate(); err != nil {
 		return fmt.Errorf("validate route type: %w", err)
+	}
+	route.Provider = strings.TrimSpace(route.Provider)
+	if route.Provider == "" {
+		return fmt.Errorf("provider required")
 	}
 	for _, fn := range route.RestFns {
 		if err := validateRestFn(fn); err != nil {
@@ -64,32 +82,36 @@ func (t *Table) Upsert(route Route) error {
 		}
 	}
 
+	key := RouteKey{Provider: route.Provider, Type: route.Type}.normalize()
+
 	t.mu.Lock()
-	t.routes[route.Type] = route
+	t.routes[key] = route
 	t.mu.Unlock()
 	return nil
 }
 
 // Remove deletes the route if present.
-func (t *Table) Remove(typ schema.CanonicalType) {
+func (t *Table) Remove(provider string, typ schema.CanonicalType) {
+	key := RouteKey{Provider: provider, Type: typ}.normalize()
 	t.mu.Lock()
-	delete(t.routes, typ)
+	delete(t.routes, key)
 	t.mu.Unlock()
 }
 
 // Lookup returns the route if present.
-func (t *Table) Lookup(typ schema.CanonicalType) (Route, bool) {
+func (t *Table) Lookup(provider string, typ schema.CanonicalType) (Route, bool) {
+	key := RouteKey{Provider: provider, Type: typ}.normalize()
 	t.mu.RLock()
-	route, ok := t.routes[typ]
+	route, ok := t.routes[key]
 	t.mu.RUnlock()
 	return route, ok
 }
 
-// Routes returns a shallow copy of all routes.
-func (t *Table) Routes() map[schema.CanonicalType]Route {
+// Routes returns a shallow copy of all routes keyed by provider+type.
+func (t *Table) Routes() map[RouteKey]Route {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	out := make(map[schema.CanonicalType]Route, len(t.routes))
+	out := make(map[RouteKey]Route, len(t.routes))
 	for k, v := range t.routes {
 		out[k] = v
 	}
@@ -104,6 +126,11 @@ func (t *Table) SetVersion(version int64) {
 // Version returns the current routing table version.
 func (t *Table) Version() int64 {
 	return t.version.Load()
+}
+
+// NextVersion increments and returns the routing version.
+func (t *Table) NextVersion() int64 {
+	return t.version.Add(1)
 }
 
 // Match reports whether the route accepts the provided raw instance.

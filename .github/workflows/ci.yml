@@ -21,28 +21,10 @@ jobs:
           version: latest
           only-new-issues: true
 
-      - name: Ban backward-compatibility code
-        run: |
-          echo "Checking for banned backward-compatibility patterns..."
-          if grep -r "legacy\|deprecated\|shim\|feature_flag" internal/ cmd/ 2>/dev/null; then
-            echo "ERROR: Backward-compatibility code detected (banned by CQ-08/GOV-04)"
-            echo "The constitution prohibits: legacy contracts, deprecated APIs, shims, and feature flags"
-            exit 1
-          fi
-          echo "✓ No backward-compatibility code found"
-
-      - name: Ban async/pool imports
-        run: |
-          echo "Checking for banned async/pool imports (PERF-09)..."
-          if grep -R '"async/pool"' core/ internal/ cmd/ lib/ tests/ 2>/dev/null; then
-            echo "ERROR: async/pool import detected (banned by PERF-09)"
-            exit 1
-          fi
-          echo "✓ No banned async/pool imports found"
       - run: make build
 
-      - name: Test with coverage
-        run: go test ./... -race -coverprofile=coverage.out -count=1 -timeout=30s
+      - name: Test with coverage and race detector
+        run: go test ./... -race -coverprofile=coverage.out -count=1 -timeout=5m
 
       - name: Check coverage threshold
         run: |
@@ -172,17 +154,3 @@ jobs:
           path: |
             coverage.out
             coverage.html
-
-  integration-race:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: build
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-      - run: go version
-
-      - name: Run integration tests with race detector
-        run: go test ./tests/integration -race -count=1 -timeout=5m

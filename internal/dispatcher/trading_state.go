@@ -13,6 +13,7 @@ type TradingState struct {
 
 // NewTradingState constructs an empty trading state store.
 func NewTradingState() *TradingState {
+	//nolint:exhaustruct // zero value for mu is intentional
 	return &TradingState{
 		flags: make(map[string]bool),
 	}

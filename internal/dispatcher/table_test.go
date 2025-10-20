@@ -9,11 +9,11 @@ import (
 
 func TestNewTable(t *testing.T) {
 	table := NewTable()
-	
+
 	if table == nil {
 		t.Fatal("expected non-nil table")
 	}
-	
+
 	routes := table.Routes()
 	if len(routes) != 0 {
 		t.Error("expected empty table")
@@ -22,23 +22,24 @@ func TestNewTable(t *testing.T) {
 
 func TestTableUpsert(t *testing.T) {
 	table := NewTable()
-	
+
 	route := Route{
+		Provider: "fake",
 		Type:     "TICKER",
 		WSTopics: []string{"ticker@btcusd"},
 		Filters:  []FilterRule{{Field: "instrument", Op: "eq", Value: "BTC-USD"}},
 	}
-	
+
 	err := table.Upsert(route)
 	if err != nil {
 		t.Fatalf("Upsert() error = %v", err)
 	}
-	
-	retrieved, ok := table.Lookup("TICKER")
+
+	retrieved, ok := table.Lookup("fake", "TICKER")
 	if !ok {
 		t.Fatal("expected to find route")
 	}
-	
+
 	if retrieved.Type != route.Type {
 		t.Errorf("expected type %s, got %s", route.Type, retrieved.Type)
 	}
@@ -46,11 +47,12 @@ func TestTableUpsert(t *testing.T) {
 
 func TestTableUpsertInvalidType(t *testing.T) {
 	table := NewTable()
-	
+
 	route := Route{
-		Type: "", // Invalid
+		Provider: "fake",
+		Type:     "", // Invalid
 	}
-	
+
 	err := table.Upsert(route)
 	if err == nil {
 		t.Error("expected error for invalid type")
@@ -59,16 +61,17 @@ func TestTableUpsertInvalidType(t *testing.T) {
 
 func TestTableRemove(t *testing.T) {
 	table := NewTable()
-	
+
 	route := Route{
-		Type: "TICKER",
+		Provider: "fake",
+		Type:     "TICKER",
 	}
-	
+
 	_ = table.Upsert(route)
-	
-	table.Remove("TICKER")
-	
-	_, ok := table.Lookup("TICKER")
+
+	table.Remove("fake", "TICKER")
+
+	_, ok := table.Lookup("fake", "TICKER")
 	if ok {
 		t.Error("expected route to be removed")
 	}
@@ -76,8 +79,8 @@ func TestTableRemove(t *testing.T) {
 
 func TestTableLookup(t *testing.T) {
 	table := NewTable()
-	
-	_, ok := table.Lookup("NONEXISTENT")
+
+	_, ok := table.Lookup("fake", "NONEXISTENT")
 	if ok {
 		t.Error("expected lookup to fail for nonexistent route")
 	}
@@ -85,13 +88,13 @@ func TestTableLookup(t *testing.T) {
 
 func TestTableVersion(t *testing.T) {
 	table := NewTable()
-	
+
 	if table.Version() != 0 {
 		t.Error("expected initial version to be 0")
 	}
-	
+
 	table.SetVersion(5)
-	
+
 	if table.Version() != 5 {
 		t.Errorf("expected version 5, got %d", table.Version())
 	}
@@ -99,15 +102,15 @@ func TestTableVersion(t *testing.T) {
 
 func TestTableRoutes(t *testing.T) {
 	table := NewTable()
-	
-	route1 := Route{Type: "TICKER"}
-	route2 := Route{Type: "TRADE"}
-	
+
+	route1 := Route{Provider: "fake", Type: "TICKER"}
+	route2 := Route{Provider: "binance", Type: "TRADE"}
+
 	_ = table.Upsert(route1)
 	_ = table.Upsert(route2)
-	
+
 	routes := table.Routes()
-	
+
 	if len(routes) != 2 {
 		t.Errorf("expected 2 routes, got %d", len(routes))
 	}
@@ -120,15 +123,15 @@ func TestRouteMatch(t *testing.T) {
 			{Field: "instrument", Op: "eq", Value: "BTC-USD"},
 		},
 	}
-	
+
 	raw := schema.RawInstance{
 		"instrument": "BTC-USD",
 	}
-	
+
 	if !route.Match(raw) {
 		t.Error("expected route to match")
 	}
-	
+
 	raw["instrument"] = "ETH-USD"
 	if route.Match(raw) {
 		t.Error("expected route not to match")
@@ -157,7 +160,7 @@ func TestFilterRuleValidate(t *testing.T) {
 			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.rule.Validate()
@@ -206,7 +209,7 @@ func TestFilterRuleMatch(t *testing.T) {
 			match: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.rule.Match(tt.raw); got != tt.match {
@@ -218,7 +221,7 @@ func TestFilterRuleMatch(t *testing.T) {
 
 func TestRestFnValidation(t *testing.T) {
 	table := NewTable()
-	
+
 	route := Route{
 		Type: "TICKER",
 		RestFns: []RestFn{
@@ -229,19 +232,19 @@ func TestRestFnValidation(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err := table.Upsert(route)
 	if err == nil {
 		t.Error("expected error for empty REST function name")
 	}
-	
+
 	route.RestFns[0].Name = "ticker"
 	route.RestFns[0].Endpoint = ""
 	err = table.Upsert(route)
 	if err == nil {
 		t.Error("expected error for empty endpoint")
 	}
-	
+
 	route.RestFns[0].Endpoint = "https://api.example.com/ticker"
 	route.RestFns[0].Interval = 0
 	err = table.Upsert(route)

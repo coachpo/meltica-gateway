@@ -19,7 +19,7 @@ func (f *WsFrame) Reset() {
 	f.ConnID = ""
 	f.ReceivedAt = 0
 	f.MessageType = 0
-	f.Data = nil
+	f.Data = f.Data[:0] // Preserve capacity, reset length
 	f.returned = false
 }
 

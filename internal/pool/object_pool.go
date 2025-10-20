@@ -18,16 +18,20 @@ var (
 // objectPool manages a bounded set of reusable objects by handing each request
 // off to a long-lived worker goroutine. Each worker owns exactly one object at
 // a time, ensuring the pool never lends out more than its capacity.
+//
+// activeLeases tracks the number of objects currently borrowed (delivered to callers
+// but not yet returned), enabling real-time availability and utilization metrics.
 type objectPool struct {
-	name      string
-	factory   func() PooledObject
-	requests  chan *poolRequest
-	stop      chan struct{}
-	leases    sync.Map // map[uintptr]*lease
-	workers   *concpool.Pool
-	closed    atomic.Bool
-	capacity  int
-	waitGroup sync.WaitGroup
+	name         string
+	objectType   string
+	factory      func() PooledObject
+	requests     chan *poolRequest
+	stop         chan struct{}
+	leases       sync.Map // map[uintptr]*lease
+	workers      *concpool.Pool
+	closed       atomic.Bool
+	capacity     int
+	activeLeases atomic.Int64
 }
 
 type poolRequest struct {
@@ -50,31 +54,30 @@ func newPoolRequest(ctx context.Context) *poolRequest {
 	}
 }
 
-func newObjectPool(name string, capacity int, factory func() PooledObject) (*objectPool, error) {
+func newObjectPool(name string, objectType string, capacity int, factory func() PooledObject) (*objectPool, error) {
 	if capacity <= 0 {
 		return nil, fmt.Errorf("pool %s: capacity must be positive", name)
 	}
 	if factory == nil {
 		return nil, fmt.Errorf("pool %s: factory required", name)
 	}
+	//nolint:exhaustruct // zero values for leases and closed are intentional
 	op := &objectPool{
-		name:     name,
-		factory:  factory,
-		requests: make(chan *poolRequest),
-		stop:     make(chan struct{}),
-		capacity: capacity,
-		workers:  concpool.New().WithMaxGoroutines(capacity),
+		name:       name,
+		objectType: objectType,
+		factory:    factory,
+		requests:   make(chan *poolRequest),
+		stop:       make(chan struct{}),
+		capacity:   capacity,
+		workers:    concpool.New().WithMaxGoroutines(capacity),
 	}
 	for i := 0; i < capacity; i++ {
-		op.waitGroup.Add(1)
 		op.workers.Go(op.worker)
 	}
 	return op, nil
 }
 
 func (op *objectPool) worker() {
-	defer op.waitGroup.Done()
-
 	obj := op.factory()
 	if obj == nil {
 		panic(fmt.Sprintf("pool %s: factory returned nil object", op.name))
@@ -129,7 +132,7 @@ func (op *objectPool) deliver(req *poolRequest, obj PooledObject) bool {
 		case <-req.ctx.Done():
 			return false
 		case req.result <- obj:
-			obj.SetReturned(false)
+			op.activeLeases.Add(1)
 			return true
 		}
 	}
@@ -163,6 +166,7 @@ func (op *objectPool) waitForReturn(l *lease) (PooledObject, bool) {
 			if !ok {
 				return nil, false
 			}
+			op.activeLeases.Add(-1)
 			return returned, true
 		}
 	}
@@ -179,7 +183,7 @@ func (op *objectPool) get(ctx context.Context) (PooledObject, error) {
 		return nil, errPoolClosed
 	case op.requests <- req:
 	case <-req.ctx.Done():
-		return nil, req.ctx.Err()
+		return nil, fmt.Errorf("request context cancelled: %w", req.ctx.Err())
 	}
 
 	select {
@@ -188,7 +192,7 @@ func (op *objectPool) get(ctx context.Context) (PooledObject, error) {
 	case obj := <-req.result:
 		return obj, nil
 	case <-req.ctx.Done():
-		return nil, req.ctx.Err()
+		return nil, fmt.Errorf("result wait context cancelled: %w", req.ctx.Err())
 	}
 }
 
@@ -277,7 +281,23 @@ func (op *objectPool) close() {
 		return true
 	})
 	op.workers.Wait()
-	op.waitGroup.Wait()
+}
+
+func (op *objectPool) getCapacity() int {
+	return op.capacity
+}
+
+func (op *objectPool) getAvailable() int64 {
+	active := op.activeLeases.Load()
+	available := int64(op.capacity) - active
+	if available < 0 {
+		available = 0
+	}
+	return available
+}
+
+func (op *objectPool) getObjectType() string {
+	return op.objectType
 }
 
 func pointerKey(obj PooledObject) uintptr {

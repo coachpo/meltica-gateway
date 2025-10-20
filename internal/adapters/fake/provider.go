@@ -1,3 +1,4 @@
+// Package fake provides a synthetic market data provider for testing and development.
 package fake
 
 import (
@@ -20,27 +21,34 @@ import (
 )
 
 // DefaultInstruments lists canonical instruments used when no explicit filters are provided.
-var DefaultInstruments = []string{"BTC-USDT", "ETH-USDT"}
+var DefaultInstruments = []string{
+	"BTC-USDT",
+	"ETH-USDT",
+	"XRP-USDT",
+	"SOL-USDT",
+	"ADA-USDT",
+	"DOGE-USDT",
+	"BNB-USDT",
+	"LTC-USDT",
+	"DOT-USDT",
+	"AVAX-USDT",
+}
 
 // Options configures the fake provider runtime.
 type Options struct {
 	Name                 string
-	Instruments          []string
 	TickerInterval       time.Duration
 	TradeInterval        time.Duration
 	BookSnapshotInterval time.Duration
-	BookUpdateInterval   time.Duration
 	Pools                *pool.PoolManager
 }
 
 // Provider emits synthetic market data covering tickers, trades, and order book events.
 type Provider struct {
 	name                 string
-	instruments          []string
 	tickerInterval       time.Duration
 	tradeInterval        time.Duration
 	bookSnapshotInterval time.Duration
-	bookUpdateInterval   time.Duration
 
 	events chan *schema.Event
 	errs   chan error
@@ -61,9 +69,6 @@ type Provider struct {
 
 	stateMu sync.Mutex
 	state   map[string]*instrumentState
-
-	orderMu sync.RWMutex
-	reports map[string]schema.ExecReport
 
 	clock func() time.Time
 }
@@ -95,10 +100,6 @@ func NewProvider(opts Options) *Provider {
 	if name == "" {
 		name = "fake"
 	}
-	instruments := normaliseInstruments(opts.Instruments)
-	if len(instruments) == 0 {
-		instruments = normaliseInstruments(DefaultInstruments)
-	}
 	tickerInterval := opts.TickerInterval
 	if tickerInterval <= 0 {
 		tickerInterval = time.Second
@@ -111,25 +112,19 @@ func NewProvider(opts Options) *Provider {
 	if bookSnapshotInterval <= 0 {
 		bookSnapshotInterval = 5 * time.Second
 	}
-	bookUpdateInterval := opts.BookUpdateInterval
-	if bookUpdateInterval <= 0 {
-		bookUpdateInterval = 700 * time.Millisecond
-	}
 
+	//nolint:exhaustruct // zero values for ctx, cancel, started, mu, etc. are intentional
 	p := &Provider{
 		name:                 name,
-		instruments:          instruments,
 		tickerInterval:       tickerInterval,
 		tradeInterval:        tradeInterval,
 		bookSnapshotInterval: bookSnapshotInterval,
-		bookUpdateInterval:   bookUpdateInterval,
 		events:               make(chan *schema.Event, 128),
 		errs:                 make(chan error, 8),
 		orders:               make(chan schema.OrderRequest, 64),
 		routes:               make(map[schema.CanonicalType]*routeHandle),
 		seq:                  make(map[string]uint64),
 		state:                make(map[string]*instrumentState),
-		reports:              make(map[string]schema.ExecReport),
 		clock:                time.Now,
 		pools:                opts.Pools,
 	}
@@ -161,6 +156,10 @@ func (p *Provider) Start(ctx context.Context) error {
 	return nil
 }
 
+func (p *Provider) Name() string {
+	return p.name
+}
+
 // Events returns the canonical event stream.
 func (p *Provider) Events() <-chan *schema.Event {
 	return p.events
@@ -187,21 +186,6 @@ func (p *Provider) SubmitOrder(ctx context.Context, req schema.OrderRequest) err
 	case p.orders <- req:
 		return nil
 	}
-}
-
-// QueryOrder returns the stored execution report, if any.
-func (p *Provider) QueryOrder(_ context.Context, provider, clientOrderID string) (schema.ExecReport, bool, error) {
-	if strings.TrimSpace(provider) == "" {
-		provider = p.name
-	}
-	key := orderKey(provider, clientOrderID)
-	p.orderMu.RLock()
-	report, ok := p.reports[key]
-	p.orderMu.RUnlock()
-	if !ok {
-		return schema.ExecReport{}, false, nil
-	}
-	return report, true, nil
 }
 
 // SubscribeRoute activates a dispatcher route.
@@ -248,11 +232,9 @@ func (p *Provider) UnsubscribeRoute(typ schema.CanonicalType) error {
 
 func (p *Provider) startRouteLocked(route dispatcher.Route, evtType schema.EventType) *routeHandle {
 	routeCtx, cancel := context.WithCancel(p.ctx)
+	//nolint:exhaustruct // zero value for wg is intentional
 	handle := &routeHandle{cancel: cancel}
 	instruments := instrumentsFromRoute(route)
-	if len(instruments) == 0 {
-		instruments = append([]string(nil), p.instruments...)
-	}
 	if len(instruments) == 0 {
 		instruments = normaliseInstruments(DefaultInstruments)
 	}
@@ -270,8 +252,8 @@ func (p *Provider) runGenerator(ctx context.Context, evtType schema.EventType, i
 		p.streamTrades(ctx, instruments)
 	case schema.EventTypeBookSnapshot:
 		p.streamBookSnapshots(ctx, instruments)
-	case schema.EventTypeBookUpdate:
-		p.streamBookUpdates(ctx, instruments)
+	case schema.EventTypeExecReport, schema.EventTypeKlineSummary, schema.EventTypeControlAck, schema.EventTypeControlResult:
+		<-ctx.Done()
 	default:
 		<-ctx.Done()
 	}
@@ -321,37 +303,9 @@ func (p *Provider) streamBookSnapshots(ctx context.Context, instruments []string
 	}
 }
 
-func (p *Provider) streamBookUpdates(ctx context.Context, instruments []string) {
-	ticker := time.NewTicker(p.bookUpdateInterval)
-	defer ticker.Stop()
-	for {
-		for _, inst := range instruments {
-			p.ensureSnapshot(inst)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			for _, inst := range instruments {
-				p.emitBookUpdate(inst)
-			}
-		}
-	}
-}
-
 func (p *Provider) emitSnapshots(instruments []string) {
 	for _, inst := range instruments {
 		p.emitBookSnapshot(inst)
-	}
-}
-
-func (p *Provider) ensureSnapshot(instrument string) {
-	state := p.getInstrumentState(instrument)
-	state.mu.Lock()
-	ready := state.hasSnapshot
-	state.mu.Unlock()
-	if !ready {
-		p.emitBookSnapshot(instrument)
 	}
 }
 
@@ -418,6 +372,7 @@ func (p *Provider) emitBookSnapshot(instrument string) {
 	state.hasSnapshot = true
 	checksum := checksum(instrument, schema.EventTypeBookSnapshot, seq)
 	state.mu.Unlock()
+	//nolint:exhaustruct // FirstUpdateID and FinalUpdateID not used by fake provider
 	payload := schema.BookSnapshotPayload{
 		Bids:       levelsBids,
 		Asks:       levelsAsks,
@@ -425,29 +380,6 @@ func (p *Provider) emitBookSnapshot(instrument string) {
 		LastUpdate: ts,
 	}
 	evt := p.newEvent(schema.EventTypeBookSnapshot, instrument, seq, payload, ts)
-	if evt == nil {
-		return
-	}
-	p.emitEvent(evt)
-}
-
-func (p *Provider) emitBookUpdate(instrument string) {
-	state := p.getInstrumentState(instrument)
-	ts := p.clock().UTC()
-	seq := p.nextSeq(schema.EventTypeBookUpdate, instrument)
-	state.mu.Lock()
-	state.bumpOrderBook(seq)
-	bidChanges := toPriceLevels(state.bids[:3])
-	askChanges := toPriceLevels(state.asks[:3])
-	checksum := checksum(instrument, schema.EventTypeBookUpdate, seq)
-	state.mu.Unlock()
-	payload := schema.BookUpdatePayload{
-		UpdateType: schema.BookUpdateTypeDelta,
-		Bids:       bidChanges,
-		Asks:       askChanges,
-		Checksum:   checksum,
-	}
-	evt := p.newEvent(schema.EventTypeBookUpdate, instrument, seq, payload, ts)
 	if evt == nil {
 		return
 	}
@@ -483,7 +415,7 @@ func (p *Provider) borrowEvent(ctx context.Context) *schema.Event {
 	if requestCtx == nil {
 		requestCtx = context.Background()
 	}
-	evt, err := p.pools.BorrowCanonicalEvent(requestCtx)
+	evt, err := p.pools.BorrowEventInst(requestCtx)
 	if err != nil {
 		log.Printf("fake provider %s: borrow canonical event failed: %v", p.name, err)
 		p.emitError(fmt.Errorf("borrow canonical event: %w", err))
@@ -537,27 +469,15 @@ func (p *Provider) consumeOrders(ctx context.Context) {
 
 func (p *Provider) handleOrder(order schema.OrderRequest) {
 	if strings.TrimSpace(order.Symbol) == "" {
-		order.Symbol = p.instruments[0]
+		order.Symbol = DefaultInstruments[0]
 	}
 	if order.Timestamp.IsZero() {
 		order.Timestamp = p.clock().UTC()
 	}
-	key := orderKey(order.Provider, order.ClientOrderID)
-	report := schema.ExecReport{
-		ClientOrderID: order.ClientOrderID,
-		Provider:      order.Provider,
-		Symbol:        normalizeInstrument(order.Symbol),
-		Status:        schema.ExecReportStateACK,
-		TransactTime:  p.clock().UTC().UnixNano(),
-		TraceID:       order.ClientOrderID,
-		DecisionID:    order.ConsumerID,
-	}
-	p.orderMu.Lock()
-	p.reports[key] = report
-	p.orderMu.Unlock()
 
 	seq := p.nextSeq(schema.EventTypeExecReport, order.Symbol)
 	ts := p.clock().UTC()
+	//nolint:exhaustruct // zero value for RejectReason is intentional
 	payload := schema.ExecReportPayload{
 		ClientOrderID:   order.ClientOrderID,
 		ExchangeOrderID: order.ClientOrderID,
@@ -616,6 +536,7 @@ func (p *Provider) getInstrumentState(instrument string) *instrumentState {
 }
 
 func newInstrumentState(symbol string, basePrice float64) *instrumentState {
+	//nolint:exhaustruct // zero values for mu, bids, asks, hasSnapshot are intentional
 	state := &instrumentState{
 		instrument: symbol,
 		basePrice:  basePrice,
@@ -634,29 +555,6 @@ func (s *instrumentState) reseedOrderBook() {
 		delta := float64(i+1) * 0.5
 		s.bids[i] = bookLevel{price: s.lastPrice - delta, quantity: 1.5 + 0.1*float64(i)}
 		s.asks[i] = bookLevel{price: s.lastPrice + delta, quantity: 1.2 + 0.1*float64(i)}
-	}
-}
-
-func (s *instrumentState) bumpOrderBook(seq uint64) {
-	if len(s.bids) == 0 || len(s.asks) == 0 {
-		s.reseedOrderBook()
-	}
-	amplitude := 0.2 * math.Sin(float64(seq%10))
-	if len(s.bids) > 0 {
-		s.bids[0].price = max(s.lastPrice-0.3, s.basePrice*0.5)
-		s.bids[0].quantity = 1.0 + 0.2*math.Abs(amplitude)
-	}
-	if len(s.asks) > 0 {
-		s.asks[0].price = s.lastPrice + 0.3
-		s.asks[0].quantity = 1.0 + 0.2*math.Abs(amplitude)
-	}
-	for i := 1; i < len(s.bids); i++ {
-		step := float64(i) * 0.05
-		s.bids[i].quantity = s.bids[i].quantity * (1 + step*0.1)
-	}
-	for i := 1; i < len(s.asks); i++ {
-		step := float64(i) * 0.04
-		s.asks[i].quantity = s.asks[i].quantity * (1 + step*0.1)
 	}
 }
 
@@ -752,10 +650,8 @@ func collectInstrumentValues(value any, set map[string]struct{}) {
 
 func canonicalToEventType(c schema.CanonicalType) (schema.EventType, bool) {
 	switch c {
-	case schema.CanonicalType("ORDERBOOK.SNAPSHOT"):
+	case schema.CanonicalType("ORDERBOOK.SNAPSHOT"), schema.CanonicalType("ORDERBOOK.DELTA"), schema.CanonicalType("ORDERBOOK.UPDATE"):
 		return schema.EventTypeBookSnapshot, true
-	case schema.CanonicalType("ORDERBOOK.DELTA"), schema.CanonicalType("ORDERBOOK.UPDATE"):
-		return schema.EventTypeBookUpdate, true
 	case schema.CanonicalType("TRADE"):
 		return schema.EventTypeTrade, true
 	case schema.CanonicalType("TICKER"):
@@ -784,20 +680,9 @@ func formatQuantity(value float64) string {
 	return fmt.Sprintf("%.4f", value)
 }
 
-func orderKey(provider, clientOrderID string) string {
-	return fmt.Sprintf("%s:%s", strings.ToLower(strings.TrimSpace(provider)), strings.TrimSpace(clientOrderID))
-}
-
 func stringOrDefault(value *string) string {
 	if value == nil {
 		return ""
 	}
 	return *value
-}
-
-func max(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }

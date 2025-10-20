@@ -4,6 +4,7 @@ coverage/
 # files, developer configurations or IDE-specific files etc.
 #
 # Recommended: Go.AllowList.gitignore
+.DS_Store
 
 # Ignore everything
 *
@@ -23,6 +24,7 @@ coverage/
 !README.md
 !LICENSE
 !*.puml
+!docs/**/*
 
 # Makefile
 !Makefile
@@ -46,3 +48,6 @@ coverage/
 # Ignore IDE directories
 .idea/
 .vscode/
+
+# Deployment
+!deployments/**/*

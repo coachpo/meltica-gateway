@@ -4,40 +4,68 @@ import (
 	"context"
 	"time"
 
-	"github.com/coachpo/meltica/internal/bus/databus"
-	"github.com/coachpo/meltica/internal/config"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/coachpo/meltica/internal/bus/eventbus"
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/schema"
+	"github.com/coachpo/meltica/internal/telemetry"
 )
 
 // Runtime coordinates dispatcher ingestion and delivery.
 type Runtime struct {
-	bus            databus.Bus
+	bus            eventbus.Bus
 	table          *Table
 	pools          *pool.PoolManager
-	cfg            config.DispatcherRuntimeConfig
-	ordering       *StreamOrdering
 	clock          func() time.Time
 	dedupe         map[string]time.Time
 	dedupeWindow   time.Duration
 	dedupeCapacity int
+
+	eventsIngestedCounter  metric.Int64Counter
+	eventsDroppedCounter   metric.Int64Counter
+	eventsDuplicateCounter metric.Int64Counter
+	processingDuration     metric.Float64Histogram
+	routingVersionGauge    metric.Int64ObservableGauge
 }
 
 // NewRuntime constructs a dispatcher runtime instance.
-func NewRuntime(bus databus.Bus, table *Table, pools *pool.PoolManager, cfg config.DispatcherRuntimeConfig, metrics interface{}) *Runtime {
-	// metrics parameter is ignored - observability removed
+func NewRuntime(bus eventbus.Bus, table *Table, pools *pool.PoolManager) *Runtime {
 	clock := time.Now
-	ordering := NewStreamOrdering(cfg.StreamOrdering, clock)
 	runtime := new(Runtime)
 	runtime.bus = bus
 	runtime.table = table
 	runtime.pools = pools
-	runtime.cfg = cfg
-	runtime.ordering = ordering
 	runtime.clock = clock
 	runtime.dedupe = make(map[string]time.Time, 1024)
 	runtime.dedupeWindow = 5 * time.Minute
 	runtime.dedupeCapacity = 8192
+
+	meter := otel.Meter("dispatcher")
+	runtime.eventsIngestedCounter, _ = meter.Int64Counter("dispatcher.events.ingested",
+		metric.WithDescription("Number of events ingested by dispatcher"),
+		metric.WithUnit("{event}"))
+	runtime.eventsDroppedCounter, _ = meter.Int64Counter("dispatcher.events.dropped",
+		metric.WithDescription("Number of events dropped"),
+		metric.WithUnit("{event}"))
+	runtime.eventsDuplicateCounter, _ = meter.Int64Counter("dispatcher.events.duplicate",
+		metric.WithDescription("Number of duplicate events detected"),
+		metric.WithUnit("{event}"))
+	runtime.processingDuration, _ = meter.Float64Histogram("dispatcher.processing.duration",
+		metric.WithDescription("Event processing duration"),
+		metric.WithUnit("ms"))
+	runtime.routingVersionGauge, _ = meter.Int64ObservableGauge("dispatcher.routing.version",
+		metric.WithDescription("Current routing table version"),
+		metric.WithUnit("{version}"),
+		metric.WithInt64Callback(func(_ context.Context, observer metric.Int64Observer) error {
+			if runtime.table != nil {
+				observer.Observe(runtime.table.Version())
+			}
+			return nil
+		}))
+
 	return runtime
 }
 
@@ -49,15 +77,13 @@ func (r *Runtime) Start(ctx context.Context, events <-chan *schema.Event) <-chan
 }
 
 func (r *Runtime) run(ctx context.Context, events <-chan *schema.Event, errCh chan<- error) {
-	flushInterval := r.cfg.StreamOrdering.FlushInterval
-	if flushInterval <= 0 {
-		flushInterval = 50 * time.Millisecond
-	}
-	ticker := time.NewTicker(flushInterval)
-	defer ticker.Stop()
 	defer close(errCh)
 
 	publish := func(batch []*schema.Event) {
+		if len(batch) == 0 {
+			return
+		}
+
 		for i, evt := range batch {
 			if evt == nil {
 				batch[i] = nil
@@ -80,16 +106,25 @@ func (r *Runtime) run(ctx context.Context, events <-chan *schema.Event, errCh ch
 	for {
 		select {
 		case <-ctx.Done():
-			publish(r.ordering.Flush(r.clock()))
 			return
 		case evt, ok := <-events:
 			if !ok {
-				publish(r.ordering.Flush(r.clock()))
 				return
 			}
 			if evt == nil {
 				continue
 			}
+
+			start := r.clock()
+
+			if r.eventsIngestedCounter != nil {
+				r.eventsIngestedCounter.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("environment", telemetry.Environment()),
+					attribute.String("event_type", string(evt.Type)),
+					attribute.String("provider", evt.Provider),
+					attribute.String("symbol", evt.Symbol)))
+			}
+
 			if rv := r.currentRoutingVersion(); rv > 0 {
 				evt.RoutingVersion = rv
 			}
@@ -97,17 +132,31 @@ func (r *Runtime) run(ctx context.Context, events <-chan *schema.Event, errCh ch
 				evt.EmitTS = r.clock().UTC()
 			}
 			if !r.markSeen(evt.EventID) {
+				if r.eventsDuplicateCounter != nil {
+					r.eventsDuplicateCounter.Add(ctx, 1, metric.WithAttributes(
+						attribute.String("environment", telemetry.Environment()),
+						attribute.String("event_type", string(evt.Type)),
+						attribute.String("provider", evt.Provider),
+						attribute.String("symbol", evt.Symbol)))
+				}
 				r.releaseEvent(evt)
 				continue
 			}
-			ready, buffered := r.ordering.OnEvent(evt)
-			if !buffered {
-				r.releaseEvent(evt)
+			// Pass-through mode: Publish immediately without reordering
+			// BookAssembler already handles ordering for orderbook events
+			// Ticker/Trade events don't require strict ordering
+			ready := []*schema.Event{evt}
+
+			duration := r.clock().Sub(start).Milliseconds()
+			if r.processingDuration != nil {
+				r.processingDuration.Record(ctx, float64(duration), metric.WithAttributes(
+					attribute.String("environment", telemetry.Environment()),
+					attribute.String("event_type", string(evt.Type)),
+					attribute.String("provider", evt.Provider),
+					attribute.String("symbol", evt.Symbol)))
 			}
-			// metrics removed - observability package deleted
+
 			publish(ready)
-		case <-ticker.C:
-			publish(r.ordering.Flush(r.clock()))
 		}
 	}
 }
@@ -147,6 +196,6 @@ func (r *Runtime) currentRoutingVersion() int {
 
 func (r *Runtime) releaseEvent(evt *schema.Event) {
 	if r.pools != nil {
-		r.pools.RecycleCanonicalEvent(evt)
+		r.pools.ReturnEventInst(evt)
 	}
 }

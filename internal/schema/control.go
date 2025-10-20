@@ -16,12 +16,8 @@ const (
 	ControlMessageSubscribe ControlMessageType = "Subscribe"
 	// ControlMessageUnsubscribe requests subscription removal.
 	ControlMessageUnsubscribe ControlMessageType = "Unsubscribe"
-	// ControlMessageSubmitOrder requests order submission through a provider adapter.
-	ControlMessageSubmitOrder ControlMessageType = "SubmitOrder"
 	// ControlMessageSetTradingMode requests trading mode updates.
 	ControlMessageSetTradingMode ControlMessageType = "SetTradingMode"
-	// ControlMessageQueryOrder requests an order query.
-	ControlMessageQueryOrder ControlMessageType = "QueryOrder"
 )
 
 // ControlMessage is exchanged over the control bus to mutate routing or trading state.
@@ -53,29 +49,6 @@ type SubscribePayload struct {
 	Providers  []string `json:"providers"`
 	EventTypes []string `json:"event_types"`
 }
-
-
-
-// SubmitOrderPayload carries request data for outbound order submission.
-type SubmitOrderPayload struct {
-	ClientOrderID string    `json:"client_order_id"`
-	Provider      string    `json:"provider"`
-	Symbol        string    `json:"symbol"`
-	Side          TradeSide `json:"side"`
-	OrderType     OrderType `json:"order_type"`
-	Quantity      string    `json:"quantity"`
-	Price         *string   `json:"price,omitempty"`
-	Timestamp     time.Time `json:"timestamp"`
-}
-
-// QueryOrderPayload requests status for a submitted order.
-type QueryOrderPayload struct {
-	ClientOrderID string `json:"client_order_id"`
-	Provider      string `json:"provider"`
-	Symbol        string `json:"symbol"`
-}
-
-
 
 // TradingModePayload flips the trading switch for a consumer.
 type TradingModePayload struct {

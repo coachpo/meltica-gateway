@@ -1,0 +1,7 @@
+eventbus:
+  bufferSize: 1024
+telemetry:
+  otlpEndpoint: http://capy.lan:4318
+  serviceName: meltica-gateway
+  otlpInsecure: true
+  enableMetrics: true
