@@ -39,15 +39,21 @@ type FilterRuleConfig struct {
 	Value any    `yaml:"value"`
 }
 
-// EventbusConfig sets event bus buffer sizing.
+// EventbusConfig sets event bus buffer sizing and worker fanout.
 type EventbusConfig struct {
-	BufferSize int `yaml:"bufferSize"`
+	BufferSize    int `yaml:"bufferSize"`
+	FanoutWorkers int `yaml:"fanoutWorkers"`
 }
 
 // PoolConfig controls pooled object capacities.
 type PoolConfig struct {
 	EventSize        int `yaml:"eventSize"`
 	OrderRequestSize int `yaml:"orderRequestSize"`
+}
+
+// APIServerConfig configures the gateway's HTTP control surface.
+type APIServerConfig struct {
+	Addr string `yaml:"addr"`
 }
 
 // TelemetryConfig configures OTLP exporters (metrics only).
@@ -77,6 +83,7 @@ type AppConfig struct {
 	Dispatcher   DispatcherConfig
 	Eventbus     EventbusConfig
 	Pools        PoolConfig
+	APIServer    APIServerConfig
 	Telemetry    TelemetryConfig
 	ManifestPath string
 }
@@ -88,6 +95,7 @@ type appConfigYAML struct {
 	Dispatcher  DispatcherConfig                `yaml:"dispatcher"`
 	Eventbus    EventbusConfig                  `yaml:"eventbus"`
 	Pools       PoolConfig                      `yaml:"pools"`
+	APIServer   APIServerConfig                 `yaml:"apiServer"`
 	Telemetry   TelemetryConfig                 `yaml:"telemetry"`
 	Manifest    string                          `yaml:"manifest"`
 }
@@ -140,11 +148,15 @@ func defaultAppConfig() AppConfig {
 			Routes: make(map[string]RouteConfig),
 		},
 		Eventbus: EventbusConfig{
-			BufferSize: 1024,
+			BufferSize:    1024,
+			FanoutWorkers: 8,
 		},
 		Pools: PoolConfig{
 			EventSize:        20000,
 			OrderRequestSize: 5000,
+		},
+		APIServer: APIServerConfig{
+			Addr: ":8880",
 		},
 		Telemetry: TelemetryConfig{
 			OTLPEndpoint:  "http://localhost:4318",
@@ -256,6 +268,9 @@ func (c *AppConfig) loadYAML(ctx context.Context, path string) error {
 	// Merge dispatcher config
 	c.Dispatcher = yamlCfg.Dispatcher
 	c.Eventbus = yamlCfg.Eventbus
+	if strings.TrimSpace(yamlCfg.APIServer.Addr) != "" {
+		c.APIServer = yamlCfg.APIServer
+	}
 	if yamlCfg.Pools.EventSize != 0 || yamlCfg.Pools.OrderRequestSize != 0 {
 		c.Pools = yamlCfg.Pools
 	}
@@ -319,12 +334,19 @@ func (c *AppConfig) Validate(ctx context.Context) error {
 	if c.Eventbus.BufferSize <= 0 {
 		return fmt.Errorf("eventbus bufferSize must be >0")
 	}
+	if c.Eventbus.FanoutWorkers <= 0 {
+		c.Eventbus.FanoutWorkers = 8
+	}
 
 	if c.Pools.EventSize <= 0 {
 		return fmt.Errorf("pool eventSize must be >0")
 	}
 	if c.Pools.OrderRequestSize <= 0 {
 		return fmt.Errorf("pool orderRequestSize must be >0")
+	}
+
+	if strings.TrimSpace(c.APIServer.Addr) == "" {
+		c.APIServer.Addr = ":8880"
 	}
 
 	// Validate telemetry

@@ -74,7 +74,7 @@ func main() {
 	}
 	logger.Printf("strategy instances registered: %d", len(lambdaManager.Instances()))
 
-	apiServer := buildAPIServer(lambdaManager)
+	apiServer := buildAPIServer(appCfg.APIServer, lambdaManager)
 	startAPIServer(&lifecycle, logger, apiServer)
 	logger.Printf("control API listening on %s", apiServer.Addr)
 
@@ -151,7 +151,7 @@ func buildPoolManager(cfg config.PoolConfig) (*pool.PoolManager, error) {
 func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager) eventbus.Bus {
 	return eventbus.NewMemoryBus(eventbus.MemoryConfig{
 		BufferSize:    cfg.BufferSize,
-		FanoutWorkers: 8,
+		FanoutWorkers: cfg.FanoutWorkers,
 		Pools:         pools,
 	})
 }
@@ -199,7 +199,7 @@ func startLambdaManager(ctx context.Context, manifest config.RuntimeManifest, bu
 	return manager, nil
 }
 
-func buildAPIServer(lambdaManager *lambdaruntime.Manager) *http.Server {
+func buildAPIServer(cfg config.APIServerConfig, lambdaManager *lambdaruntime.Manager) *http.Server {
 	handler := lambdaruntime.NewHTTPHandler(lambdaManager)
 
 	mux := http.NewServeMux()
@@ -209,7 +209,7 @@ func buildAPIServer(lambdaManager *lambdaruntime.Manager) *http.Server {
 	mux.Handle("/strategy-instances/", handler)
 
 	return &http.Server{
-		Addr:                         ":8880",
+		Addr:                         cfg.Addr,
 		Handler:                      mux,
 		DisableGeneralOptionsHandler: false,
 		TLSConfig:                    nil,

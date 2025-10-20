@@ -1,8 +1,11 @@
 eventbus:
   bufferSize: 5000
+  fanoutWorkers: 8
 pools:
   eventSize: 25000
   orderRequestSize: 5000
+apiServer:
+  addr: ":8880"
 telemetry:
   otlpEndpoint: http://capy.lan:4318
   serviceName: meltica-gateway
