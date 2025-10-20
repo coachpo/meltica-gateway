@@ -3,7 +3,7 @@ package strategies
 import (
 	"context"
 	"crypto/rand"
-	"math"
+	"math/big"
 	"sync"
 	"time"
 
@@ -11,7 +11,17 @@ import (
 )
 
 // Delay simulates processing latency without performing any business logic.
-type Delay struct{}
+type Delay struct {
+	MinDelay time.Duration
+	MaxDelay time.Duration
+}
+
+const (
+	// DefaultMinDelay defines the default lower bound for random delay.
+	DefaultMinDelay = 100 * time.Millisecond
+	// DefaultMaxDelay defines the default upper bound for random delay.
+	DefaultMaxDelay = 500 * time.Millisecond
+)
 
 var (
 	delaySubscribedEvents = []schema.CanonicalType{
@@ -28,27 +38,54 @@ func (s *Delay) SubscribedEvents() []schema.CanonicalType {
 }
 
 func (s *Delay) sleep() {
+	min := s.MinDelay
+	max := s.MaxDelay
+	if min == 0 && max == 0 {
+		min = DefaultMinDelay
+		max = DefaultMaxDelay
+	}
+	if min < 0 {
+		min = 0
+	}
+	if max < 0 {
+		max = 0
+	}
+	if max < min {
+		max = min
+	}
+
 	delayRandMu.Lock()
 	defer delayRandMu.Unlock()
-	
-	// Generate cryptographically secure random delay between 100-500ms
-	randBytes := make([]byte, 8)
-	_, err := rand.Read(randBytes)
-	if err != nil {
-		// Fallback to fixed delay if crypto/rand fails
-		time.Sleep(300 * time.Millisecond)
+
+	delayRange := max - min
+	if delayRange <= 0 {
+		time.Sleep(min)
 		return
 	}
-	
-	// Convert bytes to int64
-	randInt := int64(0)
-	for i, b := range randBytes {
-		randInt |= int64(b) << (i * 8)
+
+	offset, err := randDuration(delayRange)
+	if err != nil {
+		// Fallback to midpoint delay if crypto/rand fails
+		time.Sleep(min + delayRange/2)
+		return
 	}
-	
-	// Use absolute value to avoid negative values and mod to get range
-	delay := time.Duration((int64(math.Abs(float64(randInt))) % 401) + 100) * time.Millisecond // 100-500ms
-	time.Sleep(delay)
+	time.Sleep(min + offset)
+}
+
+func randDuration(max time.Duration) (time.Duration, error) {
+	if max <= 0 {
+		return 0, nil
+	}
+	nanos := max.Nanoseconds()
+	if nanos <= 0 {
+		return 0, nil
+	}
+	limit := big.NewInt(nanos + 1)
+	value, err := rand.Int(rand.Reader, limit)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(value.Int64()), nil
 }
 
 // OnTrade handles trade events by adding a delay.

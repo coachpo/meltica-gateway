@@ -25,13 +25,13 @@ import (
 
 var (
 	// ErrInstanceExists is returned when attempting to create an instance that already exists.
-	ErrInstanceExists         = errors.New("strategy instance already exists")
+	ErrInstanceExists = errors.New("strategy instance already exists")
 	// ErrInstanceNotFound is returned when attempting to access an instance that doesn't exist.
-	ErrInstanceNotFound       = errors.New("strategy instance not found")
+	ErrInstanceNotFound = errors.New("strategy instance not found")
 	// ErrInstanceAlreadyRunning is returned when attempting to start an already running instance.
 	ErrInstanceAlreadyRunning = errors.New("strategy instance already running")
 	// ErrInstanceNotRunning is returned when attempting to stop an instance that isn't running.
-	ErrInstanceNotRunning     = errors.New("strategy instance not running")
+	ErrInstanceNotRunning = errors.New("strategy instance not running")
 )
 
 // StrategyFactory creates trading strategy instances from configuration.
@@ -143,12 +143,28 @@ func (m *Manager) registerDefaults() {
 		meta: StrategyMetadata{
 			Name:        "delay",
 			DisplayName: "Delay",
-			Description: "Simulates processing latency between 100-500ms without performing actions.",
-			Config:      []StrategyConfigField{},
-			Events:      []schema.CanonicalType{},
+			Description: "Simulates processing latency with a configurable random delay window.",
+			Config: []StrategyConfigField{
+				{Name: "min_delay", Type: "duration", Description: "Lower bound for the random delay interval", Default: "100ms", Required: false},
+				{Name: "max_delay", Type: "duration", Description: "Upper bound for the random delay interval", Default: "500ms", Required: false},
+			},
+			Events: []schema.CanonicalType{},
 		},
-		factory: func(_ map[string]any) (lambda.TradingStrategy, error) {
-			return &strategies.Delay{}, nil
+		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
+			minDelay := durationValue(cfg, "min_delay", strategies.DefaultMinDelay)
+			maxDelay := durationValue(cfg, "max_delay", strategies.DefaultMaxDelay)
+
+			if minDelay < 0 || maxDelay < 0 {
+				return nil, fmt.Errorf("delay: min_delay and max_delay must be non-negative")
+			}
+			if maxDelay < minDelay {
+				return nil, fmt.Errorf("delay: max_delay must be greater than or equal to min_delay")
+			}
+
+			return &strategies.Delay{
+				MinDelay: minDelay,
+				MaxDelay: maxDelay,
+			}, nil
 		},
 	})
 
@@ -220,7 +236,7 @@ func (m *Manager) registerDefaults() {
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
 			strat := &strategies.MeanReversion{
 				Lambda:             nil,
-				WindowSize:          0,
+				WindowSize:         0,
 				DeviationThreshold: 0,
 				OrderSize:          "",
 			}
