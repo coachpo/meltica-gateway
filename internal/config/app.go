@@ -12,9 +12,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// AdapterSet encapsulates adapter-specific configuration.
-type AdapterSet struct{}
-
 // DispatcherConfig manages route configuration.
 type DispatcherConfig struct {
 	Routes map[string]RouteConfig `yaml:"routes"`
@@ -309,7 +306,7 @@ func (c *AppConfig) Validate(ctx context.Context) error {
 		modified := false
 		for i := range route.RestFns {
 			if route.RestFns[i].Interval <= 0 {
-				route.RestFns[i].Interval = c.Adapters.Binance.BookRefreshInterval
+				route.RestFns[i].Interval = time.Minute
 				modified = true
 			}
 		}

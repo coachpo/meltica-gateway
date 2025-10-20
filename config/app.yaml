@@ -1,7 +1,7 @@
 eventbus:
   bufferSize: 5000
 pools:
-  eventSize: 20000
+  eventSize: 25000
   orderRequestSize: 5000
 telemetry:
   otlpEndpoint: http://capy.lan:4318
