@@ -8,7 +8,7 @@ The Meltica configuration system provides a single, unified entry point for all 
 
 ### Single Config Entry Point
 
-All configuration is managed through `AppConfig` in `app.go`:
+All configuration is managed through `AppConfig` in `app_config.go`:
 
 ```go
 cfg, err := config.Load(ctx, "config/app.yaml")
@@ -18,7 +18,7 @@ cfg, err := config.Load(ctx, "config/app.yaml")
 
 Settings are applied in order (later overrides earlier):
 
-1. **Code Defaults** (`app.go`)
+1. **Code Defaults** (`app_config.go`)
 2. **YAML File** (`app.yaml`)
 3. **Environment Variables**
 
@@ -140,12 +140,12 @@ telemetry := cfg.Telemetry
 3. **Type Safety**: Compile-time validation of config structure
 4. **Easier Testing**: Mock entire config or individual sections
 5. **Better Validation**: Validate all settings together in one pass
-6. **DRY Principle**: No duplication between `config.go` and `app.yaml`
+6. **DRY Principle**: No duplication between `exchange_settings.go` and `app.yaml`
 
 ## File Organization
 
-- `app.go` - Unified config structure, streaming types, and loading logic
-- `config.go` - Exchange settings types (reused by app.go)
+- `app_config.go` - Unified config structure, streaming types, and loading logic
+- `exchange_settings.go` - Exchange settings types (reused by app_config.go)
 - `app_test.go` - Tests for unified config loading
 - `config_test.go` - Tests for core exchange configuration helpers
 

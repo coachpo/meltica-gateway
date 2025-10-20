@@ -206,20 +206,7 @@ func (c *AppConfig) loadYAML(ctx context.Context, path string) error {
 		exchange := Exchange(normalizeExchangeName(name))
 		existing, ok := c.Exchanges[exchange]
 		if !ok {
-			existing = ExchangeSettings{
-				REST: make(map[string]string),
-				Websocket: WebsocketSettings{
-					PublicURL:  "",
-					PrivateURL: "",
-				},
-				Credentials: Credentials{
-					APIKey:    "",
-					APISecret: "",
-				},
-				HTTPTimeout:           0,
-				HandshakeTimeout:      0,
-				SymbolRefreshInterval: 0,
-			}
+			existing = NewExchangeSettings()
 		}
 
 		// Merge REST endpoints
