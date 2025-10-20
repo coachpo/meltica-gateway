@@ -25,6 +25,27 @@ import (
 	"github.com/sourcegraph/conc"
 )
 
+const (
+	defaultConfigPath            = "config/app.yaml"
+	gatewayLoggerPrefix          = "gateway "
+	eventPoolName                = "Event"
+	orderRequestPoolName         = "OrderRequest"
+	shutdownTimeout              = 30 * time.Second
+	controlServerShutdownTimeout = 5 * time.Second
+	lifecycleShutdownTimeout     = 10 * time.Second
+	dataBusShutdownTimeout       = 2 * time.Second
+	poolManagerShutdownTimeout   = 5 * time.Second
+	telemetryShutdownTimeout     = 5 * time.Second
+	controlReadHeaderTimeout     = 5 * time.Second
+)
+
+var controlAPIRoutes = [...]string{
+	"/strategies",
+	"/strategies/",
+	"/strategy-instances",
+	"/strategy-instances/",
+}
+
 func main() {
 	cfgPathFlag := parseFlags()
 	ctx, cancel := newSignalContext()
@@ -82,7 +103,7 @@ func main() {
 	<-ctx.Done()
 	logger.Print("shutdown signal received, initiating graceful shutdown")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	shutdownStart := time.Now()
@@ -99,7 +120,7 @@ func main() {
 }
 
 func parseFlags() string {
-	cfgPath := flag.String("config", "", "Path to application configuration file (default: config/app.yaml)")
+	cfgPath := flag.String("config", "", fmt.Sprintf("Path to application configuration file (default: %s)", defaultConfigPath))
 	flag.Parse()
 	return *cfgPath
 }
@@ -109,7 +130,7 @@ func newSignalContext() (context.Context, context.CancelFunc) {
 }
 
 func newGatewayLogger() *log.Logger {
-	return log.New(os.Stdout, "gateway ", log.LstdFlags|log.Lmicroseconds)
+	return log.New(os.Stdout, gatewayLoggerPrefix, log.LstdFlags|log.Lmicroseconds)
 }
 
 func initTelemetry(ctx context.Context, logger *log.Logger, appCfg config.AppConfig) (*telemetry.Provider, error) {
@@ -139,10 +160,10 @@ func initTelemetry(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 
 func buildPoolManager(cfg config.PoolConfig) (*pool.PoolManager, error) {
 	manager := pool.NewPoolManager()
-	if err := manager.RegisterPool("Event", cfg.EventSize, func() interface{} { return new(schema.Event) }); err != nil {
+	if err := manager.RegisterPool(eventPoolName, cfg.EventSize, func() interface{} { return new(schema.Event) }); err != nil {
 		return nil, fmt.Errorf("register Event pool: %w", err)
 	}
-	if err := manager.RegisterPool("OrderRequest", cfg.OrderRequestSize, func() interface{} { return new(schema.OrderRequest) }); err != nil {
+	if err := manager.RegisterPool(orderRequestPoolName, cfg.OrderRequestSize, func() interface{} { return new(schema.OrderRequest) }); err != nil {
 		return nil, fmt.Errorf("register OrderRequest pool: %w", err)
 	}
 	return manager, nil
@@ -203,10 +224,9 @@ func buildAPIServer(cfg config.APIServerConfig, lambdaManager *lambdaruntime.Man
 	handler := lambdaruntime.NewHTTPHandler(lambdaManager)
 
 	mux := http.NewServeMux()
-	mux.Handle("/strategies", handler)
-	mux.Handle("/strategies/", handler)
-	mux.Handle("/strategy-instances", handler)
-	mux.Handle("/strategy-instances/", handler)
+	for _, route := range controlAPIRoutes {
+		mux.Handle(route, handler)
+	}
 
 	return &http.Server{
 		Addr:                         cfg.Addr,
@@ -224,7 +244,7 @@ func buildAPIServer(cfg config.APIServerConfig, lambdaManager *lambdaruntime.Man
 		ConnContext:                  nil,
 		HTTP2:                        nil,
 		Protocols:                    nil,
-		ReadHeaderTimeout:            5 * time.Second,
+		ReadHeaderTimeout:            controlReadHeaderTimeout,
 	}
 }
 
@@ -258,7 +278,7 @@ func performGracefulShutdown(ctx context.Context, logger *log.Logger, cfg gracef
 	}
 
 	if cfg.server != nil {
-		shutdownStep("stopping control server", 5*time.Second, func(stepCtx context.Context) error {
+		shutdownStep("stopping control server", controlServerShutdownTimeout, func(stepCtx context.Context) error {
 			return cfg.server.Shutdown(stepCtx)
 		})
 	}
@@ -269,7 +289,7 @@ func performGracefulShutdown(ctx context.Context, logger *log.Logger, cfg gracef
 	}
 
 	if cfg.lifecycle != nil {
-		shutdownStep("waiting for lifecycle goroutines", 10*time.Second, func(stepCtx context.Context) error {
+		shutdownStep("waiting for lifecycle goroutines", lifecycleShutdownTimeout, func(stepCtx context.Context) error {
 			done := make(chan struct{})
 			go func() {
 				cfg.lifecycle.Wait()
@@ -285,7 +305,7 @@ func performGracefulShutdown(ctx context.Context, logger *log.Logger, cfg gracef
 	}
 
 	if cfg.dataBus != nil {
-		shutdownStep("closing data bus", 2*time.Second, func(stepCtx context.Context) error {
+		shutdownStep("closing data bus", dataBusShutdownTimeout, func(stepCtx context.Context) error {
 			done := make(chan struct{})
 			go func() {
 				cfg.dataBus.Close()
@@ -301,13 +321,13 @@ func performGracefulShutdown(ctx context.Context, logger *log.Logger, cfg gracef
 	}
 
 	if cfg.poolMgr != nil {
-		shutdownStep("shutting down pool manager", 5*time.Second, func(stepCtx context.Context) error {
+		shutdownStep("shutting down pool manager", poolManagerShutdownTimeout, func(stepCtx context.Context) error {
 			return cfg.poolMgr.Shutdown(stepCtx)
 		})
 	}
 
 	if cfg.telemetry != nil {
-		shutdownStep("shutting down telemetry", 5*time.Second, func(stepCtx context.Context) error {
+		shutdownStep("shutting down telemetry", telemetryShutdownTimeout, func(stepCtx context.Context) error {
 			return cfg.telemetry.Shutdown(stepCtx)
 		})
 	}
@@ -333,5 +353,5 @@ func resolveConfigPath(flagValue string) string {
 		return envPath
 	}
 
-	return filepath.Clean("config/app.yaml")
+	return filepath.Clean(defaultConfigPath)
 }
