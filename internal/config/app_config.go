@@ -78,52 +78,38 @@ type DispatcherRuntimeConfig struct {
 
 // AppConfig is the unified Meltica application configuration combining all concerns.
 type AppConfig struct {
-	Environment  Environment
-	Exchanges    map[Exchange]ExchangeSettings
-	Dispatcher   DispatcherConfig
-	Eventbus     EventbusConfig
-	Pools        PoolConfig
-	APIServer    APIServerConfig
-	Telemetry    TelemetryConfig
-	ManifestPath string
+	Environment  Environment                 `yaml:"environment"`
+	Exchanges    map[Exchange]map[string]any `yaml:"exchanges"`
+	Dispatcher   DispatcherConfig            `yaml:"dispatcher"`
+	Eventbus     EventbusConfig              `yaml:"eventbus"`
+	Pools        PoolConfig                  `yaml:"pools"`
+	APIServer    APIServerConfig             `yaml:"apiServer"`
+	Telemetry    TelemetryConfig             `yaml:"telemetry"`
+	ManifestPath string                      `yaml:"manifest"`
 }
 
-// appConfigYAML is the YAML representation that maps to AppConfig.
-type appConfigYAML struct {
-	Environment string                          `yaml:"environment"`
-	Exchanges   map[string]exchangeSettingsYAML `yaml:"exchanges"`
-	Dispatcher  DispatcherConfig                `yaml:"dispatcher"`
-	Eventbus    EventbusConfig                  `yaml:"eventbus"`
-	Pools       PoolConfig                      `yaml:"pools"`
-	APIServer   APIServerConfig                 `yaml:"apiServer"`
-	Telemetry   TelemetryConfig                 `yaml:"telemetry"`
-	Manifest    string                          `yaml:"manifest"`
-}
-
-type exchangeSettingsYAML struct {
-	REST                  map[string]string `yaml:"rest"`
-	Websocket             WebsocketSettings `yaml:"websocket"`
-	Credentials           Credentials       `yaml:"credentials"`
-	HTTPTimeout           string            `yaml:"http_timeout"`
-	HandshakeTimeout      string            `yaml:"handshake_timeout"`
-	SymbolRefreshInterval string            `yaml:"symbol_refresh_interval"`
-}
-
-// Load loads the unified Meltica configuration with precedence: defaults → YAML → env vars.
+// Load loads the unified Meltica configuration strictly from the provided YAML source.
 func Load(ctx context.Context, configPath string) (AppConfig, error) {
-	// Step 1: Start with code defaults
-	cfg := defaultAppConfig()
+	_ = ctx
 
-	// Step 2: Override with YAML if present
-	yamlErr := cfg.loadYAML(ctx, configPath)
-	if yamlErr != nil && !isConfigNotFoundError(yamlErr) {
-		return AppConfig{}, fmt.Errorf("load yaml config: %w", yamlErr)
+	reader, closer, err := openConfigFile(configPath)
+	if err != nil {
+		return AppConfig{}, err
+	}
+	defer closer()
+
+	bytes, err := io.ReadAll(reader)
+	if err != nil {
+		return AppConfig{}, fmt.Errorf("read config: %w", err)
 	}
 
-	// Step 3: Override with environment variables
-	cfg.loadEnv()
+	var cfg AppConfig
+	if err := yaml.Unmarshal(bytes, &cfg); err != nil {
+		return AppConfig{}, fmt.Errorf("unmarshal config: %w", err)
+	}
 
-	// Step 4: Validate the final configuration
+	cfg.normalise()
+
 	if err := cfg.Validate(ctx); err != nil {
 		return AppConfig{}, fmt.Errorf("validate config: %w", err)
 	}
@@ -131,161 +117,23 @@ func Load(ctx context.Context, configPath string) (AppConfig, error) {
 	return cfg, nil
 }
 
-// isConfigNotFoundError checks if the error is due to config file not found.
-func isConfigNotFoundError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return os.IsNotExist(err) || strings.Contains(err.Error(), "open app config")
-}
-
-// defaultAppConfig returns the default configuration with sensible defaults.
-func defaultAppConfig() AppConfig {
-	return AppConfig{
-		Environment: EnvProd,
-		Exchanges:   make(map[Exchange]ExchangeSettings),
-		Dispatcher: DispatcherConfig{
-			Routes: make(map[string]RouteConfig),
-		},
-		Eventbus: EventbusConfig{
-			BufferSize:    1024,
-			FanoutWorkers: 8,
-		},
-		Pools: PoolConfig{
-			EventSize:        20000,
-			OrderRequestSize: 5000,
-		},
-		APIServer: APIServerConfig{
-			Addr: ":8880",
-		},
-		Telemetry: TelemetryConfig{
-			OTLPEndpoint:  "http://localhost:4318",
-			ServiceName:   "meltica-gateway",
-			OTLPInsecure:  false,
-			EnableMetrics: true,
-		},
-		ManifestPath: "config/runtime.yaml",
-	}
-}
-
-// loadYAML loads and merges YAML configuration into the AppConfig.
-func (c *AppConfig) loadYAML(ctx context.Context, path string) error {
-	_ = ctx
-	path = strings.TrimSpace(path)
-	if path == "" {
-		path = os.Getenv("MELTICA_CONFIG")
-	}
-	path = strings.TrimSpace(path)
-	if path == "" {
-		path = "config/app.yaml"
-	}
-
-	reader, closer, err := openConfigFile(path)
-	if err != nil {
-		return err
-	}
-	defer closer()
-
-	bytes, err := io.ReadAll(reader)
-	if err != nil {
-		return fmt.Errorf("read config: %w", err)
-	}
-
-	var yamlCfg appConfigYAML
-	if err := yaml.Unmarshal(bytes, &yamlCfg); err != nil {
-		return fmt.Errorf("unmarshal config: %w", err)
-	}
-
-	// Merge YAML into AppConfig
-	if yamlCfg.Environment != "" {
-		c.Environment = Environment(strings.ToLower(strings.TrimSpace(yamlCfg.Environment)))
-	}
-
-	// Merge exchanges
-	for name, exYAML := range yamlCfg.Exchanges {
-		exchange := Exchange(normalizeExchangeName(name))
-		existing, ok := c.Exchanges[exchange]
-		if !ok {
-			existing = NewExchangeSettings()
+func (c *AppConfig) normalise() {
+	if c.Exchanges == nil {
+		c.Exchanges = make(map[Exchange]map[string]any)
+	} else {
+		normalised := make(map[Exchange]map[string]any, len(c.Exchanges))
+		for key, value := range c.Exchanges {
+			normalizedKey := Exchange(normalizeExchangeName(string(key)))
+			normalised[normalizedKey] = value
 		}
-
-		// Merge REST endpoints
-		for surface, url := range exYAML.REST {
-			if url != "" {
-				existing.REST[surface] = url
-			}
-		}
-
-		// Merge websocket settings
-		if exYAML.Websocket.PublicURL != "" {
-			existing.Websocket.PublicURL = exYAML.Websocket.PublicURL
-		}
-		if exYAML.Websocket.PrivateURL != "" {
-			existing.Websocket.PrivateURL = exYAML.Websocket.PrivateURL
-		}
-
-		// Merge credentials
-		if exYAML.Credentials.APIKey != "" {
-			existing.Credentials.APIKey = exYAML.Credentials.APIKey
-		}
-		if exYAML.Credentials.APISecret != "" {
-			existing.Credentials.APISecret = exYAML.Credentials.APISecret
-		}
-
-		// Parse durations
-		if exYAML.HTTPTimeout != "" {
-			if dur, err := time.ParseDuration(exYAML.HTTPTimeout); err == nil {
-				existing.HTTPTimeout = dur
-			}
-		}
-		if exYAML.HandshakeTimeout != "" {
-			if dur, err := time.ParseDuration(exYAML.HandshakeTimeout); err == nil {
-				existing.HandshakeTimeout = dur
-			}
-		}
-		if exYAML.SymbolRefreshInterval != "" {
-			if dur, err := time.ParseDuration(exYAML.SymbolRefreshInterval); err == nil {
-				existing.SymbolRefreshInterval = dur
-			}
-		}
-
-		c.Exchanges[exchange] = existing
+		c.Exchanges = normalised
 	}
 
-	// Merge dispatcher config
-	c.Dispatcher = yamlCfg.Dispatcher
-	c.Eventbus = yamlCfg.Eventbus
-	if strings.TrimSpace(yamlCfg.APIServer.Addr) != "" {
-		c.APIServer = yamlCfg.APIServer
-	}
-	if yamlCfg.Pools.EventSize != 0 || yamlCfg.Pools.OrderRequestSize != 0 {
-		c.Pools = yamlCfg.Pools
-	}
-	c.Telemetry = yamlCfg.Telemetry
-	if manifest := strings.TrimSpace(yamlCfg.Manifest); manifest != "" {
-		c.ManifestPath = manifest
-	}
-
-	return nil
-}
-
-// loadEnv loads environment variable overrides into AppConfig.
-func (c *AppConfig) loadEnv() {
-	// Environment
-	if env := strings.TrimSpace(os.Getenv("MELTICA_ENV")); env != "" {
-		c.Environment = Environment(strings.ToLower(env))
-	}
-
-	// Telemetry overrides
-	if v := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")); v != "" {
-		c.Telemetry.OTLPEndpoint = v
-	}
-	if v := strings.TrimSpace(os.Getenv("OTEL_SERVICE_NAME")); v != "" {
-		c.Telemetry.ServiceName = v
-	}
-	if v := strings.TrimSpace(os.Getenv("MELTICA_MANIFEST")); v != "" {
-		c.ManifestPath = v
-	}
+	c.Environment = Environment(strings.ToLower(strings.TrimSpace(string(c.Environment))))
+	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
+	c.ManifestPath = strings.TrimSpace(c.ManifestPath)
+	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
+	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
 }
 
 // Validate performs comprehensive validation on the unified configuration.
@@ -302,18 +150,11 @@ func (c *AppConfig) Validate(ctx context.Context) error {
 		// Routes are optional; empty map is valid
 		c.Dispatcher.Routes = make(map[string]RouteConfig)
 	}
-
-	// Apply default interval to RestFns that don't specify one
 	for name, route := range c.Dispatcher.Routes {
-		modified := false
 		for i := range route.RestFns {
 			if route.RestFns[i].Interval <= 0 {
-				route.RestFns[i].Interval = time.Minute
-				modified = true
+				return fmt.Errorf("dispatcher route %s restFns[%d]: interval must be >0", name, i)
 			}
-		}
-		if modified {
-			c.Dispatcher.Routes[name] = route
 		}
 	}
 
@@ -322,7 +163,7 @@ func (c *AppConfig) Validate(ctx context.Context) error {
 		return fmt.Errorf("eventbus bufferSize must be >0")
 	}
 	if c.Eventbus.FanoutWorkers <= 0 {
-		c.Eventbus.FanoutWorkers = 8
+		return fmt.Errorf("eventbus fanoutWorkers must be >0")
 	}
 
 	if c.Pools.EventSize <= 0 {
@@ -333,12 +174,12 @@ func (c *AppConfig) Validate(ctx context.Context) error {
 	}
 
 	if strings.TrimSpace(c.APIServer.Addr) == "" {
-		c.APIServer.Addr = ":8880"
+		return fmt.Errorf("api server addr required")
 	}
 
 	// Validate telemetry
 	if c.Telemetry.ServiceName == "" {
-		c.Telemetry.ServiceName = "meltica"
+		return fmt.Errorf("telemetry service name required")
 	}
 
 	if strings.TrimSpace(c.ManifestPath) == "" {
@@ -392,4 +233,15 @@ func openConfigFile(path string) (io.Reader, func(), error) {
 		lastErr = os.ErrNotExist
 	}
 	return nil, nil, fmt.Errorf("open app config: %w", lastErr)
+}
+
+func cloneStringAnyMap(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return make(map[string]any)
+	}
+	dst := make(map[string]any, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }

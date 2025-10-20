@@ -1,0 +1,44 @@
+# Meltica application configuration example.
+
+environment: prod
+
+exchanges:
+  fake:
+    enabled: true
+    ticker_interval: 500ms
+    trade_interval: 1s
+    book_snapshot_interval: 5s
+
+dispatcher:
+  routes:
+    TICKER:
+      wsTopics:
+        - ticker.BTC-USDT
+      restFns:
+        - name: pricePoller
+          endpoint: https://example.net/api/v1/price
+          interval: 1s
+          parser: price-parser
+      filters:
+        - field: instrument
+          op: eq
+          value: BTC-USDT
+
+eventbus:
+  bufferSize: 2048
+  fanoutWorkers: 8
+
+pools:
+  eventSize: 50000
+  orderRequestSize: 10000
+
+apiServer:
+  addr: ":8880"
+
+telemetry:
+  otlpEndpoint: http://localhost:4318
+  serviceName: meltica-gateway
+  otlpInsecure: true
+  enableMetrics: true
+
+manifest: config/runtime.yaml

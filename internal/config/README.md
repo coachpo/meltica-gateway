@@ -27,11 +27,13 @@ Settings are applied in order (later overrides earlier):
 ```go
 type AppConfig struct {
     Environment Environment                   // dev, staging, prod
-    Exchanges   map[Exchange]ExchangeSettings // Exchange connection settings
-    Adapters    AdapterSet                    // Adapter-specific config
+    Exchanges   map[Exchange]map[string]any   // Exchange-specific blobs
     Dispatcher  DispatcherConfig              // Routing configuration
-    Event Bus     Event BusConfig                 // Message bus sizing
+    Eventbus    EventbusConfig                // Message bus sizing
+    Pools       PoolConfig                    // Object pooling capacities
+    APIServer   APIServerConfig               // Control server settings
     Telemetry   TelemetryConfig               // Observability settings
+    ManifestPath string                       // Runtime manifest path
 }
 ```
 
@@ -67,53 +69,16 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 
 ### YAML Configuration
 
-```yaml
-environment: prod
+See `config/app.example.yaml` for a complete sample. Key sections include:
 
-# Exchange connection settings (optional, has code defaults)
-exchanges:
-  binance:
-    rest:
-      spot: https://api.binance.com
-    websocket:
-      publicUrl: wss://stream.binance.com:9443/stream
-    http_timeout: 10s
-
-# Adapter settings
-adapter:
-  binance:
-    ws:
-      publicUrl: wss://stream.binance.com:9443/stream
-      handshakeTimeout: 10s
-    rest:
-      baseUrl: https://api.binance.com
-      snapshot:
-        endpoint: /api/v3/depth
-        interval: 5s
-        limit: 100
-    book_refresh_interval: 1m
-
-# Dispatcher routing
-dispatcher:
-  routes:
-    TICKER:
-      wsTopics:
-        - ticker.BTCUSDT
-      filters:
-        - field: instrument
-          op: eq
-          value: BTC-USDT
-
-# Data bus
-eventbus:
-  bufferSize: 1024
-
-# Telemetry
-telemetry:
-  otlpEndpoint: http://localhost:4318
-  serviceName: meltica-gateway
-  enableMetrics: true
-```
+- `environment`: Deployment environment string (`dev`, `staging`, `prod`).
+- `exchanges`: Arbitrary blobs forwarded to each exchange adapter.
+- `dispatcher.routes`: Topic routing, REST polling, and filters.
+- `eventbus`: In-memory event bus sizing.
+- `pools`: Object pool capacities.
+- `apiServer`: Control API bind address.
+- `telemetry`: OTLP exporter configuration.
+- `manifest`: Path to the runtime manifest (`config/runtime.yaml` by default).
 
 ## Migration from Old System
 
@@ -140,14 +105,13 @@ telemetry := cfg.Telemetry
 3. **Type Safety**: Compile-time validation of config structure
 4. **Easier Testing**: Mock entire config or individual sections
 5. **Better Validation**: Validate all settings together in one pass
-6. **DRY Principle**: No duplication between `exchange_settings.go` and `app.yaml`
+6. **DRY Principle**: Exchanges define their details within their own packages
 
 ## File Organization
 
 - `app_config.go` - Unified config structure, streaming types, and loading logic
-- `exchange_settings.go` - Exchange settings types (reused by app_config.go)
+- `types.go` - Shared config primitives (environment, exchange identifiers)
 - `app_test.go` - Tests for unified config loading
-- `config_test.go` - Tests for core exchange configuration helpers
 
 ## Testing
 
