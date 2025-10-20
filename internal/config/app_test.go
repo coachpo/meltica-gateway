@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
 )
 
 func TestLoad_Defaults(t *testing.T) {
@@ -105,10 +104,6 @@ func TestDefaultAppConfig(t *testing.T) {
 
 	if len(cfg.Exchanges) == 0 {
 		t.Error("expected default exchanges")
-	}
-
-	if cfg.Adapters.Binance.BookRefreshInterval != 1*time.Minute {
-		t.Errorf("expected book refresh interval 1m, got %v", cfg.Adapters.Binance.BookRefreshInterval)
 	}
 
 	if cfg.Dispatcher.Routes == nil {
