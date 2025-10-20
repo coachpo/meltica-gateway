@@ -8,3 +8,4 @@ telemetry:
   serviceName: meltica-gateway
   otlpInsecure: true
   enableMetrics: true
+manifest: runtime.yaml
