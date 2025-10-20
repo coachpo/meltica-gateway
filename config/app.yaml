@@ -4,17 +4,20 @@ environment: dev
 exchanges:
   # fake: synthetic market data source suitable for demos/tests
   fake:
-    # exchange: canonical provider registered in code
-    exchange: fake
-    ticker_interval: 100ms
-    trade_interval: 100ms
-    book_snapshot_interval: 100ms
-  # fake-slow: alias targeting the same fake provider with different intervals
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 100ms
+      trade_interval: 100ms
+      book_snapshot_interval: 100ms
+  # fake-slow: alias with adjusted cadence, same underlying exchange implementation
   fake-slow:
-    exchange: fake
-    ticker_interval: 250ms
-    trade_interval: 500ms
-    book_snapshot_interval: 250ms
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 250ms
+      trade_interval: 500ms
+      book_snapshot_interval: 250ms
 
 # eventbus: in-memory event bus sizing
 eventbus:
@@ -37,5 +40,5 @@ telemetry:
   otlpInsecure: true
   enableMetrics: true
 
-# manifest: path to lambda manifest file
-manifest: config/lambda-manifest.yaml
+# lambdaManifest: path to lambda manifest file
+lambdaManifest: config/lambda-manifest.yaml

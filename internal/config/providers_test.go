@@ -5,15 +5,19 @@ import "testing"
 func TestBuildProviderSpecs(t *testing.T) {
 	configs := map[Exchange]map[string]any{
 		"fake": {
-			"exchange":          "fake",
-			"ticker_interval":   "500ms",
-			"book_snapshot":     "5s",
-			"custom_param":      42,
-			"another_parameter": true,
+			"exchange": map[string]any{
+				"name":              "fake",
+				"ticker_interval":   "500ms",
+				"book_snapshot":     "5s",
+				"custom_param":      42,
+				"another_parameter": true,
+			},
 		},
 		"BINANCE": {
-			"exchange": "Binance",
-			"venue":    "spot",
+			"exchange": map[string]any{
+				"name":  "Binance",
+				"venue": "spot",
+			},
 		},
 	}
 
@@ -43,9 +47,6 @@ func TestBuildProviderSpecs(t *testing.T) {
 	if fakeSpec.Config["name"] != "fake" {
 		t.Fatalf("expected config name to be fake, got %v", fakeSpec.Config["name"])
 	}
-	if _, ok := fakeSpec.Config["exchange"]; ok {
-		t.Fatalf("expected exchange key to be omitted from config")
-	}
 
 	binanceSpec, ok := lookup["BINANCE"]
 	if !ok {
@@ -63,14 +64,34 @@ func TestBuildProviderSpecsErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("empty exchange", func(t *testing.T) {
+	t.Run("missing exchange block", func(t *testing.T) {
+		_, err := BuildProviderSpecs(map[Exchange]map[string]any{
+			"binance": {},
+		})
+		if err == nil {
+			t.Fatal("expected error for missing exchange block")
+		}
+	})
+
+	t.Run("invalid exchange map", func(t *testing.T) {
 		_, err := BuildProviderSpecs(map[Exchange]map[string]any{
 			"binance": {
-				"exchange": "",
+				"exchange": "not-a-map",
 			},
 		})
 		if err == nil {
-			t.Fatal("expected error for empty exchange")
+			t.Fatal("expected error for non-map exchange block")
+		}
+	})
+
+	t.Run("missing exchange name", func(t *testing.T) {
+		_, err := BuildProviderSpecs(map[Exchange]map[string]any{
+			"binance": {
+				"exchange": map[string]any{},
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for missing exchange.name")
 		}
 	})
 }

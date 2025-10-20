@@ -4,49 +4,45 @@
 environment: prod
 
 exchanges:
-  # fake: synthetic market data provider (alias targeting the "fake" exchange)
+  # fake: synthetic market-data provider (alias pointing to the "fake" exchange)
   fake:
-    # exchange: canonical provider name registered in code (e.g., fake, binance, alpaca)
-    exchange: fake
-    # enabled: whether to initialise the provider (true | false)
-    enabled: true
-    # ticker_interval: duration between generated ticker events (e.g., 500ms, 1s)
-    ticker_interval: 500ms
-    # trade_interval: duration between generated trade events
-    trade_interval: 1s
-    # book_snapshot_interval: duration between order book snapshots
-    book_snapshot_interval: 5s
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 500ms
+      trade_interval: 1s
+      book_snapshot_interval: 5s
 
-  # fake-slow: alias with different cadence but same underlying exchange implementation
+  # fake-slow: alias with different cadence but the same underlying exchange implementation
   fake-slow:
-    exchange: fake
-    ticker_interval: 750ms
-    trade_interval: 2s
-    book_snapshot_interval: 10s
+    exchange:
+      name: fake
+      ticker_interval: 750ms
+      trade_interval: 2s
+      book_snapshot_interval: 10s
 
   # bnx/binance/BINANCE: demonstrate aliases mapping to the real Binance exchange
   bnx:
-    exchange: binance
-    venue: spot
+    exchange:
+      name: binance
+      venue: spot
   binance:
-    exchange: binance
-    venue: spot
+    exchange:
+      name: binance
+      venue: spot
   BINANCE:
-    exchange: binance
-    venue: futures
+    exchange:
+      name: binance
+      venue: futures
 
 # eventbus: in-memory event bus configuration
 eventbus:
-  # bufferSize: capacity of the in-memory event bus buffer (int > 0)
   bufferSize: 2048
-  # fanoutWorkers: number of goroutines handling fan-out (int > 0)
   fanoutWorkers: 8
 
 # pools: configure object pool capacities
 pools:
-  # eventSize: pooled Event objects available for reuse (int > 0)
   eventSize: 50000
-  # orderRequestSize: pooled OrderRequest objects available for reuse (int > 0)
   orderRequestSize: 10000
 
 # apiServer: control API bind address (host:port or :port)
@@ -55,14 +51,10 @@ apiServer:
 
 # telemetry: OTLP exporter configuration
 telemetry:
-  # otlpEndpoint: OTLP exporter endpoint URL
   otlpEndpoint: http://localhost:4318
-  # serviceName: telemetry service identifier
   serviceName: meltica-gateway
-  # otlpInsecure: disable TLS when true
   otlpInsecure: true
-  # enableMetrics: toggle OTLP metric export (true | false)
   enableMetrics: true
 
-# manifest: path to lambda manifest file
-manifest: config/lambda-manifest.yaml
+# lambdaManifest: path to lambda manifest file
+lambdaManifest: config/lambda-manifest.yaml

@@ -21,8 +21,9 @@ func TestLoadFromYAML(t *testing.T) {
 environment: DEV
 exchanges:
   Fake:
-    exchange: fake
-    option: value
+    exchange:
+      name: fake
+      option: value
 eventbus:
   bufferSize: 128
   fanoutWorkers: 4
@@ -36,7 +37,7 @@ telemetry:
   serviceName: test-service
   otlpInsecure: true
   enableMetrics: false
-manifest: config/lambda-manifest.yaml
+lambdaManifest: config/lambda-manifest.yaml
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write temp config: %v", err)
@@ -55,7 +56,12 @@ manifest: config/lambda-manifest.yaml
 	if !ok {
 		t.Fatalf("expected fake exchange config")
 	}
-	if got := ex["option"]; got != "value" {
+	rawExchange := ex["exchange"]
+	exchangeCfg, ok := rawExchange.(map[string]any)
+	if !ok {
+		t.Fatalf("expected exchange config map, got %T", rawExchange)
+	}
+	if got := exchangeCfg["option"]; got != "value" {
 		t.Fatalf("expected exchange option value, got %v", got)
 	}
 

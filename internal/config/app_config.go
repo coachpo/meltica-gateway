@@ -44,7 +44,7 @@ type AppConfig struct {
 	Pools        PoolConfig                  `yaml:"pools"`
 	APIServer    APIServerConfig             `yaml:"apiServer"`
 	Telemetry    TelemetryConfig             `yaml:"telemetry"`
-	ManifestPath string                      `yaml:"manifest"`
+    ManifestPath string                      `yaml:"lambdaManifest"`
 }
 
 // Load reads and validates an AppConfig from the provided YAML file.

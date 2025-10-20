@@ -57,7 +57,7 @@ See `config/app.example.yaml` for a complete sample. Key sections include:
 - `pools`: Object pool capacities.
 - `apiServer`: Control API bind address.
 - `telemetry`: OTLP exporter configuration.
-- `manifest`: Path to the lambda manifest (`config/lambda-manifest.yaml` by default).
+- `lambdaManifest`: Path to the lambda manifest (`config/lambda-manifest.yaml` by default).
 
 ## Migration from Old System
 

@@ -353,9 +353,5 @@ func resolveConfigPath(flagValue string) string {
 		return flagValue
 	}
 
-	if envPath := os.Getenv("MELTICA_CONFIG"); envPath != "" {
-		return envPath
-	}
-
 	return filepath.Clean(defaultConfigPath)
 }
