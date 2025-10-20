@@ -37,6 +37,7 @@ var momentumSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("EXECUTION.REPORT"),
 }
 
+// SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *Momentum) SubscribedEvents() []schema.CanonicalType {
 	return append([]schema.CanonicalType(nil), momentumSubscribedEvents...)
 }

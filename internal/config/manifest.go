@@ -133,6 +133,7 @@ func openManifestFile(path string) (io.Reader, func(), error) {
 
 	var lastErr error
 	for _, candidate := range candidates {
+		// #nosec G304 - path is cleaned with filepath.Clean() and only uses known safe paths
 		file, err := os.Open(candidate)
 		if err == nil {
 			return file, func() { _ = file.Close() }, nil

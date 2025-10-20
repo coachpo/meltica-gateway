@@ -15,6 +15,7 @@ var noopSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
 }
 
+// SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *NoOp) SubscribedEvents() []schema.CanonicalType {
 	return append([]schema.CanonicalType(nil), noopSubscribedEvents...)
 }

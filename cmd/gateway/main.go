@@ -51,7 +51,7 @@ func main() {
 		logger.Fatalf("initialize telemetry: %v", err)
 	}
 
-	poolMgr, err := buildPoolManager()
+	poolMgr, err := buildPoolManager(appCfg.Pools)
 	if err != nil {
 		logger.Fatalf("initialise pools: %v", err)
 	}
@@ -126,7 +126,7 @@ func initTelemetry(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 
 	provider, err := telemetry.NewProvider(ctx, telemetryCfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("initialize telemetry provider: %w", err)
 	}
 
 	if telemetryCfg.Enabled {
@@ -137,12 +137,12 @@ func initTelemetry(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 	return provider, nil
 }
 
-func buildPoolManager() (*pool.PoolManager, error) {
+func buildPoolManager(cfg config.PoolConfig) (*pool.PoolManager, error) {
 	manager := pool.NewPoolManager()
-	if err := manager.RegisterPool("Event", 20000, func() interface{} { return new(schema.Event) }); err != nil {
+	if err := manager.RegisterPool("Event", cfg.EventSize, func() interface{} { return new(schema.Event) }); err != nil {
 		return nil, fmt.Errorf("register Event pool: %w", err)
 	}
-	if err := manager.RegisterPool("OrderRequest", 5000, func() interface{} { return new(schema.OrderRequest) }); err != nil {
+	if err := manager.RegisterPool("OrderRequest", cfg.OrderRequestSize, func() interface{} { return new(schema.OrderRequest) }); err != nil {
 		return nil, fmt.Errorf("register OrderRequest pool: %w", err)
 	}
 	return manager, nil
@@ -209,9 +209,22 @@ func buildAPIServer(lambdaManager *lambdaruntime.Manager) *http.Server {
 	mux.Handle("/strategy-instances/", handler)
 
 	return &http.Server{
-		Addr:              ":8880",
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+		Addr:                         ":8880",
+		Handler:                      mux,
+		DisableGeneralOptionsHandler: false,
+		TLSConfig:                    nil,
+		ReadTimeout:                  0,
+		WriteTimeout:                 0,
+		IdleTimeout:                  0,
+		MaxHeaderBytes:               0,
+		TLSNextProto:                 nil,
+		ConnState:                    nil,
+		ErrorLog:                     nil,
+		BaseContext:                  nil,
+		ConnContext:                  nil,
+		HTTP2:                        nil,
+		Protocols:                    nil,
+		ReadHeaderTimeout:            5 * time.Second,
 	}
 }
 

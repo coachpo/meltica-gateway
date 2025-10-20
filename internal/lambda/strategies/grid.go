@@ -35,6 +35,7 @@ var gridSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("EXECUTION.REPORT"),
 }
 
+// SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *Grid) SubscribedEvents() []schema.CanonicalType {
 	return append([]schema.CanonicalType(nil), gridSubscribedEvents...)
 }

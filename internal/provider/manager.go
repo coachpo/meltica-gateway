@@ -1,3 +1,4 @@
+// Package provider manages provider instances and their lifecycle.
 package provider
 
 import (
@@ -23,11 +24,13 @@ type Manager struct {
 	subscriptions map[string]*shared.SubscriptionManager
 }
 
+// NewManager creates a new provider manager.
 func NewManager(reg *Registry, pools *pool.PoolManager) *Manager {
 	if reg == nil {
 		reg = NewRegistry()
 	}
 	return &Manager{
+		mu:            sync.RWMutex{},
 		registry:      reg,
 		pools:         pools,
 		providers:     make(map[string]Instance),
@@ -112,7 +115,10 @@ func (m *Manager) ActivateRoute(ctx context.Context, route dispatcher.Route) err
 	if !ok {
 		return fmt.Errorf("provider %q not found", providerName)
 	}
-	return sub.Activate(ctx, route)
+	if err := sub.Activate(ctx, route); err != nil {
+		return fmt.Errorf("activate route: %w", err)
+	}
+	return nil
 }
 
 // DeactivateRoute removes a route from the targeted provider only.
@@ -127,7 +133,10 @@ func (m *Manager) DeactivateRoute(ctx context.Context, route dispatcher.Route) e
 	if !ok {
 		return fmt.Errorf("provider %q not found", providerName)
 	}
-	return sub.Deactivate(ctx, route.Type)
+	if err := sub.Deactivate(ctx, route.Type); err != nil {
+		return fmt.Errorf("deactivate route: %w", err)
+	}
+	return nil
 }
 
 // Deactivate removes the given route from all managed providers.
@@ -156,5 +165,8 @@ func (m *Manager) SubmitOrder(ctx context.Context, req schema.OrderRequest) erro
 	if !ok {
 		return fmt.Errorf("provider %q not found", providerName)
 	}
-	return inst.SubmitOrder(ctx, req)
+	if err := inst.SubmitOrder(ctx, req); err != nil {
+		return fmt.Errorf("submit order to provider %q: %w", providerName, err)
+	}
+	return nil
 }

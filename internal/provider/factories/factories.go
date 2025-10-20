@@ -1,3 +1,4 @@
+// Package factories registers built-in provider implementations.
 package factories
 
 import (

@@ -16,7 +16,13 @@ func RegisterFactory(reg *provider.Registry) {
 			return nil, fmt.Errorf("fake provider requires pool manager")
 		}
 
-		opts := Options{Pools: pools}
+		opts := Options{
+			Name:                 "",
+			TickerInterval:       0,
+			TradeInterval:        0,
+			BookSnapshotInterval: 0,
+			Pools:                pools,
+		}
 		if name, ok := cfg["name"].(string); ok {
 			opts.Name = name
 		}

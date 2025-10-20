@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"sort"
@@ -23,14 +24,20 @@ import (
 )
 
 var (
+	// ErrInstanceExists is returned when attempting to create an instance that already exists.
 	ErrInstanceExists         = errors.New("strategy instance already exists")
+	// ErrInstanceNotFound is returned when attempting to access an instance that doesn't exist.
 	ErrInstanceNotFound       = errors.New("strategy instance not found")
+	// ErrInstanceAlreadyRunning is returned when attempting to start an already running instance.
 	ErrInstanceAlreadyRunning = errors.New("strategy instance already running")
+	// ErrInstanceNotRunning is returned when attempting to stop an instance that isn't running.
 	ErrInstanceNotRunning     = errors.New("strategy instance not running")
 )
 
+// StrategyFactory creates trading strategy instances from configuration.
 type StrategyFactory func(config map[string]any) (lambda.TradingStrategy, error)
 
+// StrategyConfigField describes a configurable parameter for a strategy.
 type StrategyConfigField struct {
 	Name        string `json:"name"`
 	Type        string `json:"type"`
@@ -39,6 +46,7 @@ type StrategyConfigField struct {
 	Required    bool   `json:"required"`
 }
 
+// StrategyMetadata describes a trading strategy's interface and configuration.
 type StrategyMetadata struct {
 	Name        string                 `json:"name"`
 	DisplayName string                 `json:"displayName"`
@@ -47,11 +55,13 @@ type StrategyMetadata struct {
 	Events      []schema.CanonicalType `json:"events"`
 }
 
+// StrategyDefinition combines strategy metadata with a factory function.
 type StrategyDefinition struct {
 	meta    StrategyMetadata
 	factory StrategyFactory
 }
 
+// Metadata returns the strategy metadata.
 func (d StrategyDefinition) Metadata() StrategyMetadata {
 	fields := make([]StrategyConfigField, len(d.meta.Config))
 	copy(fields, d.meta.Config)
@@ -63,15 +73,18 @@ func (d StrategyDefinition) Metadata() StrategyMetadata {
 	return meta
 }
 
+// ProviderCatalog provides access to available providers.
 type ProviderCatalog interface {
 	Provider(name string) (provider.Instance, bool)
 }
 
+// RouteRegistrar manages dynamic route registration for providers.
 type RouteRegistrar interface {
 	RegisterLambda(ctx context.Context, lambdaID string, provider string, routes []dispatcher.RouteDeclaration) error
 	UnregisterLambda(ctx context.Context, lambdaID string) error
 }
 
+// Manager coordinates lambda lifecycle and strategy execution.
 type Manager struct {
 	mu sync.RWMutex
 
@@ -92,11 +105,13 @@ type lambdaInstance struct {
 	errs   <-chan error
 }
 
+// NewManager creates a new lambda manager with the specified dependencies.
 func NewManager(bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) *Manager {
 	if logger == nil {
 		logger = log.New(os.Stdout, "lambda-manager ", log.LstdFlags|log.Lmicroseconds)
 	}
 	mgr := &Manager{
+		mu:         sync.RWMutex{},
 		bus:        bus,
 		pools:      pools,
 		providers:  providers,
@@ -116,6 +131,8 @@ func (m *Manager) registerDefaults() {
 			Name:        "noop",
 			DisplayName: "No-Op",
 			Description: "Pass-through strategy that performs no actions.",
+			Config:      []StrategyConfigField{},
+			Events:      []schema.CanonicalType{},
 		},
 		factory: func(_ map[string]any) (lambda.TradingStrategy, error) {
 			return &strategies.NoOp{}, nil
@@ -127,6 +144,8 @@ func (m *Manager) registerDefaults() {
 			Name:        "delay",
 			DisplayName: "Delay",
 			Description: "Simulates processing latency between 100-500ms without performing actions.",
+			Config:      []StrategyConfigField{},
+			Events:      []schema.CanonicalType{},
 		},
 		factory: func(_ map[string]any) (lambda.TradingStrategy, error) {
 			return &strategies.Delay{}, nil
@@ -145,9 +164,13 @@ func (m *Manager) registerDefaults() {
 				Default:     "[Logging] ",
 				Required:    false,
 			}},
+			Events: []schema.CanonicalType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.Logging{}
+			strat := &strategies.Logging{
+				Logger:       log.New(io.Discard, "", 0),
+				LoggerPrefix: "",
+			}
 			strat.LoggerPrefix = stringValue(cfg, "logger_prefix", "[Logging] ")
 			return strat, nil
 		},
@@ -164,9 +187,16 @@ func (m *Manager) registerDefaults() {
 				{Name: "order_size", Type: "string", Description: "Quantity for each market order", Default: "1", Required: false},
 				{Name: "cooldown", Type: "duration", Description: "Minimum time between trades", Default: "5s", Required: false},
 			},
+			Events: []schema.CanonicalType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.Momentum{}
+			strat := &strategies.Momentum{
+				Lambda:            nil,
+				LookbackPeriod:    0,
+				MomentumThreshold: 0,
+				OrderSize:         "",
+				Cooldown:          0,
+			}
 			strat.LookbackPeriod = intValue(cfg, "lookback_period", 20)
 			strat.MomentumThreshold = floatValue(cfg, "momentum_threshold", 0.5)
 			strat.OrderSize = stringValue(cfg, "order_size", "1")
@@ -185,9 +215,15 @@ func (m *Manager) registerDefaults() {
 				{Name: "deviation_threshold", Type: "float", Description: "Deviation percentage required to open a position", Default: 0.5, Required: false},
 				{Name: "order_size", Type: "string", Description: "Order size when entering a position", Default: "1", Required: false},
 			},
+			Events: []schema.CanonicalType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.MeanReversion{}
+			strat := &strategies.MeanReversion{
+				Lambda:             nil,
+				WindowSize:          0,
+				DeviationThreshold: 0,
+				OrderSize:          "",
+			}
 			strat.WindowSize = intValue(cfg, "window_size", 20)
 			strat.DeviationThreshold = floatValue(cfg, "deviation_threshold", 0.5)
 			strat.OrderSize = stringValue(cfg, "order_size", "1")
@@ -206,9 +242,16 @@ func (m *Manager) registerDefaults() {
 				{Name: "order_size", Type: "string", Description: "Order size per level", Default: "1", Required: false},
 				{Name: "base_price", Type: "float", Description: "Optional base price for the grid", Default: 0.0, Required: false},
 			},
+			Events: []schema.CanonicalType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.Grid{}
+			strat := &strategies.Grid{
+				Lambda:      nil,
+				GridLevels:  0,
+				GridSpacing: 0,
+				OrderSize:   "",
+				BasePrice:   0,
+			}
 			strat.GridLevels = intValue(cfg, "grid_levels", 3)
 			strat.GridSpacing = floatValue(cfg, "grid_spacing", 0.5)
 			strat.OrderSize = stringValue(cfg, "order_size", "1")
@@ -227,12 +270,23 @@ func (m *Manager) registerDefaults() {
 				{Name: "order_size", Type: "string", Description: "Quoted order size", Default: "1", Required: false},
 				{Name: "max_open_orders", Type: "int", Description: "Maximum concurrent orders per side", Default: 2, Required: false},
 			},
+			Events: []schema.CanonicalType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.MarketMaking{}
+			strat := &strategies.MarketMaking{
+				Lambda:        nil,
+				SpreadBps:     0,
+				OrderSize:     "",
+				MaxOpenOrders: 0,
+			}
 			strat.SpreadBps = floatValue(cfg, "spread_bps", 25)
 			strat.OrderSize = stringValue(cfg, "order_size", "1")
-			strat.MaxOpenOrders = int32(intValue(cfg, "max_open_orders", 2))
+			maxOrders := intValue(cfg, "max_open_orders", 2)
+			if maxOrders > int(^uint32(0)>>1) {
+				maxOrders = int(^uint32(0) >> 1)
+			}
+			// #nosec G115 - bounds checked above
+			strat.MaxOpenOrders = int32(maxOrders)
 			return strat, nil
 		},
 	})
@@ -264,6 +318,7 @@ func (m *Manager) registerStrategy(def StrategyDefinition) {
 	m.strategies[name] = def
 }
 
+// StrategyCatalog returns all available strategy metadata.
 func (m *Manager) StrategyCatalog() []StrategyMetadata {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -275,16 +330,24 @@ func (m *Manager) StrategyCatalog() []StrategyMetadata {
 	return out
 }
 
+// StrategyDetail returns metadata for a specific strategy by name.
 func (m *Manager) StrategyDetail(name string) (StrategyMetadata, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	def, ok := m.strategies[strings.ToLower(strings.TrimSpace(name))]
 	if !ok {
-		return StrategyMetadata{}, false
+		return StrategyMetadata{
+			Name:        "",
+			DisplayName: "",
+			Description: "",
+			Config:      []StrategyConfigField{},
+			Events:      []schema.CanonicalType{},
+		}, false
 	}
 	return def.Metadata(), true
 }
 
+// StartFromManifest starts all lambdas defined in the runtime manifest.
 func (m *Manager) StartFromManifest(ctx context.Context, manifest config.RuntimeManifest) error {
 	for _, definition := range manifest.Lambdas {
 		spec := sanitizeSpec(definition)
@@ -300,6 +363,7 @@ func (m *Manager) StartFromManifest(ctx context.Context, manifest config.Runtime
 	return nil
 }
 
+// Create creates a new lambda instance from the specification.
 func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*lambda.BaseLambda, error) {
 	spec = sanitizeSpec(spec)
 	if spec.ID == "" || spec.Provider == "" || spec.Symbol == "" || spec.Strategy == "" {
@@ -337,6 +401,7 @@ func (m *Manager) ensureSpec(spec config.LambdaSpec, allowReplace bool) error {
 	return nil
 }
 
+// Start starts a lambda instance by ID.
 func (m *Manager) Start(ctx context.Context, id string) error {
 	spec, err := m.specForID(id)
 	if err != nil {
@@ -410,6 +475,7 @@ func (m *Manager) specForID(id string) (config.LambdaSpec, error) {
 	return cloneSpec(spec), nil
 }
 
+// Stop stops a running lambda instance by ID.
 func (m *Manager) Stop(id string) error {
 	id = strings.TrimSpace(id)
 	m.mu.Lock()
@@ -432,6 +498,7 @@ func (m *Manager) Stop(id string) error {
 	return nil
 }
 
+// Remove removes a lambda instance by ID after stopping it.
 func (m *Manager) Remove(id string) error {
 	err := m.Stop(id)
 	if err != nil && !errors.Is(err, ErrInstanceNotRunning) {
@@ -447,6 +514,7 @@ func (m *Manager) Remove(id string) error {
 	return nil
 }
 
+// Update updates an existing lambda instance with new configuration.
 func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	spec = sanitizeSpec(spec)
 	if spec.ID == "" {
@@ -483,6 +551,7 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	return nil
 }
 
+// InstanceSnapshot captures the current state of a lambda instance.
 type InstanceSnapshot struct {
 	ID        string         `json:"id"`
 	Strategy  string         `json:"strategy"`
@@ -493,6 +562,7 @@ type InstanceSnapshot struct {
 	Running   bool           `json:"running"`
 }
 
+// Instances returns snapshots of all lambda instances.
 func (m *Manager) Instances() []InstanceSnapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -505,10 +575,19 @@ func (m *Manager) Instances() []InstanceSnapshot {
 	return out
 }
 
+// Instance returns a snapshot of a specific lambda instance by ID.
 func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 	spec, err := m.specForID(id)
 	if err != nil {
-		return InstanceSnapshot{}, false
+		return InstanceSnapshot{
+			ID:        "",
+			Strategy:  "",
+			Provider:  "",
+			Symbol:    "",
+			Config:    map[string]any{},
+			AutoStart: false,
+			Running:   false,
+		}, false
 	}
 	m.mu.RLock()
 	_, running := m.instances[spec.ID]
@@ -604,7 +683,7 @@ func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaS
 	return routes
 }
 
-func bindStrategy(strategy lambda.TradingStrategy, base *lambda.BaseLambda, logger *log.Logger) {
+func bindStrategy(strategy lambda.TradingStrategy, base *lambda.BaseLambda, _ *log.Logger) {
 	switch s := strategy.(type) {
 	case *strategies.Momentum:
 		s.Lambda = &momentumAdapter{base: base}
@@ -700,7 +779,10 @@ func submitOrderWithFloat(ctx context.Context, base *lambda.BaseLambda, side sch
 		formatted := strconv.FormatFloat(*price, 'f', -1, 64)
 		priceStr = &formatted
 	}
-	return base.SubmitOrder(ctx, side, quantity, priceStr)
+	if err := base.SubmitOrder(ctx, side, quantity, priceStr); err != nil {
+		return fmt.Errorf("submit order: %w", err)
+	}
+	return nil
 }
 
 type momentumAdapter struct {
@@ -711,7 +793,10 @@ func (a *momentumAdapter) Logger() *log.Logger   { return a.base.Logger() }
 func (a *momentumAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
 func (a *momentumAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
 func (a *momentumAdapter) SubmitMarketOrder(ctx context.Context, side schema.TradeSide, quantity string) error {
-	return a.base.SubmitMarketOrder(ctx, side, quantity)
+	if err := a.base.SubmitMarketOrder(ctx, side, quantity); err != nil {
+		return fmt.Errorf("submit market order: %w", err)
+	}
+	return nil
 }
 
 type orderStrategyAdapter struct {

@@ -18,10 +18,15 @@ type Registry struct {
 	factories map[string]Factory
 }
 
+// NewRegistry creates a new provider factory registry.
 func NewRegistry() *Registry {
-	return &Registry{factories: make(map[string]Factory)}
+	return &Registry{
+		mu:        sync.RWMutex{},
+		factories: make(map[string]Factory),
+	}
 }
 
+// Register registers a provider factory for the given type.
 func (r *Registry) Register(typ string, factory Factory) {
 	if factory == nil {
 		panic("provider factory required")
@@ -31,6 +36,7 @@ func (r *Registry) Register(typ string, factory Factory) {
 	r.mu.Unlock()
 }
 
+// Create creates a provider instance from the specification.
 func (r *Registry) Create(ctx context.Context, pools *pool.PoolManager, spec config.ProviderSpec) (Instance, error) {
 	r.mu.RLock()
 	factory, ok := r.factories[spec.Type]

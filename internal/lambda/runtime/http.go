@@ -1,3 +1,4 @@
+// Package runtime provides HTTP handlers and runtime management for lambda functions.
 package runtime
 
 import (
@@ -12,6 +13,7 @@ import (
 	"github.com/coachpo/meltica/internal/pool"
 )
 
+// NewHTTPHandler creates an HTTP handler for lambda management operations.
 func NewHTTPHandler(manager *Manager) http.Handler {
 	server := &httpServer{manager: manager}
 	mux := http.NewServeMux()
@@ -167,7 +169,9 @@ func (s *httpServer) writeManagerError(w http.ResponseWriter, err error) {
 }
 
 func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close()
+	}()
 	var spec config.LambdaSpec
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&spec); err != nil {

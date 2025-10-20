@@ -35,6 +35,7 @@ var meanReversionSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("EXECUTION.REPORT"),
 }
 
+// SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *MeanReversion) SubscribedEvents() []schema.CanonicalType {
 	return append([]schema.CanonicalType(nil), meanReversionSubscribedEvents...)
 }

@@ -1,3 +1,4 @@
+// Package dispatcher provides dynamic routing capabilities for event-driven systems.
 package dispatcher
 
 import (
@@ -42,6 +43,7 @@ func NewRegistrar(table *Table, router ProviderRouter) *Registrar {
 		table = NewTable()
 	}
 	return &Registrar{
+		mu:      sync.Mutex{},
 		table:   table,
 		router:  router,
 		lambdas: make(map[string]lambdaRegistration),
@@ -104,6 +106,9 @@ func (r *Registrar) rebuild(ctx context.Context) error {
 				route = Route{
 					Provider: reg.Provider,
 					Type:     decl.Type,
+					WSTopics: []string{},
+					RestFns:  []RestFn{},
+					Filters:  []FilterRule{},
 				}
 			}
 			merged := mergeFilters(route.Filters, decl.Filters)
@@ -218,7 +223,11 @@ func mergeFilters(existing []FilterRule, overrides map[string]any) []FilterRule 
 			normValues = append(normValues, value)
 		}
 		sort.Strings(normValues)
-		rule := FilterRule{Field: field}
+		rule := FilterRule{
+			Field: field,
+			Op:    "",
+			Value: nil,
+		}
 		if len(normValues) == 1 {
 			rule.Op = "eq"
 			rule.Value = normValues[0]

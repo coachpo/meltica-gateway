@@ -2,7 +2,8 @@ package strategies
 
 import (
 	"context"
-	"math/rand"
+	"crypto/rand"
+	"math"
 	"sync"
 	"time"
 
@@ -19,9 +20,9 @@ var (
 		schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
 	}
 	delayRandMu sync.Mutex
-	delayRand   = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
+// SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *Delay) SubscribedEvents() []schema.CanonicalType {
 	return append([]schema.CanonicalType(nil), delaySubscribedEvents...)
 }
@@ -29,54 +30,83 @@ func (s *Delay) SubscribedEvents() []schema.CanonicalType {
 func (s *Delay) sleep() {
 	delayRandMu.Lock()
 	defer delayRandMu.Unlock()
-	d := time.Duration(delayRand.Intn(401)+100) * time.Millisecond // 100-500ms
-	time.Sleep(d)
+	
+	// Generate cryptographically secure random delay between 100-500ms
+	randBytes := make([]byte, 8)
+	_, err := rand.Read(randBytes)
+	if err != nil {
+		// Fallback to fixed delay if crypto/rand fails
+		time.Sleep(300 * time.Millisecond)
+		return
+	}
+	
+	// Convert bytes to int64
+	randInt := int64(0)
+	for i, b := range randBytes {
+		randInt |= int64(b) << (i * 8)
+	}
+	
+	// Use absolute value to avoid negative values and mod to get range
+	delay := time.Duration((int64(math.Abs(float64(randInt))) % 401) + 100) * time.Millisecond // 100-500ms
+	time.Sleep(delay)
 }
 
-func (s *Delay) OnTrade(ctx context.Context, _ *schema.Event, _ schema.TradePayload, _ float64) {
+// OnTrade handles trade events by adding a delay.
+func (s *Delay) OnTrade(_ context.Context, _ *schema.Event, _ schema.TradePayload, _ float64) {
 	s.sleep()
 }
 
-func (s *Delay) OnTicker(ctx context.Context, _ *schema.Event, _ schema.TickerPayload) {
+// OnTicker handles ticker events by adding a delay.
+func (s *Delay) OnTicker(_ context.Context, _ *schema.Event, _ schema.TickerPayload) {
 	s.sleep()
 }
 
-func (s *Delay) OnBookSnapshot(ctx context.Context, _ *schema.Event, _ schema.BookSnapshotPayload) {
+// OnBookSnapshot handles order book snapshot events by adding a delay.
+func (s *Delay) OnBookSnapshot(_ context.Context, _ *schema.Event, _ schema.BookSnapshotPayload) {
 	s.sleep()
 }
 
-func (s *Delay) OnOrderFilled(ctx context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
+// OnOrderFilled handles order fill events by adding a delay.
+func (s *Delay) OnOrderFilled(_ context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
 	s.sleep()
 }
 
-func (s *Delay) OnOrderRejected(ctx context.Context, _ *schema.Event, _ schema.ExecReportPayload, _ string) {
+// OnOrderRejected handles order rejection events by adding a delay.
+func (s *Delay) OnOrderRejected(_ context.Context, _ *schema.Event, _ schema.ExecReportPayload, _ string) {
 	s.sleep()
 }
 
-func (s *Delay) OnOrderPartialFill(ctx context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
+// OnOrderPartialFill handles order partial fill events by adding a delay.
+func (s *Delay) OnOrderPartialFill(_ context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
 	s.sleep()
 }
 
-func (s *Delay) OnOrderCancelled(ctx context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
+// OnOrderCancelled handles order cancellation events by adding a delay.
+func (s *Delay) OnOrderCancelled(_ context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
 	s.sleep()
 }
 
-func (s *Delay) OnOrderAcknowledged(ctx context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
+// OnOrderAcknowledged handles order acknowledgment events by adding a delay.
+func (s *Delay) OnOrderAcknowledged(_ context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
 	s.sleep()
 }
 
-func (s *Delay) OnOrderExpired(ctx context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
+// OnOrderExpired handles order expiration events by adding a delay.
+func (s *Delay) OnOrderExpired(_ context.Context, _ *schema.Event, _ schema.ExecReportPayload) {
 	s.sleep()
 }
 
-func (s *Delay) OnKlineSummary(ctx context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {
+// OnKlineSummary handles kline summary events by adding a delay.
+func (s *Delay) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {
 	s.sleep()
 }
 
-func (s *Delay) OnControlAck(ctx context.Context, _ *schema.Event, _ schema.ControlAckPayload) {
+// OnControlAck handles control acknowledgment events by adding a delay.
+func (s *Delay) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {
 	s.sleep()
 }
 
-func (s *Delay) OnControlResult(ctx context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
+// OnControlResult handles control result events by adding a delay.
+func (s *Delay) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
 	s.sleep()
 }

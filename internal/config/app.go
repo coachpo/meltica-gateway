@@ -75,6 +75,12 @@ type EventbusConfig struct {
 	BufferSize int `yaml:"bufferSize"`
 }
 
+// PoolConfig controls pooled object capacities.
+type PoolConfig struct {
+	EventSize        int `yaml:"eventSize"`
+	OrderRequestSize int `yaml:"orderRequestSize"`
+}
+
 // TelemetryConfig configures OTLP exporters (metrics only).
 type TelemetryConfig struct {
 	OTLPEndpoint  string `yaml:"otlpEndpoint"`
@@ -102,6 +108,7 @@ type AppConfig struct {
 	Adapters     AdapterSet
 	Dispatcher   DispatcherConfig
 	Eventbus     EventbusConfig
+	Pools        PoolConfig
 	Telemetry    TelemetryConfig
 	ManifestPath string
 }
@@ -113,6 +120,7 @@ type appConfigYAML struct {
 	Adapters    AdapterSet                      `yaml:"adapter"`
 	Dispatcher  DispatcherConfig                `yaml:"dispatcher"`
 	Eventbus    EventbusConfig                  `yaml:"eventbus"`
+	Pools       PoolConfig                      `yaml:"pools"`
 	Telemetry   TelemetryConfig                 `yaml:"telemetry"`
 	Manifest    string                          `yaml:"manifest"`
 }
@@ -199,6 +207,10 @@ func defaultAppConfig() AppConfig {
 		},
 		Eventbus: EventbusConfig{
 			BufferSize: 1024,
+		},
+		Pools: PoolConfig{
+			EventSize:        20000,
+			OrderRequestSize: 5000,
 		},
 		Telemetry: TelemetryConfig{
 			OTLPEndpoint:  "http://localhost:4318",
@@ -311,6 +323,9 @@ func (c *AppConfig) loadYAML(ctx context.Context, path string) error {
 	c.Adapters = yamlCfg.Adapters
 	c.Dispatcher = yamlCfg.Dispatcher
 	c.Eventbus = yamlCfg.Eventbus
+	if yamlCfg.Pools.EventSize != 0 || yamlCfg.Pools.OrderRequestSize != 0 {
+		c.Pools = yamlCfg.Pools
+	}
 	c.Telemetry = yamlCfg.Telemetry
 	if manifest := strings.TrimSpace(yamlCfg.Manifest); manifest != "" {
 		c.ManifestPath = manifest
@@ -426,6 +441,13 @@ func (c *AppConfig) Validate(ctx context.Context) error {
 	// Validate eventbus
 	if c.Eventbus.BufferSize <= 0 {
 		return fmt.Errorf("eventbus bufferSize must be >0")
+	}
+
+	if c.Pools.EventSize <= 0 {
+		return fmt.Errorf("pool eventSize must be >0")
+	}
+	if c.Pools.OrderRequestSize <= 0 {
+		return fmt.Errorf("pool orderRequestSize must be >0")
 	}
 
 	// Validate telemetry

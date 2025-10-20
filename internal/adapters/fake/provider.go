@@ -156,6 +156,7 @@ func (p *Provider) Start(ctx context.Context) error {
 	return nil
 }
 
+// Name returns the provider name.
 func (p *Provider) Name() string {
 	return p.name
 }
