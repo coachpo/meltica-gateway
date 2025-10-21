@@ -3,7 +3,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
