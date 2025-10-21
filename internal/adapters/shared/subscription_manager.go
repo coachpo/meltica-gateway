@@ -75,14 +75,3 @@ func (m *SubscriptionManager) Deactivate(ctx context.Context, typ schema.Canonic
 	m.mu.Unlock()
 	return nil
 }
-
-// ActiveRoutes exposes currently active dispatcher routes.
-func (m *SubscriptionManager) ActiveRoutes() map[schema.CanonicalType]dispatcher.Route {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make(map[schema.CanonicalType]dispatcher.Route, len(m.active))
-	for k, v := range m.active {
-		out[k] = v
-	}
-	return out
-}

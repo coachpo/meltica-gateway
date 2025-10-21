@@ -87,22 +87,6 @@ func (m *Manager) Provider(name string) (Instance, bool) {
 	return inst, ok
 }
 
-// Activate subscribes the provided route across all managed providers.
-func (m *Manager) Activate(ctx context.Context, route dispatcher.Route) error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var errs []error
-	for name, sub := range m.subscriptions {
-		if err := sub.Activate(ctx, route); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
-		}
-	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
-}
-
 // ActivateRoute applies a route update to the targeted provider only.
 func (m *Manager) ActivateRoute(ctx context.Context, route dispatcher.Route) error {
 	providerName := strings.TrimSpace(route.Provider)
@@ -135,22 +119,6 @@ func (m *Manager) DeactivateRoute(ctx context.Context, route dispatcher.Route) e
 	}
 	if err := sub.Deactivate(ctx, route.Type); err != nil {
 		return fmt.Errorf("deactivate route: %w", err)
-	}
-	return nil
-}
-
-// Deactivate removes the given route from all managed providers.
-func (m *Manager) Deactivate(ctx context.Context, typ schema.CanonicalType) error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var errs []error
-	for name, sub := range m.subscriptions {
-		if err := sub.Deactivate(ctx, typ); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
-		}
-	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
 	}
 	return nil
 }
