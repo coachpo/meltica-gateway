@@ -38,6 +38,7 @@ var marketMakingSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("TRADE"),
 	schema.CanonicalType("TICKER"),
 	schema.CanonicalType("EXECUTION.REPORT"),
+	schema.CanonicalTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -191,6 +192,12 @@ func (s *MarketMaking) OnKlineSummary(_ context.Context, _ *schema.Event, _ sche
 
 // OnInstrumentUpdate is a no-op for this strategy.
 func (s *MarketMaking) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
+
+// OnBalanceUpdate logs balance changes for awareness.
+func (s *MarketMaking) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.Lambda.Logger().Printf("[MM] Balance update: currency=%s total=%s available=%s",
+		payload.Currency, payload.Total, payload.Available)
 }
 
 // ParseFloat safely parses a string to float64.

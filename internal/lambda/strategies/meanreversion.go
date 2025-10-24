@@ -33,6 +33,7 @@ type MeanReversion struct {
 var meanReversionSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("TRADE"),
 	schema.CanonicalType("EXECUTION.REPORT"),
+	schema.CanonicalTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -150,4 +151,10 @@ func (s *MeanReversion) OnKlineSummary(_ context.Context, _ *schema.Event, _ sch
 
 // OnInstrumentUpdate is a no-op for this strategy.
 func (s *MeanReversion) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
+
+// OnBalanceUpdate logs balance updates for visibility.
+func (s *MeanReversion) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.Lambda.Logger().Printf("[MEAN_REV] Balance update: currency=%s total=%s available=%s",
+		payload.Currency, payload.Total, payload.Available)
 }

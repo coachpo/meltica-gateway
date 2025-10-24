@@ -13,6 +13,7 @@ var noopSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("TRADE"),
 	schema.CanonicalType("TICKER"),
 	schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
+	schema.CanonicalTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -32,6 +33,9 @@ func (s *NoOp) OnBookSnapshot(_ context.Context, _ *schema.Event, _ schema.BookS
 // OnInstrumentUpdate does nothing.
 func (s *NoOp) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
 }
+
+// OnBalanceUpdate does nothing.
+func (s *NoOp) OnBalanceUpdate(_ context.Context, _ *schema.Event, _ schema.BalanceUpdatePayload) {}
 
 // OnOrderFilled does nothing.
 func (s *NoOp) OnOrderFilled(_ context.Context, _ *schema.Event, _ schema.ExecReportPayload) {}

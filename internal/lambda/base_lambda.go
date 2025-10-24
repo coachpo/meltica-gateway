@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -25,6 +26,7 @@ type TradingStrategy interface {
 	OnBookSnapshot(ctx context.Context, evt *schema.Event, payload schema.BookSnapshotPayload)
 	OnKlineSummary(ctx context.Context, evt *schema.Event, payload schema.KlineSummaryPayload)
 	OnInstrumentUpdate(ctx context.Context, evt *schema.Event, payload schema.InstrumentUpdatePayload)
+	OnBalanceUpdate(ctx context.Context, evt *schema.Event, payload schema.BalanceUpdatePayload)
 
 	// Order lifecycle callbacks (trading decisions)
 	OnOrderFilled(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
@@ -60,6 +62,8 @@ type BaseLambda struct {
 	pools          *pool.PoolManager
 	logger         *log.Logger
 	strategy       TradingStrategy
+	baseCurrency   string
+	quoteCurrency  string
 
 	// Market state (thread-safe via atomic)
 	lastPrice atomic.Value // float64
@@ -103,6 +107,13 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 		orderCount:     atomic.Int64{},
 	}
 
+	if base, quote, err := schema.InstrumentCurrencies(config.Symbol); err == nil {
+		lambda.baseCurrency = strings.ToUpper(base)
+		lambda.quoteCurrency = strings.ToUpper(quote)
+	} else if config.Symbol != "" {
+		lambda.logger.Printf("[%s] unable to derive currencies from symbol %q: %v", lambda.id, config.Symbol, err)
+	}
+
 	lambda.lastPrice.Store(float64(0))
 	lambda.bidPrice.Store(float64(0))
 	lambda.askPrice.Store(float64(0))
@@ -126,6 +137,7 @@ func (l *BaseLambda) Start(ctx context.Context) (<-chan error, error) {
 		schema.EventTypeBookSnapshot,
 		schema.EventTypeExecReport,
 		schema.EventTypeInstrumentUpdate,
+		schema.EventTypeBalanceUpdate,
 	}
 
 	errs := make(chan error, len(eventTypes))
@@ -190,7 +202,15 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 	defer l.recycleEvent(evt)
 
 	// Filter by provider and symbol
-	if !l.matchesProvider(evt) || !l.matchesSymbol(evt) {
+	if !l.matchesProvider(evt) {
+		return
+	}
+
+	if typ == schema.EventTypeBalanceUpdate {
+		if !l.matchesBalanceCurrency(evt.Symbol) {
+			return
+		}
+	} else if !l.matchesSymbol(evt) {
 		return
 	}
 
@@ -207,6 +227,8 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 		l.handleKlineSummary(ctx, evt)
 	case schema.EventTypeInstrumentUpdate:
 		l.handleInstrumentUpdate(ctx, evt)
+	case schema.EventTypeBalanceUpdate:
+		l.handleBalanceUpdate(ctx, evt)
 	}
 }
 
@@ -332,6 +354,17 @@ func (l *BaseLambda) handleKlineSummary(ctx context.Context, evt *schema.Event) 
 	if l.strategy != nil {
 		l.strategy.OnKlineSummary(ctx, evt, payload)
 	}
+}
+
+func (l *BaseLambda) handleBalanceUpdate(ctx context.Context, evt *schema.Event) {
+	if l.strategy == nil {
+		return
+	}
+	payload, ok := evt.Payload.(schema.BalanceUpdatePayload)
+	if !ok {
+		return
+	}
+	l.strategy.OnBalanceUpdate(ctx, evt, payload)
 }
 
 // SubmitOrder submits an order request to the provider.
@@ -525,4 +558,18 @@ func (l *BaseLambda) recycleEvent(evt *schema.Event) {
 	if l.pools != nil {
 		l.pools.ReturnEventInst(evt)
 	}
+}
+
+func (l *BaseLambda) matchesBalanceCurrency(symbol string) bool {
+	currency := strings.ToUpper(strings.TrimSpace(symbol))
+	if currency == "" {
+		return false
+	}
+	if l.baseCurrency != "" && currency == l.baseCurrency {
+		return true
+	}
+	if l.quoteCurrency != "" && currency == l.quoteCurrency {
+		return true
+	}
+	return false
 }

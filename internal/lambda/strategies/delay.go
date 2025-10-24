@@ -29,6 +29,7 @@ var (
 		schema.CanonicalType("TRADE"),
 		schema.CanonicalType("TICKER"),
 		schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
+		schema.CanonicalTypeAccountBalance,
 	}
 	delayRandMu sync.Mutex
 )
@@ -141,5 +142,10 @@ func (s *Delay) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.Klin
 
 // OnInstrumentUpdate handles instrument catalogue refreshes by adding a delay.
 func (s *Delay) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+	s.sleep()
+}
+
+// OnBalanceUpdate handles balance updates by adding a delay.
+func (s *Delay) OnBalanceUpdate(_ context.Context, _ *schema.Event, _ schema.BalanceUpdatePayload) {
 	s.sleep()
 }

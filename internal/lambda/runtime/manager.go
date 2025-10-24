@@ -685,16 +685,42 @@ func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaS
 		return nil
 	}
 	routes := make([]dispatcher.RouteDeclaration, 0, len(events))
+	baseCurrency, quoteCurrency, err := schema.InstrumentCurrencies(spec.Symbol)
+	if err != nil {
+		baseCurrency, quoteCurrency = "", ""
+	}
+	seenCurrencies := make(map[string]struct{}, 2)
 	for _, typ := range events {
 		if err := typ.Validate(); err != nil {
 			continue
 		}
-		routes = append(routes, dispatcher.RouteDeclaration{
-			Type: typ,
-			Filters: map[string]any{
-				"instrument": spec.Symbol,
-			},
-		})
+		switch typ {
+		case schema.CanonicalTypeAccountBalance:
+			candidates := []string{baseCurrency, quoteCurrency}
+			for _, currency := range candidates {
+				currency = strings.ToUpper(strings.TrimSpace(currency))
+				if currency == "" {
+					continue
+				}
+				if _, ok := seenCurrencies[currency]; ok {
+					continue
+				}
+				seenCurrencies[currency] = struct{}{}
+				routes = append(routes, dispatcher.RouteDeclaration{
+					Type: typ,
+					Filters: map[string]any{
+						"currency": currency,
+					},
+				})
+			}
+		default:
+			routes = append(routes, dispatcher.RouteDeclaration{
+				Type: typ,
+				Filters: map[string]any{
+					"instrument": spec.Symbol,
+				},
+			})
+		}
 	}
 	return routes
 }

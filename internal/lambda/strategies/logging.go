@@ -20,6 +20,7 @@ var loggingSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("TICKER"),
 	schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
 	schema.CanonicalType("EXECUTION.REPORT"),
+	schema.CanonicalTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -115,4 +116,10 @@ func (s *Logging) OnKlineSummary(_ context.Context, evt *schema.Event, payload s
 // OnInstrumentUpdate logs instrument catalogue refresh events.
 func (s *Logging) OnInstrumentUpdate(_ context.Context, evt *schema.Event, payload schema.InstrumentUpdatePayload) {
 	s.logger().Printf("Instrument updated: provider=%s symbol=%s", evt.Provider, payload.Instrument.Symbol)
+}
+
+// OnBalanceUpdate logs account balance updates.
+func (s *Logging) OnBalanceUpdate(_ context.Context, evt *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.logger().Printf("Balance update: provider=%s currency=%s total=%s available=%s",
+		evt.Provider, payload.Currency, payload.Total, payload.Available)
 }

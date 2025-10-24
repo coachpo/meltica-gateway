@@ -35,6 +35,7 @@ type Momentum struct {
 var momentumSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("TRADE"),
 	schema.CanonicalType("EXECUTION.REPORT"),
+	schema.CanonicalTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -149,6 +150,12 @@ func (s *Momentum) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.K
 
 // OnInstrumentUpdate is a no-op for this strategy.
 func (s *Momentum) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
+
+// OnBalanceUpdate logs balance updates to track available capital.
+func (s *Momentum) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.Lambda.Logger().Printf("[MOMENTUM] Balance update: currency=%s total=%s available=%s",
+		payload.Currency, payload.Total, payload.Available)
 }
 
 // calculateMomentum returns the price change ratio over the lookback period.

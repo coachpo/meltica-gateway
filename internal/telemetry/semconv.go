@@ -13,6 +13,11 @@ const (
 	AttrProvider    = attribute.Key("provider")
 	AttrSymbol      = attribute.Key("symbol")
 	AttrMessageType = attribute.Key("message.type")
+	AttrOrderSide   = attribute.Key("order.side")
+	AttrOrderType   = attribute.Key("order.type")
+	AttrOrderTIF    = attribute.Key("order.tif")
+	AttrOrderState  = attribute.Key("order.state")
+	AttrCurrency    = attribute.Key("currency")
 
 	// Pool attributes
 	AttrPoolName   = attribute.Key("pool.name")
@@ -37,11 +42,12 @@ const (
 
 // Event type values
 const (
-	EventTypeBookSnapshot = "book_snapshot"
-	EventTypeTrade        = "trade"
-	EventTypeTicker       = "ticker"
-	EventTypeKline        = "kline"
-	EventTypeExecReport   = "exec_report"
+	EventTypeBookSnapshot  = "book_snapshot"
+	EventTypeTrade         = "trade"
+	EventTypeTicker        = "ticker"
+	EventTypeKline         = "kline"
+	EventTypeExecReport    = "exec_report"
+	EventTypeBalanceUpdate = "balance_update"
 )
 
 // Provider values
@@ -60,6 +66,27 @@ func EventAttributes(environment, eventType, provider, symbol string) []attribut
 		AttrProvider.String(provider),
 		AttrSymbol.String(symbol),
 	}
+}
+
+// OrderAttributes returns attributes for order-related metrics.
+func OrderAttributes(environment, provider, symbol, side, orderType, tif string) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		AttrEnvironment.String(environment),
+		AttrProvider.String(provider),
+	}
+	if symbol != "" {
+		attrs = append(attrs, AttrSymbol.String(symbol))
+	}
+	if side != "" {
+		attrs = append(attrs, AttrOrderSide.String(side))
+	}
+	if orderType != "" {
+		attrs = append(attrs, AttrOrderType.String(orderType))
+	}
+	if tif != "" {
+		attrs = append(attrs, AttrOrderTIF.String(tif))
+	}
+	return attrs
 }
 
 // PoolAttributes returns common attributes for pool metrics.

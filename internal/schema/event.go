@@ -12,6 +12,11 @@ import (
 // CanonicalType identifies canonical Meltica event categories (e.g. TICKER, ORDERBOOK.SNAPSHOT).
 type CanonicalType string
 
+const (
+	// CanonicalTypeAccountBalance represents balance updates for account currencies.
+	CanonicalTypeAccountBalance CanonicalType = "ACCOUNT.BALANCE"
+)
+
 // RawInstance is a pre-canonicalized payload produced by upstream adapters.
 type RawInstance map[string]any
 
@@ -139,6 +144,8 @@ const (
 	EventTypeKlineSummary EventType = "KlineSummary"
 	// EventTypeInstrumentUpdate identifies provider instrument catalogue refresh notifications.
 	EventTypeInstrumentUpdate EventType = "InstrumentUpdate"
+	// EventTypeBalanceUpdate identifies account balance updates emitted by providers.
+	EventTypeBalanceUpdate EventType = "BalanceUpdate"
 )
 
 // PriceLevel describes an order book price level using decimal strings.
@@ -247,4 +254,12 @@ type KlineSummaryPayload struct {
 // InstrumentUpdatePayload advertises an updated instrument definition for a provider.
 type InstrumentUpdatePayload struct {
 	Instrument Instrument `json:"instrument"`
+}
+
+// BalanceUpdatePayload reports the current account balance for a given currency.
+type BalanceUpdatePayload struct {
+	Currency  string    `json:"currency"`
+	Total     string    `json:"total"`
+	Available string    `json:"available"`
+	Timestamp time.Time `json:"timestamp"`
 }

@@ -12,6 +12,7 @@ exchanges:
       book_snapshot_interval: 400ms
       instrument_refresh_interval: 15m
       kline_interval: 30s
+      balance_update_interval: 2s
       price_model:
         drift: 0.00018
         volatility: 0.009
@@ -38,6 +39,7 @@ exchanges:
       trade_interval: 60ms
       book_snapshot_interval: 200ms
       kline_interval: 15s
+      balance_update_interval: 1500ms
       price_model:
         drift: 0.00035
         volatility: 0.02
@@ -65,6 +67,7 @@ exchanges:
       book_snapshot_interval: 1s
       instrument_refresh_interval: 20m
       kline_interval: 1m
+      balance_update_interval: 4s
       price_model:
         drift: 0.00005
         volatility: 0.004

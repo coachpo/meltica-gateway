@@ -12,6 +12,7 @@ exchanges:
       ticker_interval: 500ms
       trade_interval: 1s
       book_snapshot_interval: 5s
+      balance_update_interval: 3s
 
   # fake-slow: alias with different cadence but the same underlying exchange implementation
   fake-slow:
@@ -20,6 +21,7 @@ exchanges:
       ticker_interval: 750ms
       trade_interval: 2s
       book_snapshot_interval: 10s
+      balance_update_interval: 6s
 
   # bnx/binance/BINANCE: demonstrate aliases mapping to the real Binance exchange
   bnx:

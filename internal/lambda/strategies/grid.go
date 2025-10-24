@@ -33,6 +33,7 @@ type Grid struct {
 var gridSubscribedEvents = []schema.CanonicalType{
 	schema.CanonicalType("TRADE"),
 	schema.CanonicalType("EXECUTION.REPORT"),
+	schema.CanonicalTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -150,4 +151,9 @@ func (s *Grid) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.Kline
 
 // OnInstrumentUpdate refreshes strategy state when instruments change (no-op for grid).
 func (s *Grid) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
+
+// OnBalanceUpdate logs balance updates for monitoring.
+func (s *Grid) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.Lambda.Logger().Printf("[GRID] Balance update: currency=%s available=%s total=%s", payload.Currency, payload.Available, payload.Total)
 }

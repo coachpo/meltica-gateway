@@ -19,7 +19,11 @@ import (
 	"github.com/coachpo/meltica/internal/dispatcher"
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/schema"
+	"github.com/coachpo/meltica/internal/telemetry"
 	"github.com/sourcegraph/conc"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // DefaultInstruments lists canonical instruments used when no explicit catalogue is provided.
@@ -52,6 +56,7 @@ const (
 	defaultVenueDisconnectChance     = 0.0005
 	defaultVenueDisconnectDuration   = 5 * time.Second
 	defaultKlineInterval             = time.Minute
+	defaultBalanceUpdateInterval     = 3 * time.Second
 )
 
 type nativeInstrument struct {
@@ -82,6 +87,17 @@ func (instrumentInterpreter) FromNative(symbol string, catalog map[string]schema
 }
 
 type instrumentSupplier func() []nativeInstrument
+
+type currencySupplier func() []string
+
+type providerMetrics struct {
+	eventsEmitted    metric.Int64Counter
+	ordersReceived   metric.Int64Counter
+	ordersRejected   metric.Int64Counter
+	orderLatency     metric.Float64Histogram
+	venueDisruptions metric.Int64Counter
+	venueErrors      metric.Int64Counter
+}
 
 type instrumentConstraints struct {
 	priceIncrement    float64
@@ -188,6 +204,47 @@ func applyVenueDefaults(in venueBehaviorOptions) venueBehaviorOptions {
 	return in
 }
 
+func (p *Provider) initMetrics() {
+	meter := otel.Meter("provider.fake")
+	var err error
+	p.metrics.eventsEmitted, err = meter.Int64Counter("provider.fake.events.emitted",
+		metric.WithDescription("Number of synthetic events emitted"),
+		metric.WithUnit("{event}"))
+	if err != nil {
+		p.metrics.eventsEmitted = nil
+	}
+	p.metrics.ordersReceived, err = meter.Int64Counter("provider.fake.orders.received",
+		metric.WithDescription("Orders received by the fake provider"),
+		metric.WithUnit("{order}"))
+	if err != nil {
+		p.metrics.ordersReceived = nil
+	}
+	p.metrics.ordersRejected, err = meter.Int64Counter("provider.fake.orders.rejected",
+		metric.WithDescription("Orders rejected by the fake provider"),
+		metric.WithUnit("{order}"))
+	if err != nil {
+		p.metrics.ordersRejected = nil
+	}
+	p.metrics.orderLatency, err = meter.Float64Histogram("provider.fake.order.latency",
+		metric.WithDescription("End-to-end order handling latency"),
+		metric.WithUnit("ms"))
+	if err != nil {
+		p.metrics.orderLatency = nil
+	}
+	p.metrics.venueDisruptions, err = meter.Int64Counter("provider.fake.venue.disruptions",
+		metric.WithDescription("Venue connectivity disruptions triggered by the fake provider"),
+		metric.WithUnit("{event}"))
+	if err != nil {
+		p.metrics.venueDisruptions = nil
+	}
+	p.metrics.venueErrors, err = meter.Int64Counter("provider.fake.venue.errors",
+		metric.WithDescription("Injected venue errors"),
+		metric.WithUnit("{event}"))
+	if err != nil {
+		p.metrics.venueErrors = nil
+	}
+}
+
 func intPtr(v int) *int {
 	value := v
 	return &value
@@ -231,15 +288,17 @@ type Options struct {
 	OrderBook                 orderBookOptions
 	VenueBehavior             venueBehaviorOptions
 	KlineInterval             time.Duration
+	BalanceUpdateInterval     time.Duration
 }
 
 // Provider emits synthetic market data covering tickers, trades, and order book events.
 type Provider struct {
-	name                 string
-	tickerInterval       time.Duration
-	tradeInterval        time.Duration
-	bookSnapshotInterval time.Duration
-	klineInterval        time.Duration
+	name                  string
+	tickerInterval        time.Duration
+	tradeInterval         time.Duration
+	bookSnapshotInterval  time.Duration
+	klineInterval         time.Duration
+	balanceUpdateInterval time.Duration
 
 	events chan *schema.Event
 	errs   chan error
@@ -279,6 +338,11 @@ type Provider struct {
 	randMu       sync.Mutex
 	venueState   venueState
 	orderCounter atomic.Uint64
+
+	balanceMu sync.Mutex
+	balances  map[string]balanceState
+
+	metrics providerMetrics
 }
 
 type routeHandle struct {
@@ -303,6 +367,11 @@ type instrumentState struct {
 	lastDiff     bookDiff
 	currentKline *klineWindow
 	completed    []klineWindow
+}
+
+type balanceState struct {
+	total     float64
+	available float64
 }
 
 type bookDepth struct {
@@ -867,6 +936,10 @@ func NewProvider(opts Options) *Provider {
 	if bookSnapshotInterval <= 0 {
 		bookSnapshotInterval = 5 * time.Second
 	}
+	balanceInterval := opts.BalanceUpdateInterval
+	if balanceInterval <= 0 {
+		balanceInterval = defaultBalanceUpdateInterval
+	}
 
 	p := &Provider{ //nolint:exhaustruct // zero values for internal synchronization fields are acceptable
 		name:                  name,
@@ -874,6 +947,7 @@ func NewProvider(opts Options) *Provider {
 		tradeInterval:         tradeInterval,
 		bookSnapshotInterval:  bookSnapshotInterval,
 		klineInterval:         opts.KlineInterval,
+		balanceUpdateInterval: balanceInterval,
 		events:                make(chan *schema.Event, 128),
 		errs:                  make(chan error, 8),
 		orders:                make(chan schema.OrderRequest, 64),
@@ -884,6 +958,7 @@ func NewProvider(opts Options) *Provider {
 		pools:                 opts.Pools,
 		instrumentConstraints: make(map[string]instrumentConstraints),
 		rng:                   rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // pseudo-randomness is acceptable for simulations
+		balances:              make(map[string]balanceState),
 	}
 	if p.klineInterval <= 0 {
 		p.klineInterval = defaultKlineInterval
@@ -912,6 +987,7 @@ func NewProvider(opts Options) *Provider {
 			}
 		}
 	}
+	p.initMetrics()
 	return p
 }
 
@@ -1039,10 +1115,18 @@ func (p *Provider) UnsubscribeRoute(typ schema.CanonicalType) error {
 func (p *Provider) startRouteLocked(route dispatcher.Route, evtType schema.EventType) *routeHandle {
 	routeCtx, cancel := context.WithCancel(p.ctx)
 	handle := &routeHandle{cancel: cancel} //nolint:exhaustruct // wait group zero value is acceptable
-	supplier := p.instrumentSupplier(route)
-	handle.wg.Go(func() {
-		p.runGenerator(routeCtx, evtType, supplier)
-	})
+	switch evtType {
+	case schema.EventTypeBalanceUpdate:
+		supply := p.currencySupplier(route)
+		handle.wg.Go(func() {
+			p.streamBalanceUpdates(routeCtx, supply)
+		})
+	default:
+		supplier := p.instrumentSupplier(route)
+		handle.wg.Go(func() {
+			p.runGenerator(routeCtx, evtType, supplier)
+		})
+	}
 	return handle
 }
 
@@ -1099,6 +1183,86 @@ func (p *Provider) instrumentsFromRoute(route dispatcher.Route) []nativeInstrume
 	}
 	sort.Slice(natives, func(i, j int) bool { return natives[i].symbol < natives[j].symbol })
 	return natives
+}
+
+func (p *Provider) currencySupplier(route dispatcher.Route) currencySupplier {
+	currencies := p.currenciesFromRoute(route)
+	if len(currencies) == 0 {
+		currencies = p.defaultCurrencies()
+	}
+	static := snapshotCurrencies(currencies)
+	return func() []string {
+		return static
+	}
+}
+
+func (p *Provider) currenciesFromRoute(route dispatcher.Route) []string {
+	if len(route.Filters) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{})
+	for _, filter := range route.Filters {
+		if !strings.EqualFold(filter.Field, "currency") {
+			continue
+		}
+		switch v := filter.Value.(type) {
+		case string:
+			if currency := normalizeCurrency(v); currency != "" {
+				set[currency] = struct{}{}
+			}
+		case []string:
+			for _, entry := range v {
+				if currency := normalizeCurrency(entry); currency != "" {
+					set[currency] = struct{}{}
+				}
+			}
+		case []any:
+			for _, entry := range v {
+				if currency := normalizeCurrency(fmt.Sprint(entry)); currency != "" {
+					set[currency] = struct{}{}
+				}
+			}
+		default:
+			if currency := normalizeCurrency(fmt.Sprint(filter.Value)); currency != "" {
+				set[currency] = struct{}{}
+			}
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for currency := range set {
+		out = append(out, currency)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (p *Provider) defaultCurrencies() []string {
+	p.instrumentMu.RLock()
+	defer p.instrumentMu.RUnlock()
+	if len(p.instruments) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{})
+	for _, inst := range p.instruments {
+		if currency := normalizeCurrency(inst.BaseCurrency); currency != "" {
+			set[currency] = struct{}{}
+		}
+		if currency := normalizeCurrency(inst.QuoteCurrency); currency != "" {
+			set[currency] = struct{}{}
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for currency := range set {
+		out = append(out, currency)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (p *Provider) collectInstrumentValues(value any, set map[string]struct{}) {
@@ -1199,9 +1363,36 @@ func (p *Provider) streamKlines(ctx context.Context, supply instrumentSupplier) 
 	}
 }
 
+func (p *Provider) streamBalanceUpdates(ctx context.Context, supply currencySupplier) {
+	if p.balanceUpdateInterval <= 0 {
+		<-ctx.Done()
+		return
+	}
+	ticker := time.NewTicker(p.balanceUpdateInterval)
+	defer ticker.Stop()
+	p.emitBalanceSnapshots(supply())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !p.applyVenueLatency(ctx) {
+				return
+			}
+			p.emitBalanceSnapshots(supply())
+		}
+	}
+}
+
 func (p *Provider) emitSnapshots(instruments []nativeInstrument) {
 	for _, inst := range instruments {
 		p.emitBookSnapshot(inst)
+	}
+}
+
+func (p *Provider) emitBalanceSnapshots(currencies []string) {
+	for _, currency := range currencies {
+		p.emitBalanceUpdate(currency)
 	}
 }
 
@@ -1240,6 +1431,40 @@ func (p *Provider) emitKline(instrument nativeInstrument) {
 		}
 		p.emitEvent(evt)
 	}
+}
+
+func (p *Provider) emitBalanceUpdate(currency string) {
+	normalized := normalizeCurrency(currency)
+	if normalized == "" {
+		return
+	}
+	ts := p.clock().UTC()
+	p.balanceMu.Lock()
+	state := p.balances[normalized]
+	if state.total <= 0 {
+		state.total = 500 + 500*p.randomFloat()
+	}
+	delta := (p.randomFloat() - 0.5) * 25
+	state.total += delta
+	if state.total < 0 {
+		state.total = 0
+	}
+	reserve := 0.3 + 0.6*p.randomFloat()
+	state.available = state.total * reserve
+	p.balances[normalized] = state
+	p.balanceMu.Unlock()
+	payload := schema.BalanceUpdatePayload{
+		Currency:  normalized,
+		Total:     formatBalance(state.total),
+		Available: formatBalance(state.available),
+		Timestamp: ts,
+	}
+	seq := p.nextSeq(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: normalized})
+	evt := p.newEvent(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: normalized}, seq, payload, ts)
+	if evt == nil {
+		return
+	}
+	p.emitEvent(evt)
 }
 
 func (p *Provider) emitTicker(instrument nativeInstrument) {
@@ -1417,6 +1642,7 @@ func (p *Provider) emitEvent(evt *schema.Event) {
 	if p.ctx == nil {
 		return
 	}
+	p.recordEventMetric(evt.Type, evt.Symbol)
 	select {
 	case <-p.ctx.Done():
 		return
@@ -1468,6 +1694,7 @@ func (p *Provider) consumeOrders(ctx context.Context) {
 }
 
 func (p *Provider) handleOrder(order schema.OrderRequest) {
+	start := p.clock()
 	if strings.TrimSpace(order.Symbol) == "" {
 		order.Symbol = p.defaultInstrumentSymbol()
 	}
@@ -1485,34 +1712,35 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 		order.Timestamp = p.clock().UTC()
 	}
 	if order.Side != schema.TradeSideBuy && order.Side != schema.TradeSideSell {
-		p.emitReject(nativeInst, order, "side required", order.Timestamp)
+		p.rejectOrder(nativeInst, order, "side required", start, order.Timestamp)
 		return
 	}
 	if order.OrderType != schema.OrderTypeLimit && order.OrderType != schema.OrderTypeMarket {
-		p.emitReject(nativeInst, order, "unsupported order type", order.Timestamp)
-		return
-	}
-	qty, err := strconv.ParseFloat(order.Quantity, 64)
-	if err != nil || qty <= 0 {
-		p.emitReject(nativeInst, order, "invalid quantity", order.Timestamp)
+		p.rejectOrder(nativeInst, order, "unsupported order type", start, order.Timestamp)
 		return
 	}
 	state := p.getInstrumentState(nativeInst)
 	cons := state.constraints
+	p.recordOrderReceived(order)
+	qty, err := strconv.ParseFloat(order.Quantity, 64)
+	if err != nil || qty <= 0 {
+		p.rejectOrder(nativeInst, order, "invalid quantity", start, order.Timestamp)
+		return
+	}
 	qty = cons.normalizeQuantity(qty)
 	if !cons.validQuantity(qty) {
-		p.emitReject(nativeInst, order, "quantity violates instrument constraints", order.Timestamp)
+		p.rejectOrder(nativeInst, order, "quantity violates instrument constraints", start, order.Timestamp)
 		return
 	}
 	var limitPrice float64
 	if order.OrderType == schema.OrderTypeLimit {
 		if order.Price == nil {
-			p.emitReject(nativeInst, order, "limit price required", order.Timestamp)
+			p.rejectOrder(nativeInst, order, "limit price required", start, order.Timestamp)
 			return
 		}
 		limitPrice, err = strconv.ParseFloat(*order.Price, 64)
 		if err != nil || limitPrice <= 0 {
-			p.emitReject(nativeInst, order, "invalid limit price", order.Timestamp)
+			p.rejectOrder(nativeInst, order, "invalid limit price", start, order.Timestamp)
 			return
 		}
 		limitPrice = cons.normalizePrice(limitPrice)
@@ -1523,7 +1751,7 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 		limitPrice = state.basePrice
 	}
 	if !cons.enforceNotional(limitPrice, qty) {
-		p.emitReject(nativeInst, order, "min notional not met", order.Timestamp)
+		p.rejectOrder(nativeInst, order, "min notional not met", start, order.Timestamp)
 		return
 	}
 	if !p.applyVenueLatency(p.ctx) {
@@ -1531,7 +1759,7 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 	}
 	now := p.clock().UTC()
 	if !p.venueOperational(now) {
-		p.emitReject(nativeInst, order, "venue unavailable", now)
+		p.rejectOrder(nativeInst, order, "venue unavailable", start, now)
 		return
 	}
 	state.mu.Lock()
@@ -1543,12 +1771,14 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 	if tifMode == tifFOK {
 		available := state.availableLiquidity(order.Side, limitConstraint)
 		if available+floatTolerance < qty {
-			p.emitReject(nativeInst, order, "FOK insufficient liquidity", now)
+			state.mu.Unlock()
+			p.rejectOrder(nativeInst, order, "FOK insufficient liquidity", start, now)
 			return
 		}
 	}
 	if tifMode == tifPostOnly && state.isMarketable(order.Side, limitPrice) {
-		p.emitReject(nativeInst, order, "post-only order would cross the book", now)
+		state.mu.Unlock()
+		p.rejectOrder(nativeInst, order, "post-only order would cross the book", start, now)
 		return
 	}
 	active := &activeOrder{
@@ -1633,6 +1863,11 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 	state.recenterBook(p, state.lastPrice)
 	state.mu.Unlock()
 	p.emitExecReportEvents(events)
+	finalState := schema.ExecReportState("")
+	if len(events) > 0 {
+		finalState = events[len(events)-1].payload.State
+	}
+	p.recordOrderOutcome(order, finalState, start, "")
 }
 
 func (p *Provider) defaultInstrumentSymbol() string {
@@ -1778,6 +2013,15 @@ func snapshotNative(src []nativeInstrument) []nativeInstrument {
 		return nil
 	}
 	out := make([]nativeInstrument, len(src))
+	copy(out, src)
+	return out
+}
+
+func snapshotCurrencies(src []string) []string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]string, len(src))
 	copy(out, src)
 	return out
 }
@@ -2082,6 +2326,7 @@ func (p *Provider) venueOperational(now time.Time) bool {
 	if p.venueState.disconnected {
 		if now.After(p.venueState.reconnectAt) {
 			p.venueState.disconnected = false
+			p.recordVenueDisruption("reconnected")
 		} else {
 			return false
 		}
@@ -2090,17 +2335,35 @@ func (p *Provider) venueOperational(now time.Time) bool {
 		p.venueState.disconnected = true
 		p.venueState.reconnectAt = now.Add(p.venueCfg.DisconnectFor)
 		p.emitError(fmt.Errorf("fake provider %s: venue link temporarily unavailable", p.name))
+		p.recordVenueDisruption("disconnected")
 		return false
 	}
 	return true
 }
 
 func (p *Provider) venueShouldError() bool {
-	return p.venueCfg.TransientError > 0 && p.randomFloat() < p.venueCfg.TransientError
+	if p.venueCfg.TransientError > 0 && p.randomFloat() < p.venueCfg.TransientError {
+		p.recordVenueError("transient")
+		return true
+	}
+	return false
 }
 
 func normalizeInstrument(symbol string) string {
 	return strings.ToUpper(strings.TrimSpace(symbol))
+}
+
+func normalizeCurrency(code string) string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if len(code) < 2 || len(code) > 10 {
+		return ""
+	}
+	for _, r := range code {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return code
 }
 
 func defaultBasePrice(symbol string) float64 {
@@ -2164,6 +2427,8 @@ func canonicalToEventType(c schema.CanonicalType) (schema.EventType, bool) {
 		return schema.EventTypeExecReport, true
 	case schema.CanonicalType("KLINE.SUMMARY"), schema.CanonicalType("KLINE"):
 		return schema.EventTypeKlineSummary, true
+	case schema.CanonicalTypeAccountBalance:
+		return schema.EventTypeBalanceUpdate, true
 	default:
 		return "", false
 	}
@@ -2178,6 +2443,69 @@ func checksum(instrument string, evtType schema.EventType, seq uint64) string {
 	return fmt.Sprintf("%08d", sum%100000000)
 }
 
+func (p *Provider) recordEventMetric(evtType schema.EventType, symbol string) {
+	if p.metrics.eventsEmitted == nil || p.ctx == nil {
+		return
+	}
+	attrs := telemetry.EventAttributes(telemetry.Environment(), string(evtType), p.name, symbol)
+	p.metrics.eventsEmitted.Add(p.ctx, 1, metric.WithAttributes(attrs...))
+}
+
+func (p *Provider) recordOrderReceived(order schema.OrderRequest) {
+	if p.metrics.ordersReceived == nil || p.ctx == nil {
+		return
+	}
+	attrs := telemetry.OrderAttributes(telemetry.Environment(), p.name, order.Symbol, string(order.Side), string(order.OrderType), order.TIF)
+	p.metrics.ordersReceived.Add(p.ctx, 1, metric.WithAttributes(attrs...))
+}
+
+func (p *Provider) recordOrderOutcome(order schema.OrderRequest, state schema.ExecReportState, start time.Time, reason string) {
+	if p.ctx == nil {
+		return
+	}
+	attrs := telemetry.OrderAttributes(telemetry.Environment(), p.name, order.Symbol, string(order.Side), string(order.OrderType), order.TIF)
+	if p.metrics.orderLatency != nil {
+		latencyAttrs := append([]attribute.KeyValue(nil), attrs...)
+		if state != "" {
+			latencyAttrs = append(latencyAttrs, telemetry.AttrOrderState.String(string(state)))
+		}
+		duration := float64(0)
+		if !start.IsZero() {
+			delta := p.clock().Sub(start).Milliseconds()
+			if delta > 0 {
+				duration = float64(delta)
+			}
+		}
+		p.metrics.orderLatency.Record(p.ctx, duration, metric.WithAttributes(latencyAttrs...))
+	}
+	if state == schema.ExecReportStateREJECTED && p.metrics.ordersRejected != nil {
+		rejectAttrs := append([]attribute.KeyValue(nil), attrs...)
+		if reason != "" {
+			rejectAttrs = append(rejectAttrs, telemetry.AttrReason.String(reason))
+		}
+		if state != "" {
+			rejectAttrs = append(rejectAttrs, telemetry.AttrOrderState.String(string(state)))
+		}
+		p.metrics.ordersRejected.Add(p.ctx, 1, metric.WithAttributes(rejectAttrs...))
+	}
+}
+
+func (p *Provider) recordVenueDisruption(result string) {
+	if p.metrics.venueDisruptions == nil || p.ctx == nil {
+		return
+	}
+	attrs := telemetry.OperationResultAttributes(telemetry.Environment(), p.name, "venue_link", result)
+	p.metrics.venueDisruptions.Add(p.ctx, 1, metric.WithAttributes(attrs...))
+}
+
+func (p *Provider) recordVenueError(result string) {
+	if p.metrics.venueErrors == nil || p.ctx == nil {
+		return
+	}
+	attrs := telemetry.OperationResultAttributes(telemetry.Environment(), p.name, "venue_error", result)
+	p.metrics.venueErrors.Add(p.ctx, 1, metric.WithAttributes(attrs...))
+}
+
 func formatPrice(value float64) string {
 	return fmt.Sprintf("%.2f", value)
 }
@@ -2187,6 +2515,13 @@ func formatWithPrecision(value float64, precision int) string {
 		precision = 2
 	}
 	return fmt.Sprintf("%.*f", precision, value)
+}
+
+func formatBalance(value float64) string {
+	if value < 0 {
+		value = 0
+	}
+	return fmt.Sprintf("%.8f", value)
 }
 
 func stringOrDefault(value *string) string {
@@ -2212,6 +2547,11 @@ func (p *Provider) emitReject(nativeInst nativeInstrument, req schema.OrderReque
 		RejectReason:    ptr(reason),
 	}
 	p.emitExecReportEvents([]execReportEvent{{instrument: nativeInst, payload: payload, ts: ts}})
+}
+
+func (p *Provider) rejectOrder(nativeInst nativeInstrument, order schema.OrderRequest, reason string, start time.Time, ts time.Time) {
+	p.emitReject(nativeInst, order, reason, ts)
+	p.recordOrderOutcome(order, schema.ExecReportStateREJECTED, start, reason)
 }
 
 func ptr[T any](value T) *T {

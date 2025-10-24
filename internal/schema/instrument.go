@@ -508,6 +508,22 @@ func isCurrencyCode(segment string) bool {
 	return isUpperAlnum(segment)
 }
 
+// InstrumentCurrencies extracts the base and quote currency codes from a canonical instrument symbol.
+func InstrumentCurrencies(symbol string) (string, string, error) {
+	symbol = strings.TrimSpace(symbol)
+	if symbol == "" {
+		return "", "", instrumentError("instrument.symbol required")
+	}
+	parts, err := validateInstrumentSymbol(symbol)
+	if err != nil {
+		return "", "", err
+	}
+	if len(parts) < 2 {
+		return "", "", instrumentError("instrument symbol must contain base and quote segments")
+	}
+	return parts[0], parts[1], nil
+}
+
 // CloneInstrument creates a deep copy of the provided instrument.
 func CloneInstrument(inst Instrument) Instrument {
 	clone := inst
