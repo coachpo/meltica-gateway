@@ -41,7 +41,7 @@ func TestCanonicalTypeValidate(t *testing.T) {
 			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.ct.Validate()
@@ -64,6 +64,16 @@ func TestValidateInstrument(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid perp instrument",
+			symbol:  "BTC-USD-PERP",
+			wantErr: false,
+		},
+		{
+			name:    "valid futures instrument",
+			symbol:  "BTC-USD-20251227",
+			wantErr: false,
+		},
+		{
 			name:    "empty instrument",
 			symbol:  "",
 			wantErr: true,
@@ -71,11 +81,6 @@ func TestValidateInstrument(t *testing.T) {
 		{
 			name:    "no dash",
 			symbol:  "BTCUSD",
-			wantErr: true,
-		},
-		{
-			name:    "too many dashes",
-			symbol:  "BTC-USD-PERP",
 			wantErr: true,
 		},
 		{
@@ -94,7 +99,7 @@ func TestValidateInstrument(t *testing.T) {
 			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateInstrument(tt.symbol)
@@ -107,11 +112,11 @@ func TestValidateInstrument(t *testing.T) {
 
 func TestBuildEventKey(t *testing.T) {
 	key := BuildEventKey("BTC-USD", "TICKER", 123)
-	
+
 	if key == "" {
 		t.Error("expected non-empty key")
 	}
-	
+
 	// Should contain instrument, type, and seq
 	expected := "BTC-USD:TICKER:123"
 	if key != expected {
@@ -124,16 +129,16 @@ func TestRawInstanceClone(t *testing.T) {
 		"key1": "value1",
 		"key2": 42,
 	}
-	
+
 	clone := original.Clone()
-	
+
 	if len(clone) != len(original) {
 		t.Error("clone should have same length")
 	}
-	
+
 	// Modify clone
 	clone["key1"] = "modified"
-	
+
 	// Original should be unchanged
 	if original["key1"] != "value1" {
 		t.Error("original should not be modified")
@@ -147,12 +152,12 @@ func TestEventReset(t *testing.T) {
 		Provider:       "binance",
 		Symbol:         "BTC-USD",
 		Type:           EventTypeTrade,
-		SeqProvider: 100,
-		Payload:     map[string]interface{}{"price": "50000"},
+		SeqProvider:    100,
+		Payload:        map[string]interface{}{"price": "50000"},
 	}
-	
+
 	ev.Reset()
-	
+
 	if ev.EventID != "" {
 		t.Error("expected empty EventID")
 	}
@@ -178,19 +183,19 @@ func TestEventReset(t *testing.T) {
 
 func TestEventSetReturned(t *testing.T) {
 	ev := &Event{}
-	
+
 	if ev.IsReturned() {
 		t.Error("expected new event to not be returned")
 	}
-	
+
 	ev.SetReturned(true)
-	
+
 	if !ev.IsReturned() {
 		t.Error("expected event to be marked as returned")
 	}
-	
+
 	ev.SetReturned(false)
-	
+
 	if ev.IsReturned() {
 		t.Error("expected event to not be returned")
 	}
@@ -208,7 +213,7 @@ func TestEventTypeCoalescable(t *testing.T) {
 		{"trade is not coalescable", EventTypeTrade, false},
 		{"exec report is not coalescable", EventTypeExecReport, false},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.et.Coalescable(); got != tt.want {
@@ -226,7 +231,7 @@ func TestControlAckPayload(t *testing.T) {
 		Success:        true,
 		RoutingVersion: 5,
 	}
-	
+
 	if payload.MessageID != "msg-123" {
 		t.Error("MessageID not set correctly")
 	}
@@ -245,7 +250,7 @@ func TestBookSnapshotPayload(t *testing.T) {
 		},
 		Checksum: "abc123",
 	}
-	
+
 	if len(payload.Bids) != 1 {
 		t.Error("expected 1 bid level")
 	}
@@ -264,7 +269,7 @@ func TestTradePayload(t *testing.T) {
 		Price:    "50000",
 		Quantity: "1.5",
 	}
-	
+
 	if payload.Side != TradeSideBuy {
 		t.Error("expected buy side")
 	}
@@ -283,7 +288,7 @@ func TestExecReportPayload(t *testing.T) {
 		OrderType:       OrderTypeLimit,
 		RejectReason:    &reason,
 	}
-	
+
 	if payload.State != ExecReportStateREJECTED {
 		t.Error("state should be REJECTED")
 	}

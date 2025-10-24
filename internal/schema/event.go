@@ -59,28 +59,14 @@ func (c CanonicalType) Validate() error {
 	return nil
 }
 
-// ValidateInstrument verifies the canonical instrument representation (BASE-QUOTE).
+// ValidateInstrument verifies the canonical instrument formatting.
 func ValidateInstrument(symbol string) error {
 	symbol = strings.TrimSpace(symbol)
 	if symbol == "" {
 		return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument required"))
 	}
-	if !strings.Contains(symbol, "-") {
-		return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument must contain '-'"))
-	}
-	parts := strings.Split(symbol, "-")
-	if len(parts) != 2 {
-		return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument requires base-quote"))
-	}
-	for _, part := range parts {
-		if part == "" {
-			return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument contains empty leg"))
-		}
-		if strings.ToUpper(part) != part {
-			return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument must be uppercase"))
-		}
-	}
-	return nil
+	_, err := validateInstrumentSymbol(symbol)
+	return err
 }
 
 // BuildEventKey constructs the default idempotency key for an event.
@@ -97,9 +83,9 @@ type Event struct {
 	Symbol         string    `json:"symbol"`
 	Type           EventType `json:"type"`
 	SeqProvider    uint64    `json:"seq_provider"`
-	IngestTS time.Time `json:"ingest_ts"`
-	EmitTS   time.Time `json:"emit_ts"`
-	Payload  any       `json:"payload"`
+	IngestTS       time.Time `json:"ingest_ts"`
+	EmitTS         time.Time `json:"emit_ts"`
+	Payload        any       `json:"payload"`
 }
 
 // Reset zeroes the event for pool reuse.
@@ -208,7 +194,7 @@ type BookSnapshotPayload struct {
 	Asks       []PriceLevel `json:"asks"`
 	Checksum   string       `json:"checksum"`
 	LastUpdate time.Time    `json:"last_update"`
-	
+
 	// Binance-specific sequence tracking (optional, used internally during assembly)
 	FirstUpdateID uint64 `json:"first_update_id,omitempty"` // U - First update ID in event
 	FinalUpdateID uint64 `json:"final_update_id,omitempty"` // u - Final update ID in event
