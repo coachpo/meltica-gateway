@@ -88,13 +88,13 @@ exchanges:
 
 # eventbus: in-memory event bus sizing
 eventbus:
-  bufferSize: 5000
+  bufferSize: 25000
   fanoutWorkers: 8
 
 # pools: object pool capacities
 pools:
   eventSize: 25000
-  orderRequestSize: 5000
+  orderRequestSize: 25000
 
 # apiServer: control API bind address (host:port or :port)
 apiServer:
