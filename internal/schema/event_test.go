@@ -201,29 +201,6 @@ func TestEventSetReturned(t *testing.T) {
 	}
 }
 
-func TestEventTypeCoalescable(t *testing.T) {
-	tests := []struct {
-		name string
-		et   EventType
-		want bool
-	}{
-		{"ticker is coalescable", EventTypeTicker, true},
-		{"kline is coalescable", EventTypeKlineSummary, true},
-		{"book snapshot is not coalescable", EventTypeBookSnapshot, false},
-		{"trade is not coalescable", EventTypeTrade, false},
-		{"exec report is not coalescable", EventTypeExecReport, false},
-		{"instrument update is not coalescable", EventTypeInstrumentUpdate, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.et.Coalescable(); got != tt.want {
-				t.Errorf("Coalescable() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestBookSnapshotPayload(t *testing.T) {
 	payload := BookSnapshotPayload{
 		Bids: []PriceLevel{

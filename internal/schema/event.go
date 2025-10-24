@@ -141,21 +141,6 @@ const (
 	EventTypeInstrumentUpdate EventType = "InstrumentUpdate"
 )
 
-// Coalescable reports whether an event type can be coalesced under backpressure.
-func (et EventType) Coalescable() bool {
-	switch et {
-	case EventTypeTicker, EventTypeKlineSummary:
-		return true
-	case EventTypeBookSnapshot,
-		EventTypeTrade,
-		EventTypeExecReport,
-		EventTypeInstrumentUpdate:
-		return false
-	default:
-		return false
-	}
-}
-
 // PriceLevel describes an order book price level using decimal strings.
 type PriceLevel struct {
 	Price    string `json:"price"`
