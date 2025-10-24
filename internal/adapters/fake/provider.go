@@ -361,6 +361,8 @@ func (p *Provider) runGenerator(ctx context.Context, evtType schema.EventType, s
 		p.streamTrades(ctx, supply)
 	case schema.EventTypeBookSnapshot:
 		p.streamBookSnapshots(ctx, supply)
+	case schema.EventTypeInstrumentUpdate:
+		<-ctx.Done()
 	case schema.EventTypeExecReport, schema.EventTypeKlineSummary, schema.EventTypeControlAck, schema.EventTypeControlResult:
 		<-ctx.Done()
 	default:

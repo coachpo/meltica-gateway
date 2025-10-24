@@ -1,3 +1,4 @@
+// Package adapters wires built-in adapters into the provider registry.
 package adapters
 
 import (
