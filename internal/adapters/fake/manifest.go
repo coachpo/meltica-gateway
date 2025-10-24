@@ -17,11 +17,14 @@ func RegisterFactory(reg *provider.Registry) {
 		}
 
 		opts := Options{
-			Name:                 "",
-			TickerInterval:       0,
-			TradeInterval:        0,
-			BookSnapshotInterval: 0,
-			Pools:                pools,
+			Name:                      "",
+			TickerInterval:            0,
+			TradeInterval:             0,
+			BookSnapshotInterval:      0,
+			Pools:                     pools,
+			Instruments:               nil,
+			InstrumentRefreshInterval: 0,
+			InstrumentRefresh:         nil,
 		}
 		if name, ok := cfg["name"].(string); ok {
 			opts.Name = name

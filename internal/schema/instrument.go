@@ -232,7 +232,11 @@ func validateInstrumentSymbol(symbol string) ([]string, error) {
 }
 
 func validateSymbolForType(parts []string, typ InstrumentType) (symbolMeta, error) {
-	meta := symbolMeta{}
+	meta := symbolMeta{
+		expirySegment: "",
+		strikeSegment: "",
+		optionMarker:  OptionType(""),
+	}
 	if len(parts) >= 2 {
 		if !isCurrencyCode(parts[0]) {
 			return meta, instrumentError("instrument.symbol base segment must be 2-10 uppercase alphanumeric characters")
@@ -322,7 +326,7 @@ func validateContractNotional(i *Instrument) error {
 			return instrumentError("instrument.contract_currency must be omitted for spot instruments")
 		}
 		i.ContractCurrency = ""
-	default:
+	case InstrumentTypePerp, InstrumentTypeFutures, InstrumentTypeOptions:
 		normalized, err := normalizeOptionalCurrency(i.ContractCurrency, "instrument.contract_currency")
 		if err != nil {
 			return err
@@ -337,6 +341,8 @@ func validateContractNotional(i *Instrument) error {
 			return instrumentError("instrument.contract_value must be greater than zero when provided")
 		}
 		i.ContractCurrency = normalized
+	default:
+		return instrumentError("instrument.type invalid")
 	}
 	return nil
 }

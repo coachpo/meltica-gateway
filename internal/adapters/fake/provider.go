@@ -46,7 +46,7 @@ type instrumentInterpreter struct{}
 
 func (instrumentInterpreter) ToNative(inst schema.Instrument) (nativeInstrument, error) {
 	if strings.TrimSpace(inst.Symbol) == "" {
-		return nativeInstrument{}, fmt.Errorf("instrument symbol required")
+		return nativeInstrument{symbol: ""}, fmt.Errorf("instrument symbol required")
 	}
 	symbol := normalizeInstrument(inst.Symbol)
 	return nativeInstrument{symbol: symbol}, nil
@@ -75,6 +75,11 @@ func newSpotInstrument(symbol, base, quote string) schema.Instrument {
 		BaseCurrency:      base,
 		QuoteCurrency:     quote,
 		Venue:             "FAKE",
+		Expiry:            "",
+		ContractValue:     nil,
+		ContractCurrency:  "",
+		Strike:            nil,
+		OptionType:        schema.OptionType(""),
 		PriceIncrement:    "0.01",
 		QuantityIncrement: "0.0001",
 		PricePrecision:    intPtr(2),
@@ -650,12 +655,12 @@ func (p *Provider) defaultInstrumentSymbol() string {
 func (p *Provider) nativeInstrumentForSymbol(symbol string) (nativeInstrument, bool) {
 	normalized := normalizeInstrument(symbol)
 	if normalized == "" {
-		return nativeInstrument{}, false
+		return nativeInstrument{symbol: ""}, false
 	}
 	p.instrumentMu.RLock()
 	defer p.instrumentMu.RUnlock()
 	if _, ok := p.instruments[normalized]; !ok {
-		return nativeInstrument{}, false
+		return nativeInstrument{symbol: ""}, false
 	}
 	return nativeInstrument{symbol: normalized}, true
 }
