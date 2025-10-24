@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,7 +20,6 @@ import (
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/schema"
 	"github.com/sourcegraph/conc"
-	"github.com/sourcegraph/conc/iter"
 )
 
 // DefaultInstruments lists canonical instruments used when no explicit catalogue is provided.
@@ -35,7 +36,23 @@ var DefaultInstruments = []schema.Instrument{
 	newSpotInstrument("AVAX-USDT", "AVAX", "USDT"),
 }
 
-const defaultInstrumentRefreshInterval = 30 * time.Minute
+const (
+	floatTolerance                   = 1e-9
+	defaultInstrumentRefreshInterval = 30 * time.Minute
+	defaultBookLevels                = 10
+	defaultPriceDrift                = 0.00025
+	defaultPriceVolatility           = 0.0125
+	defaultShockProbability          = 0.045
+	defaultShockMagnitude            = 0.02
+	defaultTradeMinQty               = 0.01
+	defaultTradeMaxQty               = 1.5
+	defaultVenueLatencyMin           = 5 * time.Millisecond
+	defaultVenueLatencyMax           = 35 * time.Millisecond
+	defaultVenueErrorRate            = 0.005
+	defaultVenueDisconnectChance     = 0.0005
+	defaultVenueDisconnectDuration   = 5 * time.Second
+	defaultKlineInterval             = time.Minute
+)
 
 type nativeInstrument struct {
 	symbol string
@@ -65,6 +82,111 @@ func (instrumentInterpreter) FromNative(symbol string, catalog map[string]schema
 }
 
 type instrumentSupplier func() []nativeInstrument
+
+type instrumentConstraints struct {
+	priceIncrement    float64
+	quantityIncrement float64
+	minQuantity       float64
+	maxQuantity       float64
+	minNotional       float64
+	pricePrecision    int
+	quantityPrecision int
+}
+
+type venueState struct {
+	mu           sync.Mutex
+	disconnected bool
+	reconnectAt  time.Time
+}
+
+type marketModelOptions struct {
+	Drift            float64
+	Volatility       float64
+	ShockProbability float64
+	ShockMagnitude   float64
+}
+
+type tradeModelOptions struct {
+	MinQuantity float64
+	MaxQuantity float64
+}
+
+type orderBookOptions struct {
+	Levels           int
+	MaxMutationWidth int
+}
+
+type venueBehaviorOptions struct {
+	LatencyMin       time.Duration
+	LatencyMax       time.Duration
+	TransientError   float64
+	DisconnectChance float64
+	DisconnectFor    time.Duration
+}
+
+func applyMarketDefaults(in marketModelOptions) marketModelOptions {
+	if in.Drift == 0 {
+		in.Drift = defaultPriceDrift
+	}
+	if in.Volatility == 0 {
+		in.Volatility = defaultPriceVolatility
+	}
+	if in.ShockProbability == 0 {
+		in.ShockProbability = defaultShockProbability
+	}
+	if in.ShockMagnitude == 0 {
+		in.ShockMagnitude = defaultShockMagnitude
+	}
+	return in
+}
+
+func applyTradeDefaults(in tradeModelOptions) tradeModelOptions {
+	if in.MinQuantity == 0 {
+		in.MinQuantity = defaultTradeMinQty
+	}
+	if in.MaxQuantity == 0 {
+		in.MaxQuantity = defaultTradeMaxQty
+	}
+	if in.MaxQuantity < in.MinQuantity {
+		in.MaxQuantity = in.MinQuantity * 2
+	}
+	return in
+}
+
+func applyBookDefaults(in orderBookOptions) orderBookOptions {
+	if in.Levels <= 0 {
+		in.Levels = defaultBookLevels
+	}
+	if in.MaxMutationWidth <= 0 || in.MaxMutationWidth > in.Levels {
+		in.MaxMutationWidth = in.Levels / 2
+		if in.MaxMutationWidth == 0 {
+			in.MaxMutationWidth = 1
+		}
+	}
+	return in
+}
+
+func applyVenueDefaults(in venueBehaviorOptions) venueBehaviorOptions {
+	if in.LatencyMin <= 0 {
+		in.LatencyMin = defaultVenueLatencyMin
+	}
+	if in.LatencyMax <= 0 || in.LatencyMax < in.LatencyMin {
+		in.LatencyMax = defaultVenueLatencyMax
+	}
+	if in.TransientError <= 0 {
+		in.TransientError = defaultVenueErrorRate
+	}
+	if in.DisconnectChance < 0 {
+		in.DisconnectChance = 0
+	}
+	if in.DisconnectChance == 0 {
+		in.DisconnectChance = defaultVenueDisconnectChance
+	}
+	if in.DisconnectFor <= 0 {
+		in.DisconnectFor = defaultVenueDisconnectDuration
+	}
+	return in
+}
 
 func intPtr(v int) *int {
 	value := v
@@ -104,6 +226,11 @@ type Options struct {
 	Instruments               []schema.Instrument
 	InstrumentRefreshInterval time.Duration
 	InstrumentRefresh         func(context.Context) ([]schema.Instrument, error)
+	PriceModel                marketModelOptions
+	TradeModel                tradeModelOptions
+	OrderBook                 orderBookOptions
+	VenueBehavior             venueBehaviorOptions
+	KlineInterval             time.Duration
 }
 
 // Provider emits synthetic market data covering tickers, trades, and order book events.
@@ -112,6 +239,7 @@ type Provider struct {
 	tickerInterval       time.Duration
 	tradeInterval        time.Duration
 	bookSnapshotInterval time.Duration
+	klineInterval        time.Duration
 
 	events chan *schema.Event
 	errs   chan error
@@ -138,9 +266,19 @@ type Provider struct {
 	instrumentMu              sync.RWMutex
 	instrumentCodec           instrumentInterpreter
 	instruments               map[string]schema.Instrument
+	instrumentConstraints     map[string]instrumentConstraints
 	defaultNativeInstruments  []nativeInstrument
 	instrumentRefreshInterval time.Duration
 	instrumentRefresh         func(context.Context) ([]schema.Instrument, error)
+
+	priceModel   marketModelOptions
+	tradeModel   tradeModelOptions
+	bookOptions  orderBookOptions
+	venueCfg     venueBehaviorOptions
+	rng          *rand.Rand
+	randMu       sync.Mutex
+	venueState   venueState
+	orderCounter atomic.Uint64
 }
 
 type routeHandle struct {
@@ -148,20 +286,585 @@ type routeHandle struct {
 	wg     conc.WaitGroup
 }
 
+type priceTick int64
+
 type instrumentState struct {
-	mu          sync.Mutex
-	instrument  string
-	basePrice   float64
-	lastPrice   float64
-	volume      float64
-	bids        []bookLevel
-	asks        []bookLevel
-	hasSnapshot bool
+	mu           sync.Mutex
+	instrument   string
+	basePrice    float64
+	lastPrice    float64
+	volume       float64
+	hasSnapshot  bool
+	constraints  instrumentConstraints
+	bookLevels   int
+	bids         map[priceTick]*bookDepth
+	asks         map[priceTick]*bookDepth
+	orderIndex   map[string]*activeOrder
+	lastDiff     bookDiff
+	checksum     string
+	currentKline *klineWindow
+	completed    []klineWindow
+}
+
+type bookDepth struct {
+	synthetic float64
+	orders    []*activeOrder
 }
 
 type bookLevel struct {
 	price    float64
 	quantity float64
+}
+
+type bookLevelChange struct {
+	price    float64
+	quantity float64
+}
+
+type bookDiff struct {
+	bids []bookLevelChange
+	asks []bookLevelChange
+}
+
+type orderFill struct {
+	order    *activeOrder
+	quantity float64
+	price    float64
+}
+
+type execReportEvent struct {
+	instrument nativeInstrument
+	payload    schema.ExecReportPayload
+	ts         time.Time
+}
+
+func (s *instrumentState) snapshotLevels(side map[priceTick]*bookDepth, limit int, isBid bool) []bookLevel {
+	if limit <= 0 {
+		limit = s.bookLevels
+	}
+	type pair struct {
+		tick priceTick
+		qty  float64
+	}
+	pairs := make([]pair, 0, len(side))
+	for tick, depth := range side {
+		if depth == nil {
+			continue
+		}
+		totalQty := depth.synthetic + userQuantity(depth.orders)
+		if totalQty <= floatTolerance {
+			continue
+		}
+		pairs = append(pairs, pair{tick: tick, qty: totalQty})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if isBid {
+			return pairs[i].tick > pairs[j].tick
+		}
+		return pairs[i].tick < pairs[j].tick
+	})
+	if len(pairs) > limit {
+		pairs = pairs[:limit]
+	}
+	levels := make([]bookLevel, len(pairs))
+	for i, entry := range pairs {
+		levels[i] = bookLevel{
+			price:    s.constraints.priceForTick(entry.tick),
+			quantity: entry.qty,
+		}
+	}
+	return levels
+}
+
+func (s *instrumentState) mutateBook(p *Provider, mid float64) bookDiff {
+	if mid <= 0 {
+		mid = s.lastPrice
+	}
+	diff := bookDiff{}
+	diff.bids = s.mutateSide(p, s.bids, true)
+	diff.asks = s.mutateSide(p, s.asks, false)
+	s.recenterBook(p, mid)
+	return diff
+}
+
+func (s *instrumentState) mutateSide(p *Provider, side map[priceTick]*bookDepth, isBid bool) []bookLevelChange {
+	mutations := make([]bookLevelChange, 0, p.bookOptions.MaxMutationWidth)
+	count := p.bookOptions.MaxMutationWidth
+	if count <= 0 {
+		count = 1
+	}
+	for i := 0; i < count; i++ {
+		if len(side) == 0 {
+			break
+		}
+		var chosen priceTick
+		for tick := range side {
+			chosen = tick
+			if p.randomFloat() < 0.35 {
+				break
+			}
+		}
+		depth := side[chosen]
+		if depth == nil {
+			depth = &bookDepth{}
+			side[chosen] = depth
+		}
+		baseQty := depth.synthetic
+		if baseQty <= 0 {
+			baseQty = math.Max(s.constraints.quantityIncrement, 0.5)
+		}
+		delta := (p.randomFloat() - 0.5) * baseQty * 0.2
+		depth.synthetic = math.Max(s.constraints.quantityIncrement, baseQty+delta)
+		mutations = append(mutations, bookLevelChange{
+			price:    s.constraints.priceForTick(chosen),
+			quantity: depth.synthetic + userQuantity(depth.orders),
+		})
+	}
+	return mutations
+}
+
+func (s *instrumentState) recenterBook(p *Provider, mid float64) {
+	step := math.Max(s.constraints.priceIncrement, 0.01)
+	ensureLevels := func(side map[priceTick]*bookDepth, isBid bool) {
+		for len(side) < s.bookLevels {
+			offset := float64(len(side)+1) * step
+			var price float64
+			if isBid {
+				price = mid - offset
+			} else {
+				price = mid + offset
+			}
+			tick := s.constraints.tickForPrice(price)
+			if depth, ok := side[tick]; ok {
+				if depth.synthetic <= 0 {
+					depth.synthetic = math.Max(s.constraints.quantityIncrement, 0.5)
+				}
+				continue
+			}
+			qty := math.Max(s.constraints.quantityIncrement, 0.5+p.randomFloat())
+			side[tick] = &bookDepth{synthetic: qty}
+		}
+	}
+	ensureLevels(s.bids, true)
+	ensureLevels(s.asks, false)
+}
+
+func userQuantity(orders []*activeOrder) float64 {
+	sum := 0.0
+	for _, ord := range orders {
+		if ord == nil {
+			continue
+		}
+		sum += math.Max(ord.remaining, 0)
+	}
+	return sum
+}
+
+func (s *instrumentState) bestBid() (float64, bool) {
+	return s.bestPrice(s.bids, true)
+}
+
+func (s *instrumentState) bestAsk() (float64, bool) {
+	return s.bestPrice(s.asks, false)
+}
+
+func (s *instrumentState) bestPrice(side map[priceTick]*bookDepth, isBid bool) (float64, bool) {
+	var (
+		bestTick priceTick
+		has      bool
+	)
+	bestQty := 0.0
+	for tick, depth := range side {
+		if depth == nil {
+			continue
+		}
+		qty := depth.synthetic + userQuantity(depth.orders)
+		if qty <= floatTolerance {
+			continue
+		}
+		if !has {
+			has = true
+			bestTick = tick
+			bestQty = qty
+			continue
+		}
+		if isBid {
+			if tick > bestTick {
+				bestTick = tick
+				bestQty = qty
+			}
+			continue
+		}
+		if tick < bestTick {
+			bestTick = tick
+			bestQty = qty
+		}
+	}
+	if !has || bestQty <= floatTolerance {
+		return 0, false
+	}
+	return s.constraints.priceForTick(bestTick), true
+}
+
+func (s *instrumentState) availableLiquidity(side schema.TradeSide, limit float64) float64 {
+	sum := 0.0
+	switch side {
+	case schema.TradeSideBuy:
+		for tick, depth := range s.asks {
+			if depth == nil {
+				continue
+			}
+			price := s.constraints.priceForTick(tick)
+			if limit > 0 && price-limit > floatTolerance {
+				continue
+			}
+			sum += depth.synthetic + userQuantity(depth.orders)
+		}
+	case schema.TradeSideSell:
+		for tick, depth := range s.bids {
+			if depth == nil {
+				continue
+			}
+			price := s.constraints.priceForTick(tick)
+			if limit > 0 && limit-price > floatTolerance {
+				continue
+			}
+			sum += depth.synthetic + userQuantity(depth.orders)
+		}
+	}
+	return sum
+}
+
+func (s *instrumentState) isMarketable(side schema.TradeSide, price float64) bool {
+	switch side {
+	case schema.TradeSideBuy:
+		ask, ok := s.bestAsk()
+		return ok && price+floatTolerance >= ask
+	case schema.TradeSideSell:
+		bid, ok := s.bestBid()
+		return ok && price-floatTolerance <= bid
+	default:
+		return false
+	}
+}
+
+func (s *instrumentState) consumeLiquidity(side schema.TradeSide, quantity float64, limit float64, ts time.Time) (float64, []orderFill, float64) {
+	if quantity <= 0 {
+		return 0, nil, 0
+	}
+	fills := make([]orderFill, 0, 4)
+	filled := 0.0
+	avgPrice := 0.0
+	for filled+floatTolerance < quantity {
+		tick, depth, ok := s.pickLevel(side, limit)
+		if !ok || depth == nil {
+			break
+		}
+		price := s.constraints.priceForTick(tick)
+		remaining := quantity - filled
+		levelQty := depth.synthetic + userQuantity(depth.orders)
+		if levelQty <= floatTolerance {
+			delete(s.levelMap(side), tick)
+			continue
+		}
+		consume := math.Min(remaining, levelQty)
+		var consumedUser float64
+		if len(depth.orders) > 0 {
+			depth.orders, fills, consumedUser = consumeUserOrders(depth.orders, consume, price, ts, fills)
+			filled += consumedUser
+			avgPrice += consumedUser * price
+			consume -= consumedUser
+		}
+		if consume > 0 && depth.synthetic > 0 {
+			useSynthetic := math.Min(consume, depth.synthetic)
+			depth.synthetic -= useSynthetic
+			filled += useSynthetic
+			avgPrice += useSynthetic * price
+			consume -= useSynthetic
+		}
+		if depth.synthetic <= floatTolerance && len(depth.orders) == 0 {
+			delete(s.levelMap(side), tick)
+		}
+		if consume > floatTolerance {
+			continue
+		}
+	}
+	if filled > floatTolerance {
+		avgPrice /= filled
+	}
+	return avgPrice, fills, filled
+}
+
+func (s *instrumentState) levelMap(side schema.TradeSide) map[priceTick]*bookDepth {
+	if side == schema.TradeSideBuy {
+		return s.asks
+	}
+	return s.bids
+}
+
+func (s *instrumentState) pickLevel(side schema.TradeSide, limit float64) (priceTick, *bookDepth, bool) {
+	switch side {
+	case schema.TradeSideBuy:
+		return s.pickFromSide(s.asks, limit, false)
+	case schema.TradeSideSell:
+		return s.pickFromSide(s.bids, limit, true)
+	default:
+		return 0, nil, false
+	}
+}
+
+func (s *instrumentState) pickFromSide(side map[priceTick]*bookDepth, limit float64, isBid bool) (priceTick, *bookDepth, bool) {
+	var (
+		selected priceTick
+		depth    *bookDepth
+		has      bool
+	)
+	for tick, lvl := range side {
+		if lvl == nil {
+			continue
+		}
+		qty := lvl.synthetic + userQuantity(lvl.orders)
+		if qty <= floatTolerance {
+			continue
+		}
+		price := s.constraints.priceForTick(tick)
+		if limit > 0 {
+			if isBid {
+				if limit-price > floatTolerance {
+					continue
+				}
+			} else {
+				if price-limit > floatTolerance {
+					continue
+				}
+			}
+		}
+		if !has {
+			selected = tick
+			depth = lvl
+			has = true
+			continue
+		}
+		if isBid {
+			if tick > selected {
+				selected = tick
+				depth = lvl
+			}
+			continue
+		}
+		if tick < selected {
+			selected = tick
+			depth = lvl
+		}
+	}
+	return selected, depth, has
+}
+
+func consumeUserOrders(orders []*activeOrder, target float64, price float64, ts time.Time, fills []orderFill) ([]*activeOrder, []orderFill, float64) {
+	consumed := 0.0
+	i := 0
+	for i < len(orders) && consumed+floatTolerance < target {
+		ord := orders[i]
+		if ord == nil || ord.remaining <= floatTolerance {
+			i++
+			continue
+		}
+		need := target - consumed
+		fillQty := math.Min(need, ord.remaining)
+		ord.recordFill(fillQty, price, ts)
+		consumed += fillQty
+		fills = append(fills, orderFill{order: ord, quantity: fillQty, price: price})
+		if ord.remaining <= floatTolerance {
+			i++
+		} else {
+			break
+		}
+	}
+	orders = pruneOrders(orders)
+	return orders, fills, consumed
+}
+
+func pruneOrders(orders []*activeOrder) []*activeOrder {
+	out := orders[:0]
+	for _, ord := range orders {
+		if ord == nil || ord.remaining <= floatTolerance {
+			continue
+		}
+		out = append(out, ord)
+	}
+	return out
+}
+
+func (s *instrumentState) restOrder(order *activeOrder) {
+	if order == nil {
+		return
+	}
+	depthMap := s.bids
+	if order.side == schema.TradeSideSell {
+		depthMap = s.asks
+	}
+	depth := depthMap[order.priceTick]
+	if depth == nil {
+		depth = &bookDepth{}
+		depthMap[order.priceTick] = depth
+	}
+	depth.orders = append(depth.orders, order)
+}
+
+func (s *instrumentState) purgeOrder(order *activeOrder) {
+	if order == nil {
+		return
+	}
+	depthMap := s.bids
+	if order.side == schema.TradeSideSell {
+		depthMap = s.asks
+	}
+	depth := depthMap[order.priceTick]
+	if depth == nil {
+		return
+	}
+	depth.orders = pruneOrders(depth.orders)
+	if len(depth.orders) == 0 && depth.synthetic <= floatTolerance {
+		delete(depthMap, order.priceTick)
+	}
+}
+
+type klineWindow struct {
+	openTime  time.Time
+	closeTime time.Time
+	open      float64
+	high      float64
+	low       float64
+	close     float64
+	volume    float64
+}
+
+func newKlineWindow(start time.Time, interval time.Duration, price float64) *klineWindow {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	return &klineWindow{
+		openTime:  start,
+		closeTime: start.Add(interval),
+		open:      price,
+		close:     price,
+		high:      price,
+		low:       price,
+	}
+}
+
+func (k *klineWindow) update(price float64, volume float64) {
+	if k == nil {
+		return
+	}
+	if k.high == 0 || price > k.high {
+		k.high = price
+	}
+	if k.low == 0 || price < k.low {
+		k.low = price
+	}
+	k.close = price
+	if volume > 0 {
+		k.volume += volume
+	}
+}
+
+func (s *instrumentState) updateKline(ts time.Time, price, qty float64, interval time.Duration) {
+	if interval <= 0 {
+		return
+	}
+	if s.currentKline == nil {
+		start := ts.Truncate(interval)
+		s.currentKline = newKlineWindow(start, interval, price)
+	}
+	for ts.After(s.currentKline.closeTime) {
+		s.completed = append(s.completed, *s.currentKline)
+		start := s.currentKline.closeTime
+		s.currentKline = newKlineWindow(start, interval, s.currentKline.close)
+	}
+	s.currentKline.update(price, qty)
+}
+
+func (s *instrumentState) finalizeKlines(now time.Time, interval time.Duration) []klineWindow {
+	if interval <= 0 {
+		return nil
+	}
+	completed := make([]klineWindow, 0, len(s.completed)+1)
+	for len(s.completed) > 0 && !now.Before(s.completed[0].closeTime) {
+		completed = append(completed, s.completed[0])
+		s.completed = s.completed[1:]
+	}
+	if s.currentKline != nil && !now.Before(s.currentKline.closeTime) {
+		completed = append(completed, *s.currentKline)
+		start := s.currentKline.closeTime
+		s.currentKline = newKlineWindow(start, interval, s.currentKline.close)
+	}
+	return completed
+}
+
+type activeOrder struct {
+	clientID   string
+	exchangeID string
+	instrument string
+	side       schema.TradeSide
+	orderType  schema.OrderType
+	tif        tifMode
+	price      float64
+	quantity   float64
+	remaining  float64
+	filled     float64
+	notional   float64
+	priceTick  priceTick
+	createdAt  time.Time
+	updatedAt  time.Time
+}
+
+type tifMode int
+
+const (
+	tifGTC tifMode = iota
+	tifIOC
+	tifFOK
+	tifPostOnly
+)
+
+func (o *activeOrder) recordFill(qty, price float64, ts time.Time) {
+	if o == nil || qty <= 0 {
+		return
+	}
+	o.remaining -= qty
+	if o.remaining < 0 {
+		o.remaining = 0
+	}
+	o.filled += qty
+	o.notional += qty * price
+	o.updatedAt = ts
+}
+
+func (o *activeOrder) avgFillPrice() float64 {
+	if o == nil {
+		return 0
+	}
+	if o.filled <= floatTolerance {
+		if o.price > 0 {
+			return o.price
+		}
+		return 0
+	}
+	return o.notional / o.filled
+}
+
+func parseTIF(value string) tifMode {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "IOC":
+		return tifIOC
+	case "FOK":
+		return tifFOK
+	case "POST", "POST_ONLY", "PO":
+		return tifPostOnly
+	default:
+		return tifGTC
+	}
 }
 
 // NewProvider constructs a fake data provider with sane defaults.
@@ -185,19 +888,29 @@ func NewProvider(opts Options) *Provider {
 
 	//nolint:exhaustruct // zero values for ctx, cancel, started, mu, etc. are intentional
 	p := &Provider{
-		name:                 name,
-		tickerInterval:       tickerInterval,
-		tradeInterval:        tradeInterval,
-		bookSnapshotInterval: bookSnapshotInterval,
-		events:               make(chan *schema.Event, 128),
-		errs:                 make(chan error, 8),
-		orders:               make(chan schema.OrderRequest, 64),
-		routes:               make(map[schema.CanonicalType]*routeHandle),
-		seq:                  make(map[string]uint64),
-		state:                make(map[string]*instrumentState),
-		clock:                time.Now,
-		pools:                opts.Pools,
+		name:                  name,
+		tickerInterval:        tickerInterval,
+		tradeInterval:         tradeInterval,
+		bookSnapshotInterval:  bookSnapshotInterval,
+		klineInterval:         opts.KlineInterval,
+		events:                make(chan *schema.Event, 128),
+		errs:                  make(chan error, 8),
+		orders:                make(chan schema.OrderRequest, 64),
+		routes:                make(map[schema.CanonicalType]*routeHandle),
+		seq:                   make(map[string]uint64),
+		state:                 make(map[string]*instrumentState),
+		clock:                 time.Now,
+		pools:                 opts.Pools,
+		instrumentConstraints: make(map[string]instrumentConstraints),
+		rng:                   rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+	if p.klineInterval <= 0 {
+		p.klineInterval = defaultKlineInterval
+	}
+	p.priceModel = applyMarketDefaults(opts.PriceModel)
+	p.tradeModel = applyTradeDefaults(opts.TradeModel)
+	p.bookOptions = applyBookDefaults(opts.OrderBook)
+	p.venueCfg = applyVenueDefaults(opts.VenueBehavior)
 	catalogue := append([]schema.Instrument(nil), opts.Instruments...)
 	if len(catalogue) == 0 {
 		catalogue = append(catalogue, DefaultInstruments...)
@@ -363,7 +1076,9 @@ func (p *Provider) runGenerator(ctx context.Context, evtType schema.EventType, s
 		p.streamBookSnapshots(ctx, supply)
 	case schema.EventTypeInstrumentUpdate:
 		<-ctx.Done()
-	case schema.EventTypeExecReport, schema.EventTypeKlineSummary:
+	case schema.EventTypeKlineSummary:
+		p.streamKlines(ctx, supply)
+	case schema.EventTypeExecReport:
 		<-ctx.Done()
 	default:
 		<-ctx.Done()
@@ -437,6 +1152,9 @@ func (p *Provider) streamTickers(ctx context.Context, supply instrumentSupplier)
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !p.applyVenueLatency(ctx) {
+				return
+			}
 			for _, inst := range supply() {
 				p.emitTicker(inst)
 			}
@@ -452,6 +1170,9 @@ func (p *Provider) streamTrades(ctx context.Context, supply instrumentSupplier) 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !p.applyVenueLatency(ctx) {
+				return
+			}
 			for _, inst := range supply() {
 				p.emitTrade(inst)
 			}
@@ -468,7 +1189,32 @@ func (p *Provider) streamBookSnapshots(ctx context.Context, supply instrumentSup
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !p.applyVenueLatency(ctx) {
+				return
+			}
 			p.emitSnapshots(supply())
+		}
+	}
+}
+
+func (p *Provider) streamKlines(ctx context.Context, supply instrumentSupplier) {
+	if p.klineInterval <= 0 {
+		<-ctx.Done()
+		return
+	}
+	ticker := time.NewTicker(p.klineInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !p.applyVenueLatency(ctx) {
+				return
+			}
+			for _, inst := range supply() {
+				p.emitKline(inst)
+			}
 		}
 	}
 }
@@ -479,19 +1225,72 @@ func (p *Provider) emitSnapshots(instruments []nativeInstrument) {
 	}
 }
 
+func (p *Provider) emitKline(instrument nativeInstrument) {
+	if p.klineInterval <= 0 {
+		return
+	}
+	state := p.getInstrumentState(instrument)
+	ts := p.clock().UTC()
+	if !p.venueOperational(ts) {
+		return
+	}
+	if p.venueShouldError() {
+		p.emitError(fmt.Errorf("fake provider %s: kline stream error", p.name))
+		return
+	}
+	state.mu.Lock()
+	state.updateKline(ts, state.lastPrice, 0, p.klineInterval)
+	completed := state.finalizeKlines(ts, p.klineInterval)
+	cons := state.constraints
+	state.mu.Unlock()
+	for _, bucket := range completed {
+		payload := schema.KlineSummaryPayload{
+			OpenPrice:  formatWithPrecision(bucket.open, cons.pricePrecision),
+			ClosePrice: formatWithPrecision(bucket.close, cons.pricePrecision),
+			HighPrice:  formatWithPrecision(bucket.high, cons.pricePrecision),
+			LowPrice:   formatWithPrecision(bucket.low, cons.pricePrecision),
+			Volume:     formatWithPrecision(bucket.volume, cons.quantityPrecision),
+			OpenTime:   bucket.openTime,
+			CloseTime:  bucket.closeTime,
+		}
+		seq := p.nextSeq(schema.EventTypeKlineSummary, instrument)
+		evt := p.newEvent(schema.EventTypeKlineSummary, instrument, seq, payload, bucket.closeTime)
+		if evt == nil {
+			continue
+		}
+		p.emitEvent(evt)
+	}
+}
+
 func (p *Provider) emitTicker(instrument nativeInstrument) {
 	state := p.getInstrumentState(instrument)
 	ts := p.clock().UTC()
+	if !p.venueOperational(ts) {
+		return
+	}
+	if p.venueShouldError() {
+		p.emitError(fmt.Errorf("fake provider %s: ticker channel transient error", p.name))
+		return
+	}
 	seq := p.nextSeq(schema.EventTypeTicker, instrument)
 	state.mu.Lock()
-	price := p.nextPrice(state, seq)
+	price := p.nextModelPrice(state)
 	state.lastPrice = price
-	state.volume += 25 + float64(seq%50)
+	state.lastDiff = state.mutateBook(p, price)
+	bid, okBid := state.bestBid()
+	ask, okAsk := state.bestAsk()
+	if !okBid {
+		bid = price * 0.999
+	}
+	if !okAsk {
+		ask = price * 1.001
+	}
+	state.volume += 20 + 50*p.randomFloat()
 	payload := schema.TickerPayload{
 		LastPrice: formatPrice(price),
-		BidPrice:  formatPrice(price * 0.9995),
-		AskPrice:  formatPrice(price * 1.0005),
-		Volume24h: formatQuantity(state.volume),
+		BidPrice:  formatWithPrecision(bid, state.constraints.pricePrecision),
+		AskPrice:  formatWithPrecision(ask, state.constraints.pricePrecision),
+		Volume24h: formatWithPrecision(state.volume, state.constraints.quantityPrecision),
 		Timestamp: ts,
 	}
 	state.mu.Unlock()
@@ -505,40 +1304,78 @@ func (p *Provider) emitTicker(instrument nativeInstrument) {
 func (p *Provider) emitTrade(instrument nativeInstrument) {
 	state := p.getInstrumentState(instrument)
 	ts := p.clock().UTC()
+	if !p.venueOperational(ts) {
+		return
+	}
+	if p.venueShouldError() {
+		p.emitError(fmt.Errorf("fake provider %s: trade channel transient error", p.name))
+		return
+	}
 	seq := p.nextSeq(schema.EventTypeTrade, instrument)
 	state.mu.Lock()
-	price := p.nextPrice(state, seq)
-	state.lastPrice = price
-	quantity := 0.25 + 0.05*float64((seq%7)+1)
-	state.volume += quantity
 	side := schema.TradeSideBuy
-	if seq%2 == 0 {
+	if p.randomFloat() < 0.5 {
 		side = schema.TradeSideSell
 	}
+	qty := p.randomTradeQuantity(state.constraints)
+	price, fills, filled := state.consumeLiquidity(side, qty, 0, ts)
+	if filled <= floatTolerance {
+		price = p.nextModelPrice(state)
+		filled = qty
+	}
+	state.lastPrice = price
+	state.volume += filled
+	state.updateKline(ts, price, filled, p.klineInterval)
+	state.recenterBook(p, price)
+	execEvents := make([]execReportEvent, 0, len(fills))
+	for _, fill := range fills {
+		if fill.order == nil {
+			continue
+		}
+		if fill.order.remaining <= floatTolerance {
+			delete(state.orderIndex, fill.order.exchangeID)
+		}
+		reportState := schema.ExecReportStatePARTIAL
+		if fill.order.remaining <= floatTolerance {
+			reportState = schema.ExecReportStateFILLED
+		}
+		payload := buildExecPayload(fill.order, reportState, nil, state.constraints, ts)
+		execEvents = append(execEvents, execReportEvent{instrument: instrument, payload: payload, ts: ts})
+	}
+	state.mu.Unlock()
 	tradeID := fmt.Sprintf("%s-%d", strings.ReplaceAll(instrument.Symbol(), "-", ""), seq)
 	payload := schema.TradePayload{
 		TradeID:   tradeID,
 		Side:      side,
-		Price:     formatPrice(price),
-		Quantity:  formatQuantity(quantity),
+		Price:     formatWithPrecision(price, state.constraints.pricePrecision),
+		Quantity:  formatWithPrecision(filled, state.constraints.quantityPrecision),
 		Timestamp: ts,
 	}
-	state.mu.Unlock()
 	evt := p.newEvent(schema.EventTypeTrade, instrument, seq, payload, ts)
 	if evt == nil {
 		return
 	}
 	p.emitEvent(evt)
+	if len(execEvents) > 0 {
+		p.emitExecReportEvents(execEvents)
+	}
 }
 
 func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 	state := p.getInstrumentState(instrument)
 	ts := p.clock().UTC()
+	if !p.venueOperational(ts) {
+		return
+	}
+	if p.venueShouldError() {
+		p.emitError(fmt.Errorf("fake provider %s: orderbook snapshot error", p.name))
+		return
+	}
 	seq := p.nextSeq(schema.EventTypeBookSnapshot, instrument)
 	state.mu.Lock()
-	state.reseedOrderBook()
-	levelsBids := toPriceLevels(state.bids)
-	levelsAsks := toPriceLevels(state.asks)
+	state.lastDiff = state.mutateBook(p, state.lastPrice)
+	levelsBids := formatLevels(state.snapshotLevels(state.bids, p.bookOptions.Levels, true), state.constraints)
+	levelsAsks := formatLevels(state.snapshotLevels(state.asks, p.bookOptions.Levels, false), state.constraints)
 	state.hasSnapshot = true
 	checksum := checksum(instrument.Symbol(), schema.EventTypeBookSnapshot, seq)
 	state.mu.Unlock()
@@ -608,6 +1445,20 @@ func (p *Provider) emitEvent(evt *schema.Event) {
 	}
 }
 
+func (p *Provider) emitExecReportEvents(events []execReportEvent) {
+	for _, entry := range events {
+		if entry.instrument.Symbol() == "" {
+			continue
+		}
+		seq := p.nextSeq(schema.EventTypeExecReport, entry.instrument)
+		evt := p.newEvent(schema.EventTypeExecReport, entry.instrument, seq, entry.payload, entry.ts)
+		if evt == nil {
+			continue
+		}
+		p.emitEvent(evt)
+	}
+}
+
 func (p *Provider) emitError(err error) {
 	if err == nil {
 		return
@@ -654,27 +1505,149 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 	if order.Timestamp.IsZero() {
 		order.Timestamp = p.clock().UTC()
 	}
-
-	seq := p.nextSeq(schema.EventTypeExecReport, nativeInst)
-	ts := p.clock().UTC()
-	//nolint:exhaustruct // zero value for RejectReason is intentional
-	payload := schema.ExecReportPayload{
-		ClientOrderID:   order.ClientOrderID,
-		ExchangeOrderID: order.ClientOrderID,
-		State:           schema.ExecReportStateACK,
-		Side:            order.Side,
-		OrderType:       order.OrderType,
-		Price:           stringOrDefault(order.Price),
-		Quantity:        order.Quantity,
-		FilledQuantity:  "0",
-		RemainingQty:    order.Quantity,
-		AvgFillPrice:    stringOrDefault(order.Price),
-		Timestamp:       ts,
+	if order.Side != schema.TradeSideBuy && order.Side != schema.TradeSideSell {
+		p.emitReject(nativeInst, order, "side required", order.Timestamp)
+		return
 	}
-	evt := p.newEvent(schema.EventTypeExecReport, nativeInst, seq, payload, ts)
-	if evt != nil {
-		p.emitEvent(evt)
+	if order.OrderType != schema.OrderTypeLimit && order.OrderType != schema.OrderTypeMarket {
+		p.emitReject(nativeInst, order, "unsupported order type", order.Timestamp)
+		return
 	}
+	qty, err := strconv.ParseFloat(order.Quantity, 64)
+	if err != nil || qty <= 0 {
+		p.emitReject(nativeInst, order, "invalid quantity", order.Timestamp)
+		return
+	}
+	state := p.getInstrumentState(nativeInst)
+	cons := state.constraints
+	qty = cons.normalizeQuantity(qty)
+	if !cons.validQuantity(qty) {
+		p.emitReject(nativeInst, order, "quantity violates instrument constraints", order.Timestamp)
+		return
+	}
+	var limitPrice float64
+	if order.OrderType == schema.OrderTypeLimit {
+		if order.Price == nil {
+			p.emitReject(nativeInst, order, "limit price required", order.Timestamp)
+			return
+		}
+		limitPrice, err = strconv.ParseFloat(*order.Price, 64)
+		if err != nil || limitPrice <= 0 {
+			p.emitReject(nativeInst, order, "invalid limit price", order.Timestamp)
+			return
+		}
+		limitPrice = cons.normalizePrice(limitPrice)
+	} else {
+		limitPrice = state.lastPrice
+	}
+	if limitPrice <= 0 {
+		limitPrice = state.basePrice
+	}
+	if !cons.enforceNotional(limitPrice, qty) {
+		p.emitReject(nativeInst, order, "min notional not met", order.Timestamp)
+		return
+	}
+	if !p.applyVenueLatency(p.ctx) {
+		return
+	}
+	now := p.clock().UTC()
+	if !p.venueOperational(now) {
+		p.emitReject(nativeInst, order, "venue unavailable", now)
+		return
+	}
+	state.mu.Lock()
+	tifMode := parseTIF(order.TIF)
+	limitConstraint := limitPrice
+	if order.OrderType == schema.OrderTypeMarket {
+		limitConstraint = 0
+	}
+	if tifMode == tifFOK {
+		available := state.availableLiquidity(order.Side, limitConstraint)
+		if available+floatTolerance < qty {
+			p.emitReject(nativeInst, order, "FOK insufficient liquidity", now)
+			return
+		}
+	}
+	if tifMode == tifPostOnly && state.isMarketable(order.Side, limitPrice) {
+		p.emitReject(nativeInst, order, "post-only order would cross the book", now)
+		return
+	}
+	active := &activeOrder{
+		clientID:   order.ClientOrderID,
+		exchangeID: p.nextExchangeOrderID(order.Symbol),
+		instrument: order.Symbol,
+		side:       order.Side,
+		orderType:  order.OrderType,
+		tif:        tifMode,
+		price:      limitPrice,
+		priceTick:  cons.tickForPrice(limitPrice),
+		quantity:   qty,
+		remaining:  qty,
+		createdAt:  now,
+		updatedAt:  now,
+	}
+	events := []execReportEvent{{
+		instrument: nativeInst,
+		payload:    buildExecPayload(active, schema.ExecReportStateACK, nil, cons, now),
+		ts:         now,
+	}}
+	avgPrice := 0.0
+	var fills []orderFill
+	filled := 0.0
+	if order.OrderType == schema.OrderTypeMarket || state.isMarketable(order.Side, limitPrice) {
+		avgPrice, fills, filled = state.consumeLiquidity(order.Side, qty, limitConstraint, now)
+		if filled > floatTolerance {
+			active.recordFill(filled, avgPrice, now)
+			fillState := schema.ExecReportStateFILLED
+			if active.remaining > floatTolerance {
+				fillState = schema.ExecReportStatePARTIAL
+			}
+			events = append(events, execReportEvent{
+				instrument: nativeInst,
+				payload:    buildExecPayload(active, fillState, nil, cons, now),
+				ts:         now,
+			})
+		}
+	}
+	for _, fill := range fills {
+		if fill.order == nil {
+			continue
+		}
+		if fill.order.remaining <= floatTolerance {
+			delete(state.orderIndex, fill.order.exchangeID)
+		}
+		stateCargo := schema.ExecReportStatePARTIAL
+		if fill.order.remaining <= floatTolerance {
+			stateCargo = schema.ExecReportStateFILLED
+		}
+		events = append(events, execReportEvent{
+			instrument: nativeInst,
+			payload:    buildExecPayload(fill.order, stateCargo, nil, cons, now),
+			ts:         now,
+		})
+	}
+	switch tifMode {
+	case tifIOC:
+		if active.remaining > floatTolerance {
+			reason := "IOC remainder cancelled"
+			events = append(events, execReportEvent{
+				instrument: nativeInst,
+				payload:    buildExecPayload(active, schema.ExecReportStateCANCELLED, ptr(reason), cons, now),
+				ts:         now,
+			})
+			active.remaining = 0
+		}
+	case tifGTC, tifPostOnly:
+		if active.remaining > floatTolerance {
+			state.restOrder(active)
+			state.orderIndex[active.exchangeID] = active
+		} else {
+			delete(state.orderIndex, active.exchangeID)
+		}
+	}
+	state.recenterBook(p, state.lastPrice)
+	state.mu.Unlock()
+	p.emitExecReportEvents(events)
 }
 
 func (p *Provider) defaultInstrumentSymbol() string {
@@ -697,6 +1670,22 @@ func (p *Provider) nativeInstrumentForSymbol(symbol string) (nativeInstrument, b
 		return nativeInstrument{symbol: ""}, false
 	}
 	return nativeInstrument{symbol: normalized}, true
+}
+
+func (p *Provider) constraintsFor(symbol string) instrumentConstraints {
+	normalized := normalizeInstrument(symbol)
+	p.instrumentMu.RLock()
+	defer p.instrumentMu.RUnlock()
+	if meta, ok := p.instrumentConstraints[normalized]; ok {
+		return meta
+	}
+	return instrumentConstraints{
+		priceIncrement:    0.01,
+		quantityIncrement: 0.0001,
+		minQuantity:       0.0001,
+		pricePrecision:    2,
+		quantityPrecision: 4,
+	}
 }
 
 func (p *Provider) stopAll() {
@@ -725,38 +1714,70 @@ func (p *Provider) nextSeq(evtType schema.EventType, instrument nativeInstrument
 	return seq
 }
 
+func (p *Provider) nextExchangeOrderID(symbol string) string {
+	count := p.orderCounter.Add(1)
+	clean := strings.ReplaceAll(strings.ToUpper(symbol), "-", "")
+	return fmt.Sprintf("%s-%06d", clean, count)
+}
+
+func (p *Provider) randomTradeQuantity(cons instrumentConstraints) float64 {
+	rangeSize := p.tradeModel.MaxQuantity - p.tradeModel.MinQuantity
+	if rangeSize <= 0 {
+		rangeSize = p.tradeModel.MinQuantity
+	}
+	qty := p.tradeModel.MinQuantity + p.randomFloat()*rangeSize
+	if cons.minQuantity > 0 && qty < cons.minQuantity {
+		qty = cons.minQuantity
+	}
+	if cons.maxQuantity > 0 && qty > cons.maxQuantity {
+		qty = cons.maxQuantity
+	}
+	return cons.normalizeQuantity(qty)
+}
+
 func (p *Provider) getInstrumentState(inst nativeInstrument) *instrumentState {
 	symbol := inst.Symbol()
 	p.stateMu.Lock()
 	state, ok := p.state[symbol]
 	if !ok {
-		state = newInstrumentState(symbol, defaultBasePrice(symbol))
+		state = newInstrumentState(symbol, defaultBasePrice(symbol), p.constraintsFor(symbol), p.bookOptions.Levels)
 		p.state[symbol] = state
 	}
 	p.stateMu.Unlock()
 	return state
 }
 
-func newInstrumentState(symbol string, basePrice float64) *instrumentState {
-	//nolint:exhaustruct // zero values for mu, bids, asks, hasSnapshot are intentional
-	state := &instrumentState{
-		instrument: symbol,
-		basePrice:  basePrice,
-		lastPrice:  basePrice,
-		volume:     1000,
+func newInstrumentState(symbol string, basePrice float64, meta instrumentConstraints, levels int) *instrumentState {
+	if levels <= 0 {
+		levels = defaultBookLevels
 	}
-	state.reseedOrderBook()
+	state := &instrumentState{
+		instrument:  symbol,
+		basePrice:   basePrice,
+		lastPrice:   basePrice,
+		volume:      1000,
+		constraints: meta,
+		bookLevels:  levels,
+		bids:        make(map[priceTick]*bookDepth, levels),
+		asks:        make(map[priceTick]*bookDepth, levels),
+		orderIndex:  make(map[string]*activeOrder),
+	}
+	state.seedOrderBook()
 	return state
 }
 
-func (s *instrumentState) reseedOrderBook() {
-	levels := 5
-	s.bids = make([]bookLevel, levels)
-	s.asks = make([]bookLevel, levels)
-	for i := 0; i < levels; i++ {
-		delta := float64(i+1) * 0.5
-		s.bids[i] = bookLevel{price: s.lastPrice - delta, quantity: 1.5 + 0.1*float64(i)}
-		s.asks[i] = bookLevel{price: s.lastPrice + delta, quantity: 1.2 + 0.1*float64(i)}
+func (s *instrumentState) seedOrderBook() {
+	if s.bookLevels <= 0 {
+		s.bookLevels = defaultBookLevels
+	}
+	step := math.Max(s.constraints.priceIncrement, 0.01)
+	qty := math.Max(s.constraints.quantityIncrement, 0.1)
+	for i := 1; i <= s.bookLevels; i++ {
+		delta := float64(i) * step
+		bidTick := s.constraints.tickForPrice(s.lastPrice - delta)
+		askTick := s.constraints.tickForPrice(s.lastPrice + delta)
+		s.bids[bidTick] = &bookDepth{synthetic: qty + 0.25*float64(i)}
+		s.asks[askTick] = &bookDepth{synthetic: qty + 0.2*float64(i)}
 	}
 }
 
@@ -771,6 +1792,7 @@ func snapshotNative(src []nativeInstrument) []nativeInstrument {
 
 func (p *Provider) setSupportedInstruments(list []schema.Instrument) {
 	catalog := make(map[string]schema.Instrument, len(list))
+	constraints := make(map[string]instrumentConstraints, len(list))
 	seen := make(map[string]struct{}, len(list))
 	natives := make([]nativeInstrument, 0, len(list))
 	for _, inst := range list {
@@ -779,12 +1801,22 @@ func (p *Provider) setSupportedInstruments(list []schema.Instrument) {
 			log.Printf("fake provider %s: dropping instrument %q: %v", p.name, inst.Symbol, err)
 			continue
 		}
+		if clone.Type != schema.InstrumentTypeSpot {
+			log.Printf("fake provider %s: instrument %q is %s; fake provider only supports spot", p.name, inst.Symbol, clone.Type)
+			continue
+		}
 		native, err := p.instrumentCodec.ToNative(clone)
 		if err != nil {
 			log.Printf("fake provider %s: normalize instrument %q failed: %v", p.name, inst.Symbol, err)
 			continue
 		}
+		meta, err := constraintsFromInstrument(clone)
+		if err != nil {
+			log.Printf("fake provider %s: instrument %q constraints invalid: %v", p.name, inst.Symbol, err)
+			continue
+		}
 		catalog[native.symbol] = clone
+		constraints[native.symbol] = meta
 		if _, exists := seen[native.symbol]; !exists {
 			seen[native.symbol] = struct{}{}
 			natives = append(natives, native)
@@ -804,6 +1836,7 @@ func (p *Provider) setSupportedInstruments(list []schema.Instrument) {
 	p.instrumentMu.Lock()
 	prev := p.instruments
 	p.instruments = catalog
+	p.instrumentConstraints = constraints
 	p.defaultNativeInstruments = natives
 	p.instrumentMu.Unlock()
 	log.Printf("fake provider %s: instrument catalogue updated: %d instruments", p.name, len(ordered))
@@ -847,6 +1880,56 @@ func (p *Provider) emitInstrumentDiff(previous map[string]schema.Instrument, cur
 	}
 }
 
+func buildExecPayload(order *activeOrder, state schema.ExecReportState, reason *string, cons instrumentConstraints, ts time.Time) schema.ExecReportPayload {
+	if order == nil {
+		return schema.ExecReportPayload{}
+	}
+	priceValue := order.price
+	if order.orderType == schema.OrderTypeMarket && order.avgFillPrice() > 0 {
+		priceValue = order.avgFillPrice()
+	}
+	priceStr := formatWithPrecision(priceValue, cons.pricePrecision)
+	filled := formatWithPrecision(order.filled, cons.quantityPrecision)
+	remaining := formatWithPrecision(order.remaining, cons.quantityPrecision)
+	qtyStr := formatWithPrecision(order.quantity, cons.quantityPrecision)
+	avgFill := formatWithPrecision(order.avgFillPrice(), cons.pricePrecision)
+	return schema.ExecReportPayload{
+		ClientOrderID:   order.clientID,
+		ExchangeOrderID: order.exchangeID,
+		State:           state,
+		Side:            order.side,
+		OrderType:       order.orderType,
+		Price:           priceStr,
+		Quantity:        qtyStr,
+		FilledQuantity:  filled,
+		RemainingQty:    remaining,
+		AvgFillPrice:    avgFill,
+		Timestamp:       ts,
+		RejectReason:    reason,
+	}
+}
+
+func (p *Provider) randomFloat() float64 {
+	p.randMu.Lock()
+	defer p.randMu.Unlock()
+	return p.rng.Float64()
+}
+
+func (p *Provider) randomNorm() float64 {
+	p.randMu.Lock()
+	defer p.randMu.Unlock()
+	return p.rng.NormFloat64()
+}
+
+func (p *Provider) randomDuration(min, max time.Duration) time.Duration {
+	if max <= min {
+		return min
+	}
+	rangeDur := max - min
+	factor := p.randomFloat()
+	return min + time.Duration(float64(rangeDur)*factor)
+}
+
 func (p *Provider) emitInstrumentUpdate(inst schema.Instrument) {
 	if strings.TrimSpace(inst.Symbol) == "" {
 		return
@@ -874,6 +1957,155 @@ func instrumentsEqual(a, b schema.Instrument) bool {
 	return reflect.DeepEqual(a, b)
 }
 
+func constraintsFromInstrument(inst schema.Instrument) (instrumentConstraints, error) {
+	meta := instrumentConstraints{}
+	var err error
+	if meta.priceIncrement, err = parseDecimal(inst.PriceIncrement, 0.01); err != nil {
+		return instrumentConstraints{}, fmt.Errorf("price increment: %w", err)
+	}
+	if meta.quantityIncrement, err = parseDecimal(inst.QuantityIncrement, 0.0001); err != nil {
+		return instrumentConstraints{}, fmt.Errorf("quantity increment: %w", err)
+	}
+	if meta.minQuantity, err = parseDecimal(inst.MinQuantity, meta.quantityIncrement); err != nil {
+		return instrumentConstraints{}, fmt.Errorf("min quantity: %w", err)
+	}
+	if meta.maxQuantity, err = parseDecimal(inst.MaxQuantity, 0); err != nil {
+		return instrumentConstraints{}, fmt.Errorf("max quantity: %w", err)
+	}
+	if meta.minNotional, err = parseDecimal(inst.MinNotional, 0); err != nil {
+		return instrumentConstraints{}, fmt.Errorf("min notional: %w", err)
+	}
+	if inst.PricePrecision != nil {
+		meta.pricePrecision = *inst.PricePrecision
+	}
+	if meta.pricePrecision <= 0 {
+		meta.pricePrecision = 2
+	}
+	if inst.QuantityPrecision != nil {
+		meta.quantityPrecision = *inst.QuantityPrecision
+	}
+	if meta.quantityPrecision <= 0 {
+		meta.quantityPrecision = 4
+	}
+	if meta.priceIncrement <= 0 {
+		meta.priceIncrement = 0.01
+	}
+	if meta.quantityIncrement <= 0 {
+		meta.quantityIncrement = 0.0001
+	}
+	return meta, nil
+}
+
+func parseDecimal(input string, fallback float64) (float64, error) {
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return fallback, nil
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, err
+	}
+	return f, nil
+}
+
+func (ic instrumentConstraints) tickForPrice(price float64) priceTick {
+	if ic.priceIncrement <= 0 {
+		return priceTick(math.Round(price / 0.01))
+	}
+	return priceTick(math.Round(price / ic.priceIncrement))
+}
+
+func (ic instrumentConstraints) priceForTick(t priceTick) float64 {
+	if ic.priceIncrement <= 0 {
+		return float64(t) * 0.01
+	}
+	return float64(t) * ic.priceIncrement
+}
+
+func (ic instrumentConstraints) normalizePrice(price float64) float64 {
+	if ic.priceIncrement <= 0 {
+		return price
+	}
+	steps := math.Round(price / ic.priceIncrement)
+	return steps * ic.priceIncrement
+}
+
+func (ic instrumentConstraints) normalizeQuantity(q float64) float64 {
+	if ic.quantityIncrement <= 0 {
+		return q
+	}
+	steps := math.Round(q / ic.quantityIncrement)
+	return steps * ic.quantityIncrement
+}
+
+func (ic instrumentConstraints) validQuantity(q float64) bool {
+	if q <= 0 {
+		return false
+	}
+	if ic.minQuantity > 0 && q+floatTolerance < ic.minQuantity {
+		return false
+	}
+	if ic.maxQuantity > 0 && q-ic.maxQuantity > floatTolerance {
+		return false
+	}
+	if ic.quantityIncrement > 0 {
+		steps := math.Round(q / ic.quantityIncrement)
+		return math.Abs(q-steps*ic.quantityIncrement) < 1e-9
+	}
+	return true
+}
+
+func (ic instrumentConstraints) enforceNotional(price, qty float64) bool {
+	if ic.minNotional <= 0 {
+		return true
+	}
+	return price*qty+floatTolerance >= ic.minNotional
+}
+
+func (p *Provider) applyVenueLatency(ctx context.Context) bool {
+	if p.venueCfg.LatencyMin <= 0 {
+		return true
+	}
+	delay := p.randomDuration(p.venueCfg.LatencyMin, p.venueCfg.LatencyMax)
+	if delay <= 0 {
+		return true
+	}
+	if ctx == nil {
+		ctx = p.ctx
+	}
+	t := time.NewTimer(delay)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+func (p *Provider) venueOperational(now time.Time) bool {
+	p.venueState.mu.Lock()
+	defer p.venueState.mu.Unlock()
+	if p.venueState.disconnected {
+		if now.After(p.venueState.reconnectAt) {
+			p.venueState.disconnected = false
+		} else {
+			return false
+		}
+	}
+	if p.venueCfg.DisconnectChance > 0 && p.randomFloat() < p.venueCfg.DisconnectChance {
+		p.venueState.disconnected = true
+		p.venueState.reconnectAt = now.Add(p.venueCfg.DisconnectFor)
+		p.emitError(fmt.Errorf("fake provider %s: venue link temporarily unavailable", p.name))
+		return false
+	}
+	return true
+}
+
+func (p *Provider) venueShouldError() bool {
+	return p.venueCfg.TransientError > 0 && p.randomFloat() < p.venueCfg.TransientError
+}
+
 func normalizeInstrument(symbol string) string {
 	return strings.ToUpper(strings.TrimSpace(symbol))
 }
@@ -891,20 +2123,40 @@ func defaultBasePrice(symbol string) float64 {
 	}
 }
 
-func (p *Provider) nextPrice(state *instrumentState, seq uint64) float64 {
+func (p *Provider) nextModelPrice(state *instrumentState) float64 {
 	base := state.lastPrice
-	amplitude := 0.75 * math.Sin(float64(seq%13))
-	price := base + amplitude
+	if base <= 0 {
+		base = state.basePrice
+	}
+	drift := base * p.priceModel.Drift
+	vol := base * p.priceModel.Volatility * p.randomNorm()
+	shock := 0.0
+	if p.randomFloat() < p.priceModel.ShockProbability {
+		direction := 1.0
+		if p.randomFloat() < 0.5 {
+			direction = -1
+		}
+		shock = direction * p.priceModel.ShockMagnitude * base
+	}
+	price := base + drift + vol + shock
 	if price <= 0 {
 		price = state.basePrice
 	}
 	return price
 }
 
-func toPriceLevels(levels []bookLevel) []schema.PriceLevel {
-	return iter.Map(levels, func(level *bookLevel) schema.PriceLevel {
-		return schema.PriceLevel{Price: formatPrice(level.price), Quantity: formatQuantity(level.quantity)}
-	})
+func formatLevels(levels []bookLevel, cons instrumentConstraints) []schema.PriceLevel {
+	if len(levels) == 0 {
+		return nil
+	}
+	out := make([]schema.PriceLevel, len(levels))
+	for i, lvl := range levels {
+		out[i] = schema.PriceLevel{
+			Price:    formatWithPrecision(lvl.price, cons.pricePrecision),
+			Quantity: formatWithPrecision(lvl.quantity, cons.quantityPrecision),
+		}
+	}
+	return out
 }
 
 func canonicalToEventType(c schema.CanonicalType) (schema.EventType, bool) {
@@ -917,6 +2169,8 @@ func canonicalToEventType(c schema.CanonicalType) (schema.EventType, bool) {
 		return schema.EventTypeTicker, true
 	case schema.CanonicalType("EXECUTION.REPORT"):
 		return schema.EventTypeExecReport, true
+	case schema.CanonicalType("KLINE.SUMMARY"), schema.CanonicalType("KLINE"):
+		return schema.EventTypeKlineSummary, true
 	default:
 		return "", false
 	}
@@ -939,9 +2193,38 @@ func formatQuantity(value float64) string {
 	return fmt.Sprintf("%.4f", value)
 }
 
+func formatWithPrecision(value float64, precision int) string {
+	if precision <= 0 {
+		precision = 2
+	}
+	return fmt.Sprintf("%.*f", precision, value)
+}
+
 func stringOrDefault(value *string) string {
 	if value == nil {
 		return ""
 	}
 	return *value
+}
+
+func (p *Provider) emitReject(nativeInst nativeInstrument, req schema.OrderRequest, reason string, ts time.Time) {
+	payload := schema.ExecReportPayload{
+		ClientOrderID:   req.ClientOrderID,
+		ExchangeOrderID: p.nextExchangeOrderID(req.Symbol),
+		State:           schema.ExecReportStateREJECTED,
+		Side:            req.Side,
+		OrderType:       req.OrderType,
+		Price:           stringOrDefault(req.Price),
+		Quantity:        req.Quantity,
+		FilledQuantity:  "0",
+		RemainingQty:    req.Quantity,
+		AvgFillPrice:    "0",
+		Timestamp:       ts,
+		RejectReason:    ptr(reason),
+	}
+	p.emitExecReportEvents([]execReportEvent{{instrument: nativeInst, payload: payload, ts: ts}})
+}
+
+func ptr[T any](value T) *T {
+	return &value
 }

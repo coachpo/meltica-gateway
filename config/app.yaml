@@ -2,22 +2,86 @@
 environment: dev
 
 exchanges:
-  # fake: synthetic market data source suitable for demos/tests
-  fake:
+  # fake-liquid: moderate volatility venue demonstrating instrument refresh and klines
+  fake-liquid:
     exchange:
       name: fake
       enabled: true
-      ticker_interval: 100ms
-      trade_interval: 100ms
-      book_snapshot_interval: 100ms
-  # fake-slow: alias with adjusted cadence, same underlying exchange implementation
-  fake-slow:
+      ticker_interval: 150ms
+      trade_interval: 120ms
+      book_snapshot_interval: 400ms
+      instrument_refresh_interval: 15m
+      kline_interval: 30s
+      price_model:
+        drift: 0.00018
+        volatility: 0.009
+        shock_probability: 0.02
+        shock_magnitude: 0.015
+      trade_model:
+        min_quantity: 0.02
+        max_quantity: 1.5
+      order_book:
+        levels: 14
+        max_mutation_width: 6
+      venue_behavior:
+        latency_min: 8ms
+        latency_max: 28ms
+        transient_error: 0.0025
+        disconnect_chance: 0.0002
+        disconnect_for: 2s
+  # fake-volatile: fast-moving market with aggressive shocks for stress tests
+  fake-volatile:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 80ms
+      trade_interval: 60ms
+      book_snapshot_interval: 200ms
+      kline_interval: 15s
+      price_model:
+        drift: 0.00035
+        volatility: 0.02
+        shock_probability: 0.08
+        shock_magnitude: 0.05
+      trade_model:
+        min_quantity: 0.01
+        max_quantity: 2.8
+      order_book:
+        levels: 18
+        max_mutation_width: 9
+      venue_behavior:
+        latency_min: 4ms
+        latency_max: 18ms
+        transient_error: 0.006
+        disconnect_chance: 0.001
+        disconnect_for: 1500ms
+  # fake-calm: slower venue illustrating tight error budgets and wider latency bands
+  fake-calm:
     exchange:
       name: fake
       enabled: true
       ticker_interval: 250ms
-      trade_interval: 500ms
-      book_snapshot_interval: 250ms
+      trade_interval: 250ms
+      book_snapshot_interval: 1s
+      instrument_refresh_interval: 20m
+      kline_interval: 1m
+      price_model:
+        drift: 0.00005
+        volatility: 0.004
+        shock_probability: 0.01
+        shock_magnitude: 0.01
+      trade_model:
+        min_quantity: 0.05
+        max_quantity: 1.0
+      order_book:
+        levels: 10
+        max_mutation_width: 4
+      venue_behavior:
+        latency_min: 12ms
+        latency_max: 45ms
+        transient_error: 0.0015
+        disconnect_chance: 0.00005
+        disconnect_for: 4s
 
 # eventbus: in-memory event bus sizing
 eventbus:
@@ -43,133 +107,60 @@ telemetry:
 # lambdaManifest: inline lambda definitions that will be materialised at startup
 lambdaManifest:
   lambdas:
-    - id: lambda-fake-btc
-      provider: fake
+    - id: mm-btc
+      provider: fake-liquid
       symbol: BTC-USDT
-      strategy: delay
+      strategy: marketmaking
       config:
-        min_delay: "250ms"
-        max_delay: "750ms"
+        spread_bps: 28
+        order_size: "0.05"
+        max_open_orders: 3
       auto_start: true
-    - id: lambda-fake-btc-logger
-      provider: fake
-      symbol: BTC-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-slow-eth
-      provider: fake-slow
+    - id: grid-eth
+      provider: fake-volatile
       symbol: ETH-USDT
-      strategy: delay
+      strategy: grid
       config:
-        min_delay: "250ms"
-        max_delay: "750ms"
+        grid_levels: 5
+        grid_spacing: 0.75
+        order_size: "0.4"
       auto_start: true
-    - id: lambda-fake-eth-noop
-      provider: fake
-      symbol: ETH-USDT
-      strategy: delay
+    - id: momentum-sol
+      provider: fake-volatile
+      symbol: SOL-USDT
+      strategy: momentum
+      config:
+        lookback_period: 24
+        momentum_threshold: 0.9
+        order_size: "12"
+        cooldown: "4s"
       auto_start: true
-    - id: lambda-fake-xrp
-      provider: fake
+    - id: meanrev-xrp
+      provider: fake-calm
       symbol: XRP-USDT
-      strategy: delay
+      strategy: meanreversion
       config:
-        min_delay: "250ms"
-        max_delay: "750ms"
+        window_size: 30
+        deviation_threshold: 0.7
+        order_size: "2500"
       auto_start: true
-    - id: lambda-fake-xrp-noop
-      provider: fake
-      symbol: XRP-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-sol-1
-      provider: fake
-      symbol: SOL-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-sol-2
-      provider: fake
-      symbol: SOL-USDT
-      strategy: delay
-      config:
-        min_delay: "250ms"
-        max_delay: "750ms"
-      auto_start: true
-    - id: lambda-fake-sol-3
-      provider: fake
-      symbol: SOL-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-sol-4
-      provider: fake
-      symbol: SOL-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-sol-logger
-      provider: fake
-      symbol: SOL-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-ada
-      provider: fake
+    - id: logging-ada
+      provider: fake-liquid
       symbol: ADA-USDT
-      strategy: delay
+      strategy: logging
       config:
-        min_delay: "250ms"
-        max_delay: "750ms"
+        logger_prefix: "[ADA-LOGGER] "
       auto_start: true
-    - id: lambda-fake-ada-logger
-      provider: fake
-      symbol: ADA-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-doge
-      provider: fake
+    - id: delay-doge
+      provider: fake-calm
       symbol: DOGE-USDT
       strategy: delay
+      config:
+        min_delay: "150ms"
+        max_delay: "600ms"
       auto_start: true
-    - id: lambda-fake-doge-logger
-      provider: fake
-      symbol: DOGE-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-bnb
-      provider: fake
+    - id: noop-bnb
+      provider: fake-liquid
       symbol: BNB-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-bnb-noop
-      provider: fake
-      symbol: BNB-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-ltc
-      provider: fake
-      symbol: LTC-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-ltc-logger
-      provider: fake
-      symbol: LTC-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-dot
-      provider: fake
-      symbol: DOT-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-dot-noop
-      provider: fake
-      symbol: DOT-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-avax
-      provider: fake
-      symbol: AVAX-USDT
-      strategy: delay
-      auto_start: true
-    - id: lambda-fake-avax-logger
-      provider: fake
-      symbol: AVAX-USDT
-      strategy: delay
+      strategy: noop
       auto_start: true
