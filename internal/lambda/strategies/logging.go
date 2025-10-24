@@ -116,20 +116,3 @@ func (s *Logging) OnKlineSummary(_ context.Context, evt *schema.Event, payload s
 func (s *Logging) OnInstrumentUpdate(_ context.Context, evt *schema.Event, payload schema.InstrumentUpdatePayload) {
 	s.logger().Printf("Instrument updated: provider=%s symbol=%s", evt.Provider, payload.Instrument.Symbol)
 }
-
-// OnControlAck logs control acknowledgment events.
-func (s *Logging) OnControlAck(_ context.Context, evt *schema.Event, payload schema.ControlAckPayload) {
-	if payload.Success {
-		s.logger().Printf("Control ACK: provider=%s symbol=%s command=%s consumer=%s success=true",
-			evt.Provider, evt.Symbol, payload.CommandType, payload.ConsumerID)
-	} else {
-		s.logger().Printf("Control ACK: provider=%s symbol=%s command=%s consumer=%s success=false error=%s",
-			evt.Provider, evt.Symbol, payload.CommandType, payload.ConsumerID, payload.ErrorMessage)
-	}
-}
-
-// OnControlResult logs control result events.
-func (s *Logging) OnControlResult(_ context.Context, evt *schema.Event, payload schema.ControlResultPayload) {
-	s.logger().Printf("Control RESULT: provider=%s symbol=%s command=%s consumer=%s",
-		evt.Provider, evt.Symbol, payload.CommandType, payload.ConsumerID)
-}

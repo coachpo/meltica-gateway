@@ -224,23 +224,6 @@ func TestEventTypeCoalescable(t *testing.T) {
 	}
 }
 
-func TestControlAckPayload(t *testing.T) {
-	payload := ControlAckPayload{
-		MessageID:      "msg-123",
-		ConsumerID:     "consumer-1",
-		CommandType:    "subscribe",
-		Success:        true,
-		RoutingVersion: 5,
-	}
-
-	if payload.MessageID != "msg-123" {
-		t.Error("MessageID not set correctly")
-	}
-	if !payload.Success {
-		t.Error("Success should be true")
-	}
-}
-
 func TestBookSnapshotPayload(t *testing.T) {
 	payload := BookSnapshotPayload{
 		Bids: []PriceLevel{

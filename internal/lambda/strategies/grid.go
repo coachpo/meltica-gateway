@@ -148,12 +148,6 @@ func (s *Grid) OnOrderExpired(_ context.Context, _ *schema.Event, _ schema.ExecR
 // OnKlineSummary tracks kline data (no-op for this strategy).
 func (s *Grid) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {}
 
-// OnControlAck tracks control acknowledgments (no-op for this strategy).
-func (s *Grid) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {}
-
-// OnControlResult tracks control results (no-op for this strategy).
-func (s *Grid) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {}
-
 // OnInstrumentUpdate refreshes strategy state when instruments change (no-op for grid).
 func (s *Grid) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
 }

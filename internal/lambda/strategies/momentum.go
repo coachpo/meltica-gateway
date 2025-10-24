@@ -147,13 +147,6 @@ func (s *Momentum) OnOrderExpired(_ context.Context, _ *schema.Event, _ schema.E
 // OnKlineSummary tracks kline data (no-op for this strategy).
 func (s *Momentum) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {}
 
-// OnControlAck tracks control acknowledgments (no-op for this strategy).
-func (s *Momentum) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {}
-
-// OnControlResult tracks control results (no-op for this strategy).
-func (s *Momentum) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
-}
-
 // OnInstrumentUpdate is a no-op for this strategy.
 func (s *Momentum) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
 }

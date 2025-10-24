@@ -143,13 +143,3 @@ func (s *Delay) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.Klin
 func (s *Delay) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
 	s.sleep()
 }
-
-// OnControlAck handles control acknowledgment events by adding a delay.
-func (s *Delay) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {
-	s.sleep()
-}
-
-// OnControlResult handles control result events by adding a delay.
-func (s *Delay) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
-	s.sleep()
-}

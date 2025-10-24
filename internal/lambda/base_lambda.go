@@ -36,10 +36,6 @@ type TradingStrategy interface {
 	OnOrderAcknowledged(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
 	OnOrderExpired(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
 
-	// Control plane callbacks (for monitoring, metrics, operational decisions)
-	OnControlAck(ctx context.Context, evt *schema.Event, payload schema.ControlAckPayload)
-	OnControlResult(ctx context.Context, evt *schema.Event, payload schema.ControlResultPayload)
-
 	// SubscribedEvents declares the canonical event types the strategy consumes.
 	SubscribedEvents() []schema.CanonicalType
 }
@@ -209,10 +205,6 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 		l.handleExecReport(ctx, evt)
 	case schema.EventTypeKlineSummary:
 		l.handleKlineSummary(ctx, evt)
-	case schema.EventTypeControlAck:
-		l.handleControlAck(ctx, evt)
-	case schema.EventTypeControlResult:
-		l.handleControlResult(ctx, evt)
 	case schema.EventTypeInstrumentUpdate:
 		l.handleInstrumentUpdate(ctx, evt)
 	}
@@ -339,41 +331,6 @@ func (l *BaseLambda) handleKlineSummary(ctx context.Context, evt *schema.Event) 
 
 	if l.strategy != nil {
 		l.strategy.OnKlineSummary(ctx, evt, payload)
-	}
-}
-
-func (l *BaseLambda) handleControlAck(ctx context.Context, evt *schema.Event) {
-	payload, ok := evt.Payload.(schema.ControlAckPayload)
-	if !ok {
-		return
-	}
-
-	// Log at base level for infrastructure monitoring
-	if payload.Success {
-		l.logger.Printf("[%s] Control ACK: command=%s consumer=%s", l.id, payload.CommandType, payload.ConsumerID)
-	} else {
-		l.logger.Printf("[%s] Control ACK FAILED: command=%s consumer=%s error=%s",
-			l.id, payload.CommandType, payload.ConsumerID, payload.ErrorMessage)
-	}
-
-	// Delegate to strategy for operational decisions
-	if l.strategy != nil {
-		l.strategy.OnControlAck(ctx, evt, payload)
-	}
-}
-
-func (l *BaseLambda) handleControlResult(ctx context.Context, evt *schema.Event) {
-	payload, ok := evt.Payload.(schema.ControlResultPayload)
-	if !ok {
-		return
-	}
-
-	// Log at base level for infrastructure monitoring
-	l.logger.Printf("[%s] Control RESULT: command=%s consumer=%s", l.id, payload.CommandType, payload.ConsumerID)
-
-	// Delegate to strategy for operational decisions
-	if l.strategy != nil {
-		l.strategy.OnControlResult(ctx, evt, payload)
 	}
 }
 

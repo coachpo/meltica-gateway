@@ -137,10 +137,6 @@ const (
 	EventTypeExecReport EventType = "ExecReport"
 	// EventTypeKlineSummary identifies candlestick summary events.
 	EventTypeKlineSummary EventType = "KlineSummary"
-	// EventTypeControlAck identifies control-plane acknowledgements.
-	EventTypeControlAck EventType = "ControlAck"
-	// EventTypeControlResult identifies control-plane command results.
-	EventTypeControlResult EventType = "ControlResult"
 	// EventTypeInstrumentUpdate identifies provider instrument catalogue refresh notifications.
 	EventTypeInstrumentUpdate EventType = "InstrumentUpdate"
 )
@@ -153,34 +149,11 @@ func (et EventType) Coalescable() bool {
 	case EventTypeBookSnapshot,
 		EventTypeTrade,
 		EventTypeExecReport,
-		EventTypeControlAck,
-		EventTypeControlResult,
 		EventTypeInstrumentUpdate:
 		return false
 	default:
 		return false
 	}
-}
-
-// ControlAckPayload carries control acknowledgement metadata delivered over the data bus.
-type ControlAckPayload struct {
-	MessageID      string             `json:"message_id"`
-	ConsumerID     string             `json:"consumer_id"`
-	CommandType    ControlMessageType `json:"command_type"`
-	Success        bool               `json:"success"`
-	RoutingVersion int                `json:"routing_version"`
-	ErrorMessage   string             `json:"error_message,omitempty"`
-	Timestamp      time.Time          `json:"timestamp"`
-}
-
-// ControlResultPayload carries control command results delivered over the data bus.
-type ControlResultPayload struct {
-	MessageID      string             `json:"message_id"`
-	ConsumerID     string             `json:"consumer_id"`
-	CommandType    ControlMessageType `json:"command_type"`
-	RoutingVersion int                `json:"routing_version"`
-	Result         any                `json:"result,omitempty"`
-	Timestamp      time.Time          `json:"timestamp"`
 }
 
 // PriceLevel describes an order book price level using decimal strings.

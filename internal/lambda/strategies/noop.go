@@ -54,9 +54,3 @@ func (s *NoOp) OnOrderExpired(_ context.Context, _ *schema.Event, _ schema.ExecR
 
 // OnKlineSummary does nothing.
 func (s *NoOp) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {}
-
-// OnControlAck does nothing.
-func (s *NoOp) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {}
-
-// OnControlResult does nothing.
-func (s *NoOp) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {}
