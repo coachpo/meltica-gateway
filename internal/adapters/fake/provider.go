@@ -301,7 +301,6 @@ type instrumentState struct {
 	asks         map[priceTick]*bookDepth
 	orderIndex   map[string]*activeOrder
 	lastDiff     bookDiff
-	checksum     string
 	currentKline *klineWindow
 	completed    []klineWindow
 }
@@ -380,14 +379,14 @@ func (s *instrumentState) mutateBook(p *Provider, mid float64) bookDiff {
 	if mid <= 0 {
 		mid = s.lastPrice
 	}
-	diff := bookDiff{}
+	diff := bookDiff{bids: nil, asks: nil}
 	diff.bids = s.mutateSide(p, s.bids, true)
 	diff.asks = s.mutateSide(p, s.asks, false)
 	s.recenterBook(p, mid)
 	return diff
 }
 
-func (s *instrumentState) mutateSide(p *Provider, side map[priceTick]*bookDepth, isBid bool) []bookLevelChange {
+func (s *instrumentState) mutateSide(p *Provider, side map[priceTick]*bookDepth, _ bool) []bookLevelChange {
 	mutations := make([]bookLevelChange, 0, p.bookOptions.MaxMutationWidth)
 	count := p.bookOptions.MaxMutationWidth
 	if count <= 0 {
@@ -406,7 +405,7 @@ func (s *instrumentState) mutateSide(p *Provider, side map[priceTick]*bookDepth,
 		}
 		depth := side[chosen]
 		if depth == nil {
-			depth = &bookDepth{}
+			depth = &bookDepth{synthetic: 0, orders: nil}
 			side[chosen] = depth
 		}
 		baseQty := depth.synthetic
@@ -442,7 +441,7 @@ func (s *instrumentState) recenterBook(p *Provider, mid float64) {
 				continue
 			}
 			qty := math.Max(s.constraints.quantityIncrement, 0.5+p.randomFloat())
-			side[tick] = &bookDepth{synthetic: qty}
+			side[tick] = &bookDepth{synthetic: qty, orders: nil}
 		}
 	}
 	ensureLevels(s.bids, true)
@@ -705,28 +704,10 @@ func (s *instrumentState) restOrder(order *activeOrder) {
 	}
 	depth := depthMap[order.priceTick]
 	if depth == nil {
-		depth = &bookDepth{}
+		depth = &bookDepth{synthetic: 0, orders: nil}
 		depthMap[order.priceTick] = depth
 	}
 	depth.orders = append(depth.orders, order)
-}
-
-func (s *instrumentState) purgeOrder(order *activeOrder) {
-	if order == nil {
-		return
-	}
-	depthMap := s.bids
-	if order.side == schema.TradeSideSell {
-		depthMap = s.asks
-	}
-	depth := depthMap[order.priceTick]
-	if depth == nil {
-		return
-	}
-	depth.orders = pruneOrders(depth.orders)
-	if len(depth.orders) == 0 && depth.synthetic <= floatTolerance {
-		delete(depthMap, order.priceTick)
-	}
 }
 
 type klineWindow struct {
@@ -750,6 +731,7 @@ func newKlineWindow(start time.Time, interval time.Duration, price float64) *kli
 		close:     price,
 		high:      price,
 		low:       price,
+		volume:    0,
 	}
 }
 
@@ -886,8 +868,7 @@ func NewProvider(opts Options) *Provider {
 		bookSnapshotInterval = 5 * time.Second
 	}
 
-	//nolint:exhaustruct // zero values for ctx, cancel, started, mu, etc. are intentional
-	p := &Provider{
+	p := &Provider{ //nolint:exhaustruct // zero values for internal synchronization fields are acceptable
 		name:                  name,
 		tickerInterval:        tickerInterval,
 		tradeInterval:         tradeInterval,
@@ -902,7 +883,7 @@ func NewProvider(opts Options) *Provider {
 		clock:                 time.Now,
 		pools:                 opts.Pools,
 		instrumentConstraints: make(map[string]instrumentConstraints),
-		rng:                   rand.New(rand.NewSource(time.Now().UnixNano())),
+		rng:                   rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // pseudo-randomness is acceptable for simulations
 	}
 	if p.klineInterval <= 0 {
 		p.klineInterval = defaultKlineInterval
@@ -1057,8 +1038,7 @@ func (p *Provider) UnsubscribeRoute(typ schema.CanonicalType) error {
 
 func (p *Provider) startRouteLocked(route dispatcher.Route, evtType schema.EventType) *routeHandle {
 	routeCtx, cancel := context.WithCancel(p.ctx)
-	//nolint:exhaustruct // zero value for wg is intentional
-	handle := &routeHandle{cancel: cancel}
+	handle := &routeHandle{cancel: cancel} //nolint:exhaustruct // wait group zero value is acceptable
 	supplier := p.instrumentSupplier(route)
 	handle.wg.Go(func() {
 		p.runGenerator(routeCtx, evtType, supplier)
@@ -1379,8 +1359,7 @@ func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 	state.hasSnapshot = true
 	checksum := checksum(instrument.Symbol(), schema.EventTypeBookSnapshot, seq)
 	state.mu.Unlock()
-	//nolint:exhaustruct // FirstUpdateID and FinalUpdateID not used by fake provider
-	payload := schema.BookSnapshotPayload{
+	payload := schema.BookSnapshotPayload{ //nolint:exhaustruct // optional update fields are intentionally omitted
 		Bids:       levelsBids,
 		Asks:       levelsAsks,
 		Checksum:   checksum,
@@ -1583,6 +1562,8 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 		priceTick:  cons.tickForPrice(limitPrice),
 		quantity:   qty,
 		remaining:  qty,
+		filled:     0,
+		notional:   0,
 		createdAt:  now,
 		updatedAt:  now,
 	}
@@ -1627,9 +1608,12 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 		})
 	}
 	switch tifMode {
-	case tifIOC:
+	case tifIOC, tifFOK:
 		if active.remaining > floatTolerance {
 			reason := "IOC remainder cancelled"
+			if tifMode == tifFOK {
+				reason = "FOK remainder cancelled"
+			}
 			events = append(events, execReportEvent{
 				instrument: nativeInst,
 				payload:    buildExecPayload(active, schema.ExecReportStateCANCELLED, ptr(reason), cons, now),
@@ -1637,6 +1621,7 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 			})
 			active.remaining = 0
 		}
+		delete(state.orderIndex, active.exchangeID)
 	case tifGTC, tifPostOnly:
 		if active.remaining > floatTolerance {
 			state.restOrder(active)
@@ -1683,6 +1668,8 @@ func (p *Provider) constraintsFor(symbol string) instrumentConstraints {
 		priceIncrement:    0.01,
 		quantityIncrement: 0.0001,
 		minQuantity:       0.0001,
+		maxQuantity:       0,
+		minNotional:       0,
 		pricePrecision:    2,
 		quantityPrecision: 4,
 	}
@@ -1752,15 +1739,20 @@ func newInstrumentState(symbol string, basePrice float64, meta instrumentConstra
 		levels = defaultBookLevels
 	}
 	state := &instrumentState{
-		instrument:  symbol,
-		basePrice:   basePrice,
-		lastPrice:   basePrice,
-		volume:      1000,
-		constraints: meta,
-		bookLevels:  levels,
-		bids:        make(map[priceTick]*bookDepth, levels),
-		asks:        make(map[priceTick]*bookDepth, levels),
-		orderIndex:  make(map[string]*activeOrder),
+		mu:           sync.Mutex{},
+		instrument:   symbol,
+		basePrice:    basePrice,
+		lastPrice:    basePrice,
+		volume:       1000,
+		hasSnapshot:  false,
+		constraints:  meta,
+		bookLevels:   levels,
+		bids:         make(map[priceTick]*bookDepth, levels),
+		asks:         make(map[priceTick]*bookDepth, levels),
+		orderIndex:   make(map[string]*activeOrder),
+		lastDiff:     bookDiff{bids: nil, asks: nil},
+		currentKline: nil,
+		completed:    nil,
 	}
 	state.seedOrderBook()
 	return state
@@ -1776,8 +1768,8 @@ func (s *instrumentState) seedOrderBook() {
 		delta := float64(i) * step
 		bidTick := s.constraints.tickForPrice(s.lastPrice - delta)
 		askTick := s.constraints.tickForPrice(s.lastPrice + delta)
-		s.bids[bidTick] = &bookDepth{synthetic: qty + 0.25*float64(i)}
-		s.asks[askTick] = &bookDepth{synthetic: qty + 0.2*float64(i)}
+		s.bids[bidTick] = &bookDepth{synthetic: qty + 0.25*float64(i), orders: nil}
+		s.asks[askTick] = &bookDepth{synthetic: qty + 0.2*float64(i), orders: nil}
 	}
 }
 
@@ -1882,7 +1874,8 @@ func (p *Provider) emitInstrumentDiff(previous map[string]schema.Instrument, cur
 
 func buildExecPayload(order *activeOrder, state schema.ExecReportState, reason *string, cons instrumentConstraints, ts time.Time) schema.ExecReportPayload {
 	if order == nil {
-		return schema.ExecReportPayload{}
+		var empty schema.ExecReportPayload
+		return empty
 	}
 	priceValue := order.price
 	if order.orderType == schema.OrderTypeMarket && order.avgFillPrice() > 0 {
@@ -1921,13 +1914,13 @@ func (p *Provider) randomNorm() float64 {
 	return p.rng.NormFloat64()
 }
 
-func (p *Provider) randomDuration(min, max time.Duration) time.Duration {
-	if max <= min {
-		return min
+func (p *Provider) randomDuration(minDur, maxDur time.Duration) time.Duration {
+	if maxDur <= minDur {
+		return minDur
 	}
-	rangeDur := max - min
+	rangeDur := maxDur - minDur
 	factor := p.randomFloat()
-	return min + time.Duration(float64(rangeDur)*factor)
+	return minDur + time.Duration(float64(rangeDur)*factor)
 }
 
 func (p *Provider) emitInstrumentUpdate(inst schema.Instrument) {
@@ -1958,7 +1951,7 @@ func instrumentsEqual(a, b schema.Instrument) bool {
 }
 
 func constraintsFromInstrument(inst schema.Instrument) (instrumentConstraints, error) {
-	meta := instrumentConstraints{}
+	var meta instrumentConstraints
 	var err error
 	if meta.priceIncrement, err = parseDecimal(inst.PriceIncrement, 0.01); err != nil {
 		return instrumentConstraints{}, fmt.Errorf("price increment: %w", err)
@@ -2003,7 +1996,7 @@ func parseDecimal(input string, fallback float64) (float64, error) {
 	}
 	f, err := strconv.ParseFloat(value, 64)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("parse float %q: %w", value, err)
 	}
 	return f, nil
 }
@@ -2187,10 +2180,6 @@ func checksum(instrument string, evtType schema.EventType, seq uint64) string {
 
 func formatPrice(value float64) string {
 	return fmt.Sprintf("%.2f", value)
-}
-
-func formatQuantity(value float64) string {
-	return fmt.Sprintf("%.4f", value)
 }
 
 func formatWithPrecision(value float64, precision int) string {

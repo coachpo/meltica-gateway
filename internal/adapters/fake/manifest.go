@@ -26,6 +26,28 @@ func RegisterFactory(reg *provider.Registry) {
 			Instruments:               nil,
 			InstrumentRefreshInterval: 0,
 			InstrumentRefresh:         nil,
+			PriceModel: marketModelOptions{
+				Drift:            0,
+				Volatility:       0,
+				ShockProbability: 0,
+				ShockMagnitude:   0,
+			},
+			TradeModel: tradeModelOptions{
+				MinQuantity: 0,
+				MaxQuantity: 0,
+			},
+			OrderBook: orderBookOptions{
+				Levels:           0,
+				MaxMutationWidth: 0,
+			},
+			VenueBehavior: venueBehaviorOptions{
+				LatencyMin:       0,
+				LatencyMax:       0,
+				TransientError:   0,
+				DisconnectChance: 0,
+				DisconnectFor:    0,
+			},
+			KlineInterval: 0,
 		}
 
 		if name, ok := cfg["name"].(string); ok {
@@ -164,7 +186,11 @@ func intFromConfig(cfg map[string]any, key string) (int, bool) {
 	case int64:
 		return int(value), true
 	case uint64:
-		return int(value), true
+		limit := uint64(^uint(0) >> 1)
+		if value > limit {
+			return 0, false
+		}
+		return int(int64(value)), true
 	case float64:
 		return int(value), true
 	case string:
