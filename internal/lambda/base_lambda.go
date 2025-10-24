@@ -100,6 +100,8 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 		pools:          pools,
 		logger:         log.New(os.Stdout, "", log.LstdFlags),
 		strategy:       strategy,
+		baseCurrency:   "",
+		quoteCurrency:  "",
 		lastPrice:      atomic.Value{},
 		bidPrice:       atomic.Value{},
 		askPrice:       atomic.Value{},

@@ -167,3 +167,146 @@ lambdaManifest:
       symbol: BNB-USDT
       strategy: noop
       auto_start: true
+    - id: mm-eth-tight
+      provider: fake-liquid
+      symbol: ETH-USDT
+      strategy: marketmaking
+      config:
+        spread_bps: 18
+        order_size: "0.08"
+        max_open_orders: 2
+      auto_start: true
+    - id: grid-avax-wide
+      provider: fake-calm
+      symbol: AVAX-USDT
+      strategy: grid
+      config:
+        grid_levels: 7
+        grid_spacing: 1.1
+        order_size: "0.75"
+        base_price: 38.5
+      auto_start: true
+    - id: momentum-doge-fast
+      provider: fake-volatile
+      symbol: DOGE-USDT
+      strategy: momentum
+      config:
+        lookback_period: 12
+        momentum_threshold: 0.35
+        order_size: "3500"
+        cooldown: "2s"
+      auto_start: false
+    - id: meanrev-btc-calm
+      provider: fake-calm
+      symbol: BTC-USDT
+      strategy: meanreversion
+      config:
+        window_size: 45
+        deviation_threshold: 0.55
+        order_size: "0.02"
+      auto_start: false
+    - id: logging-portfolio
+      provider: fake-volatile
+      symbol: ETH-USDT
+      strategy: logging
+      config:
+        logger_prefix: "[VOLATILE-LOGGER] "
+      auto_start: true
+    - id: delay-dot-sweeper
+      provider: fake-liquid
+      symbol: DOT-USDT
+      strategy: delay
+      config:
+        min_delay: "100ms"
+        max_delay: "400ms"
+      auto_start: true
+    - id: mm-avax-volatile
+      provider: fake-volatile
+      symbol: AVAX-USDT
+      strategy: marketmaking
+      config:
+        spread_bps: 35
+        order_size: "0.6"
+        max_open_orders: 4
+      auto_start: false
+    - id: mm-sol-calm
+      provider: fake-calm
+      symbol: SOL-USDT
+      strategy: marketmaking
+      config:
+        spread_bps: 42
+        order_size: "1.5"
+        max_open_orders: 1
+      auto_start: false
+    - id: grid-ltc-liquid
+      provider: fake-liquid
+      symbol: LTC-USDT
+      strategy: grid
+      config:
+        grid_levels: 6
+        grid_spacing: 0.9
+        order_size: "0.3"
+      auto_start: true
+    - id: momentum-bnb-liquid
+      provider: fake-liquid
+      symbol: BNB-USDT
+      strategy: momentum
+      config:
+        lookback_period: 18
+        momentum_threshold: 0.6
+        order_size: "9"
+        cooldown: "3s"
+      auto_start: false
+    - id: momentum-ada-calm
+      provider: fake-calm
+      symbol: ADA-USDT
+      strategy: momentum
+      config:
+        lookback_period: 36
+        momentum_threshold: 0.25
+        order_size: "4200"
+        cooldown: "6s"
+      auto_start: true
+    - id: meanrev-sol-liquid
+      provider: fake-liquid
+      symbol: SOL-USDT
+      strategy: meanreversion
+      config:
+        window_size: 28
+        deviation_threshold: 0.65
+        order_size: "8"
+      auto_start: false
+    - id: meanrev-avax-volatile
+      provider: fake-volatile
+      symbol: AVAX-USDT
+      strategy: meanreversion
+      config:
+        window_size: 32
+        deviation_threshold: 0.8
+        order_size: "0.9"
+      auto_start: true
+    - id: logging-calm-hub
+      provider: fake-calm
+      symbol: BTC-USDT
+      strategy: logging
+      config:
+        logger_prefix: "[CALM-LOGGER] "
+      auto_start: true
+    - id: delay-eth-volatile
+      provider: fake-volatile
+      symbol: ETH-USDT
+      strategy: delay
+      config:
+        min_delay: "80ms"
+        max_delay: "320ms"
+      auto_start: true
+    - id: noop-avax-volatile
+      provider: fake-volatile
+      symbol: AVAX-USDT
+      strategy: noop
+      auto_start: false
+    - id: noop-ada-calm
+      provider: fake-calm
+      symbol: ADA-USDT
+      strategy: noop
+      auto_start: false

@@ -47,7 +47,8 @@ func RegisterFactory(reg *provider.Registry) {
 				DisconnectChance: 0,
 				DisconnectFor:    0,
 			},
-			KlineInterval: 0,
+			KlineInterval:         0,
+			BalanceUpdateInterval: 0,
 		}
 
 		if name, ok := cfg["name"].(string); ok {
@@ -64,6 +65,9 @@ func RegisterFactory(reg *provider.Registry) {
 		}
 		if refresh, ok := durationFromConfig(cfg, "instrument_refresh_interval"); ok {
 			opts.InstrumentRefreshInterval = refresh
+		}
+		if balance, ok := durationFromConfig(cfg, "balance_update_interval"); ok {
+			opts.BalanceUpdateInterval = balance
 		}
 		if kline, ok := durationFromConfig(cfg, "kline_interval"); ok {
 			opts.KlineInterval = kline
