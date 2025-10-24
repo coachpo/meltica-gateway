@@ -78,9 +78,7 @@ func cloneBookSnapshotPayload(payload BookSnapshotPayload) BookSnapshotPayload {
 
 func cloneInstrumentUpdatePayload(payload InstrumentUpdatePayload) InstrumentUpdatePayload {
 	cloned := payload
-	if len(payload.Instruments) > 0 {
-		cloned.Instruments = CloneInstruments(payload.Instruments)
-	}
+	cloned.Instrument = CloneInstrument(payload.Instrument)
 	return cloned
 }
 

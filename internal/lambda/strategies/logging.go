@@ -114,7 +114,7 @@ func (s *Logging) OnKlineSummary(_ context.Context, evt *schema.Event, payload s
 
 // OnInstrumentUpdate logs instrument catalogue refresh events.
 func (s *Logging) OnInstrumentUpdate(_ context.Context, evt *schema.Event, payload schema.InstrumentUpdatePayload) {
-	s.logger().Printf("Instruments updated: provider=%s total=%d", evt.Provider, len(payload.Instruments))
+	s.logger().Printf("Instrument updated: provider=%s symbol=%s", evt.Provider, payload.Instrument.Symbol)
 }
 
 // OnControlAck logs control acknowledgment events.

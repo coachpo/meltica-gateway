@@ -193,11 +193,8 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 
 	defer l.recycleEvent(evt)
 
-	// Filter by provider (instrument updates are provider-scoped only)
-	if !l.matchesProvider(evt) {
-		return
-	}
-	if typ != schema.EventTypeInstrumentUpdate && !l.matchesSymbol(evt) {
+	// Filter by provider and symbol
+	if !l.matchesProvider(evt) || !l.matchesSymbol(evt) {
 		return
 	}
 

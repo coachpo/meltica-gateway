@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -245,7 +246,6 @@ func (p *Provider) Start(ctx context.Context) error {
 	if p.instrumentRefreshInterval > 0 && p.instrumentRefresh != nil {
 		go p.runInstrumentRefresh(ctx)
 	}
-	p.emitInstrumentCatalogue(p.Instruments())
 	return nil
 }
 
@@ -802,11 +802,12 @@ func (p *Provider) setSupportedInstruments(list []schema.Instrument) {
 		}
 	}
 	p.instrumentMu.Lock()
+	prev := p.instruments
 	p.instruments = catalog
 	p.defaultNativeInstruments = natives
 	p.instrumentMu.Unlock()
 	log.Printf("fake provider %s: instrument catalogue updated: %d instruments", p.name, len(ordered))
-	p.emitInstrumentCatalogue(ordered)
+	p.emitInstrumentDiff(prev, catalog)
 }
 
 func (p *Provider) runInstrumentRefresh(ctx context.Context) {
@@ -837,39 +838,40 @@ func (p *Provider) refreshInstruments(ctx context.Context) {
 	p.setSupportedInstruments(list)
 }
 
-func (p *Provider) emitInstrumentCatalogue(list []schema.Instrument) {
-	if len(list) == 0 {
-		list = []schema.Instrument{}
+func (p *Provider) emitInstrumentDiff(previous map[string]schema.Instrument, current map[string]schema.Instrument) {
+	for symbol, inst := range current {
+		if prev, ok := previous[symbol]; ok && instrumentsEqual(prev, inst) {
+			continue
+		}
+		p.emitInstrumentUpdate(inst)
 	}
-	seq := p.nextInstrumentSeq()
+}
+
+func (p *Provider) emitInstrumentUpdate(inst schema.Instrument) {
+	if strings.TrimSpace(inst.Symbol) == "" {
+		return
+	}
 	now := p.clock().UTC()
-	snapshot := schema.CloneInstruments(list)
-	if snapshot == nil {
-		snapshot = []schema.Instrument{}
-	}
-	inst := schema.InstrumentUpdatePayload{Instruments: snapshot}
+	native := nativeInstrument{symbol: inst.Symbol}
+	seq := p.nextSeq(schema.EventTypeInstrumentUpdate, native)
+	payload := schema.InstrumentUpdatePayload{Instrument: schema.CloneInstrument(inst)}
 	evt := p.borrowEvent(p.ctx)
 	if evt == nil {
 		return
 	}
-	evt.EventID = fmt.Sprintf("%s:INSTRUMENTS:%d", p.name, seq)
+	evt.EventID = fmt.Sprintf("%s:INST:%s:%d", p.name, strings.ReplaceAll(inst.Symbol, "-", ""), seq)
 	evt.Provider = p.name
-	evt.Symbol = ""
+	evt.Symbol = inst.Symbol
 	evt.Type = schema.EventTypeInstrumentUpdate
 	evt.SeqProvider = seq
 	evt.IngestTS = now
 	evt.EmitTS = now
-	evt.Payload = inst
+	evt.Payload = payload
 	p.emitEvent(evt)
 }
 
-func (p *Provider) nextInstrumentSeq() uint64 {
-	p.seqMu.Lock()
-	defer p.seqMu.Unlock()
-	key := fmt.Sprintf("%s|%s", schema.EventTypeInstrumentUpdate, "ALL")
-	seq := p.seq[key] + 1
-	p.seq[key] = seq
-	return seq
+func instrumentsEqual(a, b schema.Instrument) bool {
+	return reflect.DeepEqual(a, b)
 }
 
 func normalizeInstrument(symbol string) string {

@@ -286,7 +286,7 @@ type KlineSummaryPayload struct {
 	CloseTime  time.Time `json:"close_time"`
 }
 
-// InstrumentUpdatePayload advertises the current instrument catalogue for a provider.
+// InstrumentUpdatePayload advertises an updated instrument definition for a provider.
 type InstrumentUpdatePayload struct {
-	Instruments []Instrument `json:"instruments"`
+	Instrument Instrument `json:"instrument"`
 }
