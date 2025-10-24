@@ -21,11 +21,6 @@ const (
 	maxPrecisionDigits = 18
 )
 
-// InstrumentEnvelope wraps an instrument payload for external exchange.
-type InstrumentEnvelope struct {
-	Instrument Instrument `json:"instrument"`
-}
-
 // Instrument describes a tradable instrument across supported venues.
 type Instrument struct {
 	Symbol            string         `json:"symbol"`

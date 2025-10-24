@@ -20,27 +20,82 @@ import (
 	"github.com/sourcegraph/conc/iter"
 )
 
-// DefaultInstruments lists canonical instruments used when no explicit filters are provided.
-var DefaultInstruments = []string{
-	"BTC-USDT",
-	"ETH-USDT",
-	"XRP-USDT",
-	"SOL-USDT",
-	"ADA-USDT",
-	"DOGE-USDT",
-	"BNB-USDT",
-	"LTC-USDT",
-	"DOT-USDT",
-	"AVAX-USDT",
+// DefaultInstruments lists canonical instruments used when no explicit catalogue is provided.
+var DefaultInstruments = []schema.Instrument{
+	newSpotInstrument("BTC-USDT", "BTC", "USDT"),
+	newSpotInstrument("ETH-USDT", "ETH", "USDT"),
+	newSpotInstrument("XRP-USDT", "XRP", "USDT"),
+	newSpotInstrument("SOL-USDT", "SOL", "USDT"),
+	newSpotInstrument("ADA-USDT", "ADA", "USDT"),
+	newSpotInstrument("DOGE-USDT", "DOGE", "USDT"),
+	newSpotInstrument("BNB-USDT", "BNB", "USDT"),
+	newSpotInstrument("LTC-USDT", "LTC", "USDT"),
+	newSpotInstrument("DOT-USDT", "DOT", "USDT"),
+	newSpotInstrument("AVAX-USDT", "AVAX", "USDT"),
+}
+
+type nativeInstrument struct {
+	symbol string
+}
+
+func (n nativeInstrument) Symbol() string {
+	return n.symbol
+}
+
+type instrumentInterpreter struct{}
+
+func (instrumentInterpreter) ToNative(inst schema.Instrument) (nativeInstrument, error) {
+	if strings.TrimSpace(inst.Symbol) == "" {
+		return nativeInstrument{}, fmt.Errorf("instrument symbol required")
+	}
+	symbol := normalizeInstrument(inst.Symbol)
+	return nativeInstrument{symbol: symbol}, nil
+}
+
+func (instrumentInterpreter) FromNative(symbol string, catalog map[string]schema.Instrument) (schema.Instrument, error) {
+	normalized := normalizeInstrument(symbol)
+	inst, ok := catalog[normalized]
+	if !ok {
+		return schema.Instrument{}, fmt.Errorf("instrument %s not supported", normalized)
+	}
+	return inst, nil
+}
+
+type instrumentSupplier func() []nativeInstrument
+
+func intPtr(v int) *int {
+	value := v
+	return &value
+}
+
+func newSpotInstrument(symbol, base, quote string) schema.Instrument {
+	return schema.Instrument{
+		Symbol:            symbol,
+		Type:              schema.InstrumentTypeSpot,
+		BaseCurrency:      base,
+		QuoteCurrency:     quote,
+		Venue:             "FAKE",
+		PriceIncrement:    "0.01",
+		QuantityIncrement: "0.0001",
+		PricePrecision:    intPtr(2),
+		QuantityPrecision: intPtr(4),
+		NotionalPrecision: intPtr(2),
+		MinNotional:       "10",
+		MinQuantity:       "0.0001",
+		MaxQuantity:       "1000",
+	}
 }
 
 // Options configures the fake provider runtime.
 type Options struct {
-	Name                 string
-	TickerInterval       time.Duration
-	TradeInterval        time.Duration
-	BookSnapshotInterval time.Duration
-	Pools                *pool.PoolManager
+	Name                      string
+	TickerInterval            time.Duration
+	TradeInterval             time.Duration
+	BookSnapshotInterval      time.Duration
+	Pools                     *pool.PoolManager
+	Instruments               []schema.Instrument
+	InstrumentRefreshInterval time.Duration
+	InstrumentRefresh         func(context.Context) ([]schema.Instrument, error)
 }
 
 // Provider emits synthetic market data covering tickers, trades, and order book events.
@@ -71,6 +126,13 @@ type Provider struct {
 	state   map[string]*instrumentState
 
 	clock func() time.Time
+
+	instrumentMu              sync.RWMutex
+	instrumentCodec           instrumentInterpreter
+	instruments               map[string]schema.Instrument
+	defaultNativeInstruments  []nativeInstrument
+	instrumentRefreshInterval time.Duration
+	instrumentRefresh         func(context.Context) ([]schema.Instrument, error)
 }
 
 type routeHandle struct {
@@ -128,6 +190,15 @@ func NewProvider(opts Options) *Provider {
 		clock:                time.Now,
 		pools:                opts.Pools,
 	}
+	catalogue := append([]schema.Instrument(nil), opts.Instruments...)
+	if len(catalogue) == 0 {
+		catalogue = append(catalogue, DefaultInstruments...)
+	}
+	p.setSupportedInstruments(catalogue)
+	if opts.InstrumentRefreshInterval > 0 && opts.InstrumentRefresh != nil {
+		p.instrumentRefreshInterval = opts.InstrumentRefreshInterval
+		p.instrumentRefresh = opts.InstrumentRefresh
+	}
 	return p
 }
 
@@ -153,6 +224,9 @@ func (p *Provider) Start(ctx context.Context) error {
 	}()
 
 	go p.consumeOrders(ctx)
+	if p.instrumentRefreshInterval > 0 && p.instrumentRefresh != nil {
+		go p.runInstrumentRefresh(ctx)
+	}
 	return nil
 }
 
@@ -235,24 +309,21 @@ func (p *Provider) startRouteLocked(route dispatcher.Route, evtType schema.Event
 	routeCtx, cancel := context.WithCancel(p.ctx)
 	//nolint:exhaustruct // zero value for wg is intentional
 	handle := &routeHandle{cancel: cancel}
-	instruments := instrumentsFromRoute(route)
-	if len(instruments) == 0 {
-		instruments = normaliseInstruments(DefaultInstruments)
-	}
+	supplier := p.instrumentSupplier(route)
 	handle.wg.Go(func() {
-		p.runGenerator(routeCtx, evtType, instruments)
+		p.runGenerator(routeCtx, evtType, supplier)
 	})
 	return handle
 }
 
-func (p *Provider) runGenerator(ctx context.Context, evtType schema.EventType, instruments []string) {
+func (p *Provider) runGenerator(ctx context.Context, evtType schema.EventType, supply instrumentSupplier) {
 	switch evtType {
 	case schema.EventTypeTicker:
-		p.streamTickers(ctx, instruments)
+		p.streamTickers(ctx, supply)
 	case schema.EventTypeTrade:
-		p.streamTrades(ctx, instruments)
+		p.streamTrades(ctx, supply)
 	case schema.EventTypeBookSnapshot:
-		p.streamBookSnapshots(ctx, instruments)
+		p.streamBookSnapshots(ctx, supply)
 	case schema.EventTypeExecReport, schema.EventTypeKlineSummary, schema.EventTypeControlAck, schema.EventTypeControlResult:
 		<-ctx.Done()
 	default:
@@ -260,7 +331,66 @@ func (p *Provider) runGenerator(ctx context.Context, evtType schema.EventType, i
 	}
 }
 
-func (p *Provider) streamTickers(ctx context.Context, instruments []string) {
+func (p *Provider) instrumentSupplier(route dispatcher.Route) instrumentSupplier {
+	filtered := p.instrumentsFromRoute(route)
+	if len(filtered) == 0 {
+		return p.currentDefaultNative
+	}
+	static := snapshotNative(filtered)
+	return func() []nativeInstrument {
+		return static
+	}
+}
+
+func (p *Provider) instrumentsFromRoute(route dispatcher.Route) []nativeInstrument {
+	if len(route.Filters) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{})
+	for _, filter := range route.Filters {
+		if strings.EqualFold(filter.Field, "instrument") {
+			p.collectInstrumentValues(filter.Value, set)
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	p.instrumentMu.RLock()
+	defer p.instrumentMu.RUnlock()
+	natives := make([]nativeInstrument, 0, len(set))
+	for symbol := range set {
+		if _, err := p.instrumentCodec.FromNative(symbol, p.instruments); err == nil {
+			natives = append(natives, nativeInstrument{symbol: symbol})
+		}
+	}
+	sort.Slice(natives, func(i, j int) bool { return natives[i].symbol < natives[j].symbol })
+	return natives
+}
+
+func (p *Provider) collectInstrumentValues(value any, set map[string]struct{}) {
+	switch v := value.(type) {
+	case string:
+		if symbol := normalizeInstrument(v); symbol != "" {
+			set[symbol] = struct{}{}
+		}
+	case []string:
+		for _, entry := range v {
+			p.collectInstrumentValues(entry, set)
+		}
+	case []any:
+		for _, entry := range v {
+			p.collectInstrumentValues(entry, set)
+		}
+	}
+}
+
+func (p *Provider) currentDefaultNative() []nativeInstrument {
+	p.instrumentMu.RLock()
+	defer p.instrumentMu.RUnlock()
+	return snapshotNative(p.defaultNativeInstruments)
+}
+
+func (p *Provider) streamTickers(ctx context.Context, supply instrumentSupplier) {
 	ticker := time.NewTicker(p.tickerInterval)
 	defer ticker.Stop()
 	for {
@@ -268,14 +398,14 @@ func (p *Provider) streamTickers(ctx context.Context, instruments []string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			for _, inst := range instruments {
+			for _, inst := range supply() {
 				p.emitTicker(inst)
 			}
 		}
 	}
 }
 
-func (p *Provider) streamTrades(ctx context.Context, instruments []string) {
+func (p *Provider) streamTrades(ctx context.Context, supply instrumentSupplier) {
 	ticker := time.NewTicker(p.tradeInterval)
 	defer ticker.Stop()
 	for {
@@ -283,15 +413,15 @@ func (p *Provider) streamTrades(ctx context.Context, instruments []string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			for _, inst := range instruments {
+			for _, inst := range supply() {
 				p.emitTrade(inst)
 			}
 		}
 	}
 }
 
-func (p *Provider) streamBookSnapshots(ctx context.Context, instruments []string) {
-	p.emitSnapshots(instruments)
+func (p *Provider) streamBookSnapshots(ctx context.Context, supply instrumentSupplier) {
+	p.emitSnapshots(supply())
 	ticker := time.NewTicker(p.bookSnapshotInterval)
 	defer ticker.Stop()
 	for {
@@ -299,18 +429,18 @@ func (p *Provider) streamBookSnapshots(ctx context.Context, instruments []string
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			p.emitSnapshots(instruments)
+			p.emitSnapshots(supply())
 		}
 	}
 }
 
-func (p *Provider) emitSnapshots(instruments []string) {
+func (p *Provider) emitSnapshots(instruments []nativeInstrument) {
 	for _, inst := range instruments {
 		p.emitBookSnapshot(inst)
 	}
 }
 
-func (p *Provider) emitTicker(instrument string) {
+func (p *Provider) emitTicker(instrument nativeInstrument) {
 	state := p.getInstrumentState(instrument)
 	ts := p.clock().UTC()
 	seq := p.nextSeq(schema.EventTypeTicker, instrument)
@@ -333,7 +463,7 @@ func (p *Provider) emitTicker(instrument string) {
 	p.emitEvent(evt)
 }
 
-func (p *Provider) emitTrade(instrument string) {
+func (p *Provider) emitTrade(instrument nativeInstrument) {
 	state := p.getInstrumentState(instrument)
 	ts := p.clock().UTC()
 	seq := p.nextSeq(schema.EventTypeTrade, instrument)
@@ -346,7 +476,7 @@ func (p *Provider) emitTrade(instrument string) {
 	if seq%2 == 0 {
 		side = schema.TradeSideSell
 	}
-	tradeID := fmt.Sprintf("%s-%d", strings.ReplaceAll(instrument, "-", ""), seq)
+	tradeID := fmt.Sprintf("%s-%d", strings.ReplaceAll(instrument.Symbol(), "-", ""), seq)
 	payload := schema.TradePayload{
 		TradeID:   tradeID,
 		Side:      side,
@@ -362,7 +492,7 @@ func (p *Provider) emitTrade(instrument string) {
 	p.emitEvent(evt)
 }
 
-func (p *Provider) emitBookSnapshot(instrument string) {
+func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 	state := p.getInstrumentState(instrument)
 	ts := p.clock().UTC()
 	seq := p.nextSeq(schema.EventTypeBookSnapshot, instrument)
@@ -371,7 +501,7 @@ func (p *Provider) emitBookSnapshot(instrument string) {
 	levelsBids := toPriceLevels(state.bids)
 	levelsAsks := toPriceLevels(state.asks)
 	state.hasSnapshot = true
-	checksum := checksum(instrument, schema.EventTypeBookSnapshot, seq)
+	checksum := checksum(instrument.Symbol(), schema.EventTypeBookSnapshot, seq)
 	state.mu.Unlock()
 	//nolint:exhaustruct // FirstUpdateID and FinalUpdateID not used by fake provider
 	payload := schema.BookSnapshotPayload{
@@ -387,11 +517,11 @@ func (p *Provider) emitBookSnapshot(instrument string) {
 	p.emitEvent(evt)
 }
 
-func (p *Provider) newEvent(evtType schema.EventType, instrument string, seq uint64, payload any, ts time.Time) *schema.Event {
+func (p *Provider) newEvent(evtType schema.EventType, instrument nativeInstrument, seq uint64, payload any, ts time.Time) *schema.Event {
 	if ts.IsZero() {
 		ts = p.clock().UTC()
 	}
-	symbol := normalizeInstrument(instrument)
+	symbol := normalizeInstrument(instrument.Symbol())
 	eventID := fmt.Sprintf("%s:%s:%s:%d", p.name, strings.ReplaceAll(symbol, "-", ""), evtType, seq)
 	evt := p.borrowEvent(p.ctx)
 	if evt == nil {
@@ -470,13 +600,23 @@ func (p *Provider) consumeOrders(ctx context.Context) {
 
 func (p *Provider) handleOrder(order schema.OrderRequest) {
 	if strings.TrimSpace(order.Symbol) == "" {
-		order.Symbol = DefaultInstruments[0]
+		order.Symbol = p.defaultInstrumentSymbol()
 	}
+	nativeInst, ok := p.nativeInstrumentForSymbol(order.Symbol)
+	if !ok {
+		order.Symbol = p.defaultInstrumentSymbol()
+		nativeInst, ok = p.nativeInstrumentForSymbol(order.Symbol)
+		if !ok {
+			p.emitError(fmt.Errorf("fake provider %s: unsupported instrument %q", p.name, order.Symbol))
+			return
+		}
+	}
+	order.Symbol = nativeInst.Symbol()
 	if order.Timestamp.IsZero() {
 		order.Timestamp = p.clock().UTC()
 	}
 
-	seq := p.nextSeq(schema.EventTypeExecReport, order.Symbol)
+	seq := p.nextSeq(schema.EventTypeExecReport, nativeInst)
 	ts := p.clock().UTC()
 	//nolint:exhaustruct // zero value for RejectReason is intentional
 	payload := schema.ExecReportPayload{
@@ -492,10 +632,32 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 		AvgFillPrice:    stringOrDefault(order.Price),
 		Timestamp:       ts,
 	}
-	evt := p.newEvent(schema.EventTypeExecReport, order.Symbol, seq, payload, ts)
+	evt := p.newEvent(schema.EventTypeExecReport, nativeInst, seq, payload, ts)
 	if evt != nil {
 		p.emitEvent(evt)
 	}
+}
+
+func (p *Provider) defaultInstrumentSymbol() string {
+	p.instrumentMu.RLock()
+	defer p.instrumentMu.RUnlock()
+	if len(p.defaultNativeInstruments) == 0 {
+		return ""
+	}
+	return p.defaultNativeInstruments[0].Symbol()
+}
+
+func (p *Provider) nativeInstrumentForSymbol(symbol string) (nativeInstrument, bool) {
+	normalized := normalizeInstrument(symbol)
+	if normalized == "" {
+		return nativeInstrument{}, false
+	}
+	p.instrumentMu.RLock()
+	defer p.instrumentMu.RUnlock()
+	if _, ok := p.instruments[normalized]; !ok {
+		return nativeInstrument{}, false
+	}
+	return nativeInstrument{symbol: normalized}, true
 }
 
 func (p *Provider) stopAll() {
@@ -515,8 +677,8 @@ func (p *Provider) stopAll() {
 	}
 }
 
-func (p *Provider) nextSeq(evtType schema.EventType, instrument string) uint64 {
-	key := fmt.Sprintf("%s|%s", evtType, normalizeInstrument(instrument))
+func (p *Provider) nextSeq(evtType schema.EventType, instrument nativeInstrument) uint64 {
+	key := fmt.Sprintf("%s|%s", evtType, instrument.Symbol())
 	p.seqMu.Lock()
 	seq := p.seq[key] + 1
 	p.seq[key] = seq
@@ -524,8 +686,8 @@ func (p *Provider) nextSeq(evtType schema.EventType, instrument string) uint64 {
 	return seq
 }
 
-func (p *Provider) getInstrumentState(instrument string) *instrumentState {
-	symbol := normalizeInstrument(instrument)
+func (p *Provider) getInstrumentState(inst nativeInstrument) *instrumentState {
+	symbol := inst.Symbol()
 	p.stateMu.Lock()
 	state, ok := p.state[symbol]
 	if !ok {
@@ -559,29 +721,77 @@ func (s *instrumentState) reseedOrderBook() {
 	}
 }
 
-func normaliseInstruments(instruments []string) []string {
-	set := make(map[string]struct{})
-	for _, inst := range instruments {
-		symbol := normalizeInstrument(inst)
-		if symbol == "" {
-			continue
-		}
-		set[symbol] = struct{}{}
-	}
-	if len(set) == 0 {
+func snapshotNative(src []nativeInstrument) []nativeInstrument {
+	if len(src) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(set))
-	for inst := range set {
-		out = append(out, inst)
-	}
-	sort.Strings(out)
+	out := make([]nativeInstrument, len(src))
+	copy(out, src)
 	return out
 }
 
+func (p *Provider) setSupportedInstruments(list []schema.Instrument) {
+	catalog := make(map[string]schema.Instrument, len(list))
+	seen := make(map[string]struct{}, len(list))
+	natives := make([]nativeInstrument, 0, len(list))
+	for _, inst := range list {
+		clone := inst
+		if err := clone.Validate(); err != nil {
+			log.Printf("fake provider %s: dropping instrument %q: %v", p.name, inst.Symbol, err)
+			continue
+		}
+		native, err := p.instrumentCodec.ToNative(clone)
+		if err != nil {
+			log.Printf("fake provider %s: normalize instrument %q failed: %v", p.name, inst.Symbol, err)
+			continue
+		}
+		catalog[native.symbol] = clone
+		if _, exists := seen[native.symbol]; !exists {
+			seen[native.symbol] = struct{}{}
+			natives = append(natives, native)
+		}
+	}
+	if len(catalog) == 0 {
+		log.Printf("fake provider %s: instrument catalogue empty; retaining previous set", p.name)
+		return
+	}
+	sort.Slice(natives, func(i, j int) bool { return natives[i].symbol < natives[j].symbol })
+	p.instrumentMu.Lock()
+	p.instruments = catalog
+	p.defaultNativeInstruments = natives
+	p.instrumentMu.Unlock()
+}
+
+func (p *Provider) runInstrumentRefresh(ctx context.Context) {
+	ticker := time.NewTicker(p.instrumentRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.refreshInstruments(ctx)
+		}
+	}
+}
+
+func (p *Provider) refreshInstruments(ctx context.Context) {
+	if p.instrumentRefresh == nil {
+		return
+	}
+	list, err := p.instrumentRefresh(ctx)
+	if err != nil {
+		p.emitError(fmt.Errorf("instrument refresh: %w", err))
+		return
+	}
+	if len(list) == 0 {
+		return
+	}
+	p.setSupportedInstruments(list)
+}
+
 func normalizeInstrument(symbol string) string {
-	symbol = strings.ToUpper(strings.TrimSpace(symbol))
-	return symbol
+	return strings.ToUpper(strings.TrimSpace(symbol))
 }
 
 func defaultBasePrice(symbol string) float64 {
@@ -611,42 +821,6 @@ func toPriceLevels(levels []bookLevel) []schema.PriceLevel {
 	return iter.Map(levels, func(level *bookLevel) schema.PriceLevel {
 		return schema.PriceLevel{Price: formatPrice(level.price), Quantity: formatQuantity(level.quantity)}
 	})
-}
-
-func instrumentsFromRoute(route dispatcher.Route) []string {
-	set := make(map[string]struct{})
-	for _, filter := range route.Filters {
-		if strings.EqualFold(filter.Field, "instrument") {
-			collectInstrumentValues(filter.Value, set)
-		}
-	}
-	if len(set) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(set))
-	for inst := range set {
-		out = append(out, inst)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func collectInstrumentValues(value any, set map[string]struct{}) {
-	switch v := value.(type) {
-	case string:
-		symbol := normalizeInstrument(v)
-		if symbol != "" {
-			set[symbol] = struct{}{}
-		}
-	case []string:
-		for _, entry := range v {
-			collectInstrumentValues(entry, set)
-		}
-	case []any:
-		for _, entry := range v {
-			collectInstrumentValues(entry, set)
-		}
-	}
 }
 
 func canonicalToEventType(c schema.CanonicalType) (schema.EventType, bool) {
