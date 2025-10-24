@@ -24,6 +24,7 @@ type TradingStrategy interface {
 	OnTicker(ctx context.Context, evt *schema.Event, payload schema.TickerPayload)
 	OnBookSnapshot(ctx context.Context, evt *schema.Event, payload schema.BookSnapshotPayload)
 	OnKlineSummary(ctx context.Context, evt *schema.Event, payload schema.KlineSummaryPayload)
+	OnInstrumentUpdate(ctx context.Context, evt *schema.Event, payload schema.InstrumentUpdatePayload)
 
 	// Order lifecycle callbacks (trading decisions)
 	OnOrderFilled(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
@@ -128,6 +129,7 @@ func (l *BaseLambda) Start(ctx context.Context) (<-chan error, error) {
 		schema.EventTypeTicker,
 		schema.EventTypeBookSnapshot,
 		schema.EventTypeExecReport,
+		schema.EventTypeInstrumentUpdate,
 	}
 
 	errs := make(chan error, len(eventTypes))
@@ -191,8 +193,11 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 
 	defer l.recycleEvent(evt)
 
-	// Filter by symbol and provider
-	if !l.matchesSymbol(evt) || !l.matchesProvider(evt) {
+	// Filter by provider (instrument updates are provider-scoped only)
+	if !l.matchesProvider(evt) {
+		return
+	}
+	if typ != schema.EventTypeInstrumentUpdate && !l.matchesSymbol(evt) {
 		return
 	}
 
@@ -211,6 +216,8 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 		l.handleControlAck(ctx, evt)
 	case schema.EventTypeControlResult:
 		l.handleControlResult(ctx, evt)
+	case schema.EventTypeInstrumentUpdate:
+		l.handleInstrumentUpdate(ctx, evt)
 	}
 }
 
@@ -314,6 +321,17 @@ func (l *BaseLambda) handleExecReport(ctx context.Context, evt *schema.Event) {
 		// Useful for tracking order lifecycle, metrics, compliance
 		l.strategy.OnOrderExpired(ctx, evt, payload)
 	}
+}
+
+func (l *BaseLambda) handleInstrumentUpdate(ctx context.Context, evt *schema.Event) {
+	if l.strategy == nil {
+		return
+	}
+	payload, ok := evt.Payload.(schema.InstrumentUpdatePayload)
+	if !ok {
+		return
+	}
+	l.strategy.OnInstrumentUpdate(ctx, evt, payload)
 }
 
 func (l *BaseLambda) handleKlineSummary(ctx context.Context, evt *schema.Event) {

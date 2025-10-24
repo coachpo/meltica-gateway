@@ -507,3 +507,41 @@ func isCurrencyCode(segment string) bool {
 	}
 	return isUpperAlnum(segment)
 }
+
+// CloneInstrument creates a deep copy of the provided instrument.
+func CloneInstrument(inst Instrument) Instrument {
+	clone := inst
+	if inst.ContractValue != nil {
+		v := *inst.ContractValue
+		clone.ContractValue = &v
+	}
+	if inst.Strike != nil {
+		v := *inst.Strike
+		clone.Strike = &v
+	}
+	if inst.PricePrecision != nil {
+		v := *inst.PricePrecision
+		clone.PricePrecision = &v
+	}
+	if inst.QuantityPrecision != nil {
+		v := *inst.QuantityPrecision
+		clone.QuantityPrecision = &v
+	}
+	if inst.NotionalPrecision != nil {
+		v := *inst.NotionalPrecision
+		clone.NotionalPrecision = &v
+	}
+	return clone
+}
+
+// CloneInstruments returns deep copies of the provided instruments slice.
+func CloneInstruments(list []Instrument) []Instrument {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]Instrument, len(list))
+	for i := range list {
+		out[i] = CloneInstrument(list[i])
+	}
+	return out
+}

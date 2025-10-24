@@ -155,3 +155,7 @@ func (s *MeanReversion) OnControlAck(_ context.Context, _ *schema.Event, _ schem
 // OnControlResult tracks control results (no-op for this strategy).
 func (s *MeanReversion) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
 }
+
+// OnInstrumentUpdate is a no-op for this strategy.
+func (s *MeanReversion) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}

@@ -141,6 +141,8 @@ const (
 	EventTypeControlAck EventType = "ControlAck"
 	// EventTypeControlResult identifies control-plane command results.
 	EventTypeControlResult EventType = "ControlResult"
+	// EventTypeInstrumentUpdate identifies provider instrument catalogue refresh notifications.
+	EventTypeInstrumentUpdate EventType = "InstrumentUpdate"
 )
 
 // Coalescable reports whether an event type can be coalesced under backpressure.
@@ -152,7 +154,8 @@ func (et EventType) Coalescable() bool {
 		EventTypeTrade,
 		EventTypeExecReport,
 		EventTypeControlAck,
-		EventTypeControlResult:
+		EventTypeControlResult,
+		EventTypeInstrumentUpdate:
 		return false
 	default:
 		return false
@@ -281,4 +284,9 @@ type KlineSummaryPayload struct {
 	Volume     string    `json:"volume"`
 	OpenTime   time.Time `json:"open_time"`
 	CloseTime  time.Time `json:"close_time"`
+}
+
+// InstrumentUpdatePayload advertises the current instrument catalogue for a provider.
+type InstrumentUpdatePayload struct {
+	Instruments []Instrument `json:"instruments"`
 }

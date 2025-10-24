@@ -212,6 +212,7 @@ func TestEventTypeCoalescable(t *testing.T) {
 		{"book snapshot is not coalescable", EventTypeBookSnapshot, false},
 		{"trade is not coalescable", EventTypeTrade, false},
 		{"exec report is not coalescable", EventTypeExecReport, false},
+		{"instrument update is not coalescable", EventTypeInstrumentUpdate, false},
 	}
 
 	for _, tt := range tests {

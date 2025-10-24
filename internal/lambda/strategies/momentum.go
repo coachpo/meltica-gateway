@@ -154,6 +154,10 @@ func (s *Momentum) OnControlAck(_ context.Context, _ *schema.Event, _ schema.Con
 func (s *Momentum) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
 }
 
+// OnInstrumentUpdate is a no-op for this strategy.
+func (s *Momentum) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
+
 // calculateMomentum returns the price change ratio over the lookback period.
 func (s *Momentum) calculateMomentum() float64 {
 	if len(s.priceHistory) < 2 {

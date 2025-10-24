@@ -34,6 +34,8 @@ var DefaultInstruments = []schema.Instrument{
 	newSpotInstrument("AVAX-USDT", "AVAX", "USDT"),
 }
 
+const defaultInstrumentRefreshInterval = 30 * time.Minute
+
 type nativeInstrument struct {
 	symbol string
 }
@@ -200,9 +202,20 @@ func NewProvider(opts Options) *Provider {
 		catalogue = append(catalogue, DefaultInstruments...)
 	}
 	p.setSupportedInstruments(catalogue)
-	if opts.InstrumentRefreshInterval > 0 && opts.InstrumentRefresh != nil {
-		p.instrumentRefreshInterval = opts.InstrumentRefreshInterval
-		p.instrumentRefresh = opts.InstrumentRefresh
+
+	refreshInterval := opts.InstrumentRefreshInterval
+	if refreshInterval <= 0 {
+		refreshInterval = defaultInstrumentRefreshInterval
+	}
+	p.instrumentRefreshInterval = refreshInterval
+	if refreshInterval > 0 {
+		if opts.InstrumentRefresh != nil {
+			p.instrumentRefresh = opts.InstrumentRefresh
+		} else {
+			p.instrumentRefresh = func(context.Context) ([]schema.Instrument, error) {
+				return schema.CloneInstruments(p.Instruments()), nil
+			}
+		}
 	}
 	return p
 }
@@ -232,6 +245,7 @@ func (p *Provider) Start(ctx context.Context) error {
 	if p.instrumentRefreshInterval > 0 && p.instrumentRefresh != nil {
 		go p.runInstrumentRefresh(ctx)
 	}
+	p.emitInstrumentCatalogue(p.Instruments())
 	return nil
 }
 
@@ -248,6 +262,24 @@ func (p *Provider) Events() <-chan *schema.Event {
 // Errors returns asynchronous provider errors.
 func (p *Provider) Errors() <-chan error {
 	return p.errs
+}
+
+// Instruments returns the current catalogue of supported instruments.
+func (p *Provider) Instruments() []schema.Instrument {
+	p.instrumentMu.RLock()
+	defer p.instrumentMu.RUnlock()
+	if len(p.defaultNativeInstruments) == 0 {
+		return nil
+	}
+	out := make([]schema.Instrument, 0, len(p.defaultNativeInstruments))
+	for _, native := range p.defaultNativeInstruments {
+		inst, ok := p.instruments[native.symbol]
+		if !ok {
+			continue
+		}
+		out = append(out, schema.CloneInstrument(inst))
+	}
+	return out
 }
 
 // SubmitOrder enqueues a synthetic order acknowledgement.
@@ -740,7 +772,7 @@ func (p *Provider) setSupportedInstruments(list []schema.Instrument) {
 	seen := make(map[string]struct{}, len(list))
 	natives := make([]nativeInstrument, 0, len(list))
 	for _, inst := range list {
-		clone := inst
+		clone := schema.CloneInstrument(inst)
 		if err := clone.Validate(); err != nil {
 			log.Printf("fake provider %s: dropping instrument %q: %v", p.name, inst.Symbol, err)
 			continue
@@ -761,10 +793,18 @@ func (p *Provider) setSupportedInstruments(list []schema.Instrument) {
 		return
 	}
 	sort.Slice(natives, func(i, j int) bool { return natives[i].symbol < natives[j].symbol })
+	ordered := make([]schema.Instrument, 0, len(natives))
+	for _, native := range natives {
+		if inst, ok := catalog[native.symbol]; ok {
+			ordered = append(ordered, schema.CloneInstrument(inst))
+		}
+	}
 	p.instrumentMu.Lock()
 	p.instruments = catalog
 	p.defaultNativeInstruments = natives
 	p.instrumentMu.Unlock()
+	log.Printf("fake provider %s: instrument catalogue updated: %d instruments", p.name, len(ordered))
+	p.emitInstrumentCatalogue(ordered)
 }
 
 func (p *Provider) runInstrumentRefresh(ctx context.Context) {
@@ -793,6 +833,41 @@ func (p *Provider) refreshInstruments(ctx context.Context) {
 		return
 	}
 	p.setSupportedInstruments(list)
+}
+
+func (p *Provider) emitInstrumentCatalogue(list []schema.Instrument) {
+	if len(list) == 0 {
+		list = []schema.Instrument{}
+	}
+	seq := p.nextInstrumentSeq()
+	now := p.clock().UTC()
+	snapshot := schema.CloneInstruments(list)
+	if snapshot == nil {
+		snapshot = []schema.Instrument{}
+	}
+	inst := schema.InstrumentUpdatePayload{Instruments: snapshot}
+	evt := p.borrowEvent(p.ctx)
+	if evt == nil {
+		return
+	}
+	evt.EventID = fmt.Sprintf("%s:INSTRUMENTS:%d", p.name, seq)
+	evt.Provider = p.name
+	evt.Symbol = ""
+	evt.Type = schema.EventTypeInstrumentUpdate
+	evt.SeqProvider = seq
+	evt.IngestTS = now
+	evt.EmitTS = now
+	evt.Payload = inst
+	p.emitEvent(evt)
+}
+
+func (p *Provider) nextInstrumentSeq() uint64 {
+	p.seqMu.Lock()
+	defer p.seqMu.Unlock()
+	key := fmt.Sprintf("%s|%s", schema.EventTypeInstrumentUpdate, "ALL")
+	seq := p.seq[key] + 1
+	p.seq[key] = seq
+	return seq
 }
 
 func normalizeInstrument(symbol string) string {

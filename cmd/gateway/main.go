@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coachpo/meltica/internal/adapters"
 	"github.com/coachpo/meltica/internal/bus/eventbus"
 	"github.com/coachpo/meltica/internal/config"
 	"github.com/coachpo/meltica/internal/dispatcher"
 	lambdaruntime "github.com/coachpo/meltica/internal/lambda/runtime"
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/provider"
-	"github.com/coachpo/meltica/internal/provider/factories"
 	"github.com/coachpo/meltica/internal/schema"
 	"github.com/coachpo/meltica/internal/telemetry"
 	"github.com/sourcegraph/conc"
@@ -175,7 +175,7 @@ func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager) eventbus.Bu
 
 func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppConfig, poolMgr *pool.PoolManager, table *dispatcher.Table, bus eventbus.Bus, lifecycle *conc.WaitGroup) (*provider.Manager, error) {
 	registry := provider.NewRegistry()
-	factories.Register(registry)
+	adapters.RegisterAll(registry)
 
 	manager := provider.NewManager(registry, poolMgr)
 	specs, err := config.BuildProviderSpecs(appCfg.Exchanges)

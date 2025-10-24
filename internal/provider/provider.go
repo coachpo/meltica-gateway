@@ -16,4 +16,5 @@ type Instance interface {
 	SubmitOrder(ctx context.Context, req schema.OrderRequest) error
 	SubscribeRoute(route dispatcher.Route) error
 	UnsubscribeRoute(typ schema.CanonicalType) error
+	Instruments() []schema.Instrument
 }

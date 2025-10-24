@@ -29,6 +29,10 @@ func (s *NoOp) OnTicker(_ context.Context, _ *schema.Event, _ schema.TickerPaylo
 // OnBookSnapshot does nothing.
 func (s *NoOp) OnBookSnapshot(_ context.Context, _ *schema.Event, _ schema.BookSnapshotPayload) {}
 
+// OnInstrumentUpdate does nothing.
+func (s *NoOp) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
+
 // OnOrderFilled does nothing.
 func (s *NoOp) OnOrderFilled(_ context.Context, _ *schema.Event, _ schema.ExecReportPayload) {}
 

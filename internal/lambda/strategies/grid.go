@@ -153,3 +153,6 @@ func (s *Grid) OnControlAck(_ context.Context, _ *schema.Event, _ schema.Control
 
 // OnControlResult tracks control results (no-op for this strategy).
 func (s *Grid) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {}
+
+func (s *Grid) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}

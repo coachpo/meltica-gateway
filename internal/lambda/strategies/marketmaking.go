@@ -196,6 +196,10 @@ func (s *MarketMaking) OnControlAck(_ context.Context, _ *schema.Event, _ schema
 func (s *MarketMaking) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
 }
 
+// OnInstrumentUpdate is a no-op for this strategy.
+func (s *MarketMaking) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
+
 // ParseFloat safely parses a string to float64.
 func ParseFloat(s string) (float64, error) {
 	if s == "" {
