@@ -85,6 +85,276 @@ exchanges:
         transient_error: 0.0015
         disconnect_chance: 0.00005
         disconnect_for: 4s
+  fake-ultra-low-latency:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 40ms
+      trade_interval: 35ms
+      book_snapshot_interval: 120ms
+      instrument_refresh_interval: 10m
+      kline_interval: 10s
+      balance_update_interval: 1s
+      price_model:
+        drift: 0.00042
+        volatility: 0.03
+        shock_probability: 0.05
+        shock_magnitude: 0.04
+      trade_model:
+        min_quantity: 0.005
+        max_quantity: 1.2
+      order_book:
+        levels: 22
+        max_mutation_width: 5
+      venue_behavior:
+        latency_min: 2ms
+        latency_max: 9ms
+        transient_error: 0.004
+        disconnect_chance: 0.0003
+        disconnect_for: 1s
+  fake-night-owl:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 400ms
+      trade_interval: 350ms
+      book_snapshot_interval: 2s
+      instrument_refresh_interval: 25m
+      kline_interval: 2m
+      balance_update_interval: 5s
+      price_model:
+        drift: -0.00002
+        volatility: 0.003
+        shock_probability: 0.004
+        shock_magnitude: 0.006
+      trade_model:
+        min_quantity: 0.08
+        max_quantity: 0.9
+      order_book:
+        levels: 8
+        max_mutation_width: 3
+      venue_behavior:
+        latency_min: 16ms
+        latency_max: 65ms
+        transient_error: 0.0008
+        disconnect_chance: 0.00004
+        disconnect_for: 6s
+  fake-asia-session:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 110ms
+      trade_interval: 85ms
+      book_snapshot_interval: 280ms
+      instrument_refresh_interval: 12m
+      kline_interval: 20s
+      balance_update_interval: 1800ms
+      price_model:
+        drift: 0.00027
+        volatility: 0.016
+        shock_probability: 0.035
+        shock_magnitude: 0.032
+      trade_model:
+        min_quantity: 0.02
+        max_quantity: 2.1
+      order_book:
+        levels: 16
+        max_mutation_width: 7
+      venue_behavior:
+        latency_min: 6ms
+        latency_max: 22ms
+        transient_error: 0.003
+        disconnect_chance: 0.0006
+        disconnect_for: 1200ms
+  fake-europe-open:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 140ms
+      trade_interval: 95ms
+      book_snapshot_interval: 320ms
+      instrument_refresh_interval: 11m
+      kline_interval: 25s
+      balance_update_interval: 1500ms
+      price_model:
+        drift: 0.00019
+        volatility: 0.014
+        shock_probability: 0.022
+        shock_magnitude: 0.028
+      trade_model:
+        min_quantity: 0.03
+        max_quantity: 1.7
+      order_book:
+        levels: 15
+        max_mutation_width: 6
+      venue_behavior:
+        latency_min: 7ms
+        latency_max: 26ms
+        transient_error: 0.0022
+        disconnect_chance: 0.0005
+        disconnect_for: 1600ms
+  fake-deep-liquidity:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 90ms
+      trade_interval: 70ms
+      book_snapshot_interval: 210ms
+      instrument_refresh_interval: 9m
+      kline_interval: 18s
+      balance_update_interval: 1400ms
+      price_model:
+        drift: 0.00012
+        volatility: 0.008
+        shock_probability: 0.017
+        shock_magnitude: 0.02
+      trade_model:
+        min_quantity: 0.015
+        max_quantity: 3.4
+      order_book:
+        levels: 28
+        max_mutation_width: 8
+      venue_behavior:
+        latency_min: 5ms
+        latency_max: 20ms
+        transient_error: 0.002
+        disconnect_chance: 0.00045
+        disconnect_for: 2s
+  fake-fragile:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 220ms
+      trade_interval: 180ms
+      book_snapshot_interval: 650ms
+      instrument_refresh_interval: 30m
+      kline_interval: 45s
+      balance_update_interval: 2500ms
+      price_model:
+        drift: 0.00009
+        volatility: 0.012
+        shock_probability: 0.05
+        shock_magnitude: 0.06
+      trade_model:
+        min_quantity: 0.03
+        max_quantity: 1.2
+      order_book:
+        levels: 12
+        max_mutation_width: 10
+      venue_behavior:
+        latency_min: 18ms
+        latency_max: 85ms
+        transient_error: 0.009
+        disconnect_chance: 0.0035
+        disconnect_for: 5s
+  fake-noise-burst:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 95ms
+      trade_interval: 60ms
+      book_snapshot_interval: 260ms
+      instrument_refresh_interval: 14m
+      kline_interval: 22s
+      balance_update_interval: 1700ms
+      price_model:
+        drift: 0.00025
+        volatility: 0.026
+        shock_probability: 0.09
+        shock_magnitude: 0.07
+      trade_model:
+        min_quantity: 0.01
+        max_quantity: 2.6
+      order_book:
+        levels: 19
+        max_mutation_width: 11
+      venue_behavior:
+        latency_min: 9ms
+        latency_max: 34ms
+        transient_error: 0.0055
+        disconnect_chance: 0.0012
+        disconnect_for: 1800ms
+  fake-swing:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 160ms
+      trade_interval: 140ms
+      book_snapshot_interval: 480ms
+      instrument_refresh_interval: 18m
+      kline_interval: 40s
+      balance_update_interval: 2100ms
+      price_model:
+        drift: 0.00031
+        volatility: 0.018
+        shock_probability: 0.03
+        shock_magnitude: 0.045
+      trade_model:
+        min_quantity: 0.025
+        max_quantity: 1.9
+      order_book:
+        levels: 17
+        max_mutation_width: 8
+      venue_behavior:
+        latency_min: 10ms
+        latency_max: 38ms
+        transient_error: 0.0035
+        disconnect_chance: 0.0008
+        disconnect_for: 2400ms
+  fake-microcap:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 500ms
+      trade_interval: 420ms
+      book_snapshot_interval: 2.5s
+      instrument_refresh_interval: 35m
+      kline_interval: 90s
+      balance_update_interval: 6s
+      price_model:
+        drift: 0.0006
+        volatility: 0.05
+        shock_probability: 0.07
+        shock_magnitude: 0.12
+      trade_model:
+        min_quantity: 0.2
+        max_quantity: 4.0
+      order_book:
+        levels: 6
+        max_mutation_width: 14
+      venue_behavior:
+        latency_min: 22ms
+        latency_max: 110ms
+        transient_error: 0.012
+        disconnect_chance: 0.004
+        disconnect_for: 8s
+  fake-rangebound:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 210ms
+      trade_interval: 200ms
+      book_snapshot_interval: 520ms
+      instrument_refresh_interval: 22m
+      kline_interval: 55s
+      balance_update_interval: 3s
+      price_model:
+        drift: 0.00001
+        volatility: 0.002
+        shock_probability: 0.003
+        shock_magnitude: 0.004
+      trade_model:
+        min_quantity: 0.06
+        max_quantity: 1.1
+      order_book:
+        levels: 11
+        max_mutation_width: 2
+      venue_behavior:
+        latency_min: 14ms
+        latency_max: 36ms
+        transient_error: 0.0012
+        disconnect_chance: 0.0001
+        disconnect_for: 3s
 
 # eventbus: in-memory event bus sizing
 eventbus:
@@ -308,5 +578,193 @@ lambdaManifest:
     - id: noop-ada-calm
       provider: fake-calm
       symbol: ADA-USDT
+      strategy: noop
+      auto_start: false
+    - id: mm-matic-ultra
+      provider: fake-ultra-low-latency
+      symbol: MATIC-USDT
+      strategy: marketmaking
+      config:
+        spread_bps: 12
+        order_size: "220"
+        max_open_orders: 5
+      auto_start: true
+    - id: grid-btc-deep
+      provider: fake-deep-liquidity
+      symbol: BTC-USDT
+      strategy: grid
+      config:
+        grid_levels: 9
+        grid_spacing: 0.55
+        order_size: "0.03"
+        base_price: 67350
+      auto_start: false
+    - id: momentum-uni-asia
+      provider: fake-asia-session
+      symbol: UNI-USDT
+      strategy: momentum
+      config:
+        lookback_period: 30
+        momentum_threshold: 0.42
+        order_size: "650"
+        cooldown: "1500ms"
+      auto_start: true
+    - id: meanrev-link-europe
+      provider: fake-europe-open
+      symbol: LINK-USDT
+      strategy: meanreversion
+      config:
+        window_size: 35
+        deviation_threshold: 0.6
+        order_size: "520"
+      auto_start: true
+    - id: logging-night-audit
+      provider: fake-night-owl
+      symbol: BTC-USDT
+      strategy: logging
+      config:
+        logger_prefix: "[NIGHT-AUDIT] "
+      auto_start: true
+    - id: delay-microcap-retry
+      provider: fake-microcap
+      symbol: PEPE-USDT
+      strategy: delay
+      config:
+        min_delay: "200ms"
+        max_delay: "900ms"
+      auto_start: false
+    - id: noop-rangebound-monitor
+      provider: fake-rangebound
+      symbol: BCH-USDT
+      strategy: noop
+      auto_start: true
+    - id: mm-noise-burst
+      provider: fake-noise-burst
+      symbol: LTC-USDT
+      strategy: marketmaking
+      config:
+        spread_bps: 48
+        order_size: "0.45"
+        max_open_orders: 4
+      auto_start: false
+    - id: momentum-shib-ultra
+      provider: fake-ultra-low-latency
+      symbol: SHIB-USDT
+      strategy: momentum
+      config:
+        lookback_period: 40
+        momentum_threshold: 0.18
+        order_size: "4800000"
+        cooldown: "800ms"
+      auto_start: true
+    - id: grid-ton-swing
+      provider: fake-swing
+      symbol: TON-USDT
+      strategy: grid
+      config:
+        grid_levels: 8
+        grid_spacing: 1.3
+        order_size: "35"
+        base_price: 6.1
+      auto_start: false
+    - id: meanrev-xlm-night
+      provider: fake-night-owl
+      symbol: XLM-USDT
+      strategy: meanreversion
+      config:
+        window_size: 26
+        deviation_threshold: 0.4
+        order_size: "1800"
+      auto_start: false
+    - id: logging-fragile-monitor
+      provider: fake-fragile
+      symbol: ETH-USDT
+      strategy: logging
+      config:
+        logger_prefix: "[FRAGILE-WATCH] "
+      auto_start: true
+    - id: delay-europe-circuit
+      provider: fake-europe-open
+      symbol: SOL-USDT
+      strategy: delay
+      config:
+        min_delay: "120ms"
+        max_delay: "520ms"
+      auto_start: false
+    - id: mm-asia-tight
+      provider: fake-asia-session
+      symbol: XRP-USDT
+      strategy: marketmaking
+      config:
+        spread_bps: 22
+        order_size: "3100"
+        max_open_orders: 3
+      auto_start: true
+    - id: momentum-deep-breakout
+      provider: fake-deep-liquidity
+      symbol: ETH-USDT
+      strategy: momentum
+      config:
+        lookback_period: 34
+        momentum_threshold: 0.48
+        order_size: "5.5"
+        cooldown: "2500ms"
+      auto_start: false
+    - id: grid-microcap-ladder
+      provider: fake-microcap
+      symbol: FLOKI-USDT
+      strategy: grid
+      config:
+        grid_levels: 10
+        grid_spacing: 1.9
+        order_size: "150000"
+        base_price: 0.00028
+      auto_start: false
+    - id: meanrev-rangebound
+      provider: fake-rangebound
+      symbol: TRX-USDT
+      strategy: meanreversion
+      config:
+        window_size: 60
+        deviation_threshold: 0.2
+        order_size: "15000"
+      auto_start: true
+    - id: momentum-fragile-break
+      provider: fake-fragile
+      symbol: DOGE-USDT
+      strategy: momentum
+      config:
+        lookback_period: 28
+        momentum_threshold: 0.3
+        order_size: "6200"
+        cooldown: "5s"
+      auto_start: false
+    - id: mm-night-gold
+      provider: fake-night-owl
+      symbol: XAU-USDT
+      strategy: marketmaking
+      config:
+        spread_bps: 55
+        order_size: "0.15"
+        max_open_orders: 2
+      auto_start: false
+    - id: delay-noise-throttle
+      provider: fake-noise-burst
+      symbol: ADA-USDT
+      strategy: delay
+      config:
+        min_delay: "90ms"
+        max_delay: "360ms"
+      auto_start: true
+    - id: logging-microcap-stream
+      provider: fake-microcap
+      symbol: DOGE-USDT
+      strategy: logging
+      config:
+        logger_prefix: "[MICROCAP] "
+      auto_start: false
+    - id: noop-ultra-hold
+      provider: fake-ultra-low-latency
+      symbol: BTC-USDT
       strategy: noop
       auto_start: false

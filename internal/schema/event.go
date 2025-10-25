@@ -25,6 +25,8 @@ const (
 	RouteTypeExecutionReport RouteType = "EXECUTION.REPORT"
 	// RouteTypeKlineSummary designates candlestick summary streams.
 	RouteTypeKlineSummary RouteType = "KLINE.SUMMARY"
+	// RouteTypeInstrumentUpdate designates instrument catalogue refresh notifications.
+	RouteTypeInstrumentUpdate RouteType = "INSTRUMENT.UPDATE"
 )
 
 var (
@@ -35,14 +37,16 @@ var (
 		RouteTypeTicker:            EventTypeTicker,
 		RouteTypeExecutionReport:   EventTypeExecReport,
 		RouteTypeKlineSummary:      EventTypeKlineSummary,
+		RouteTypeInstrumentUpdate:  EventTypeInstrumentUpdate,
 	}
 	eventTypeToRoutes = map[EventType]RouteType{
-		EventTypeBalanceUpdate: RouteTypeAccountBalance,
-		EventTypeBookSnapshot:  RouteTypeOrderbookSnapshot,
-		EventTypeTrade:         RouteTypeTrade,
-		EventTypeTicker:        RouteTypeTicker,
-		EventTypeExecReport:    RouteTypeExecutionReport,
-		EventTypeKlineSummary:  RouteTypeKlineSummary,
+		EventTypeBalanceUpdate:    RouteTypeAccountBalance,
+		EventTypeBookSnapshot:     RouteTypeOrderbookSnapshot,
+		EventTypeTrade:            RouteTypeTrade,
+		EventTypeTicker:           RouteTypeTicker,
+		EventTypeExecReport:       RouteTypeExecutionReport,
+		EventTypeKlineSummary:     RouteTypeKlineSummary,
+		EventTypeInstrumentUpdate: RouteTypeInstrumentUpdate,
 	}
 )
 
