@@ -456,7 +456,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_provider_fake_balance_updates{environment=\\\"$environment\\\"}[1m]))",
+          "expr": "sum(rate(meltica_provider_fake_balance_updates{environment=\"$environment\"}[1m]))",
           "refId": "A"
         }
       ],
@@ -495,7 +495,7 @@
       },
       "targets": [
         {
-          "expr": "sum(meltica_provider_fake_balance_total{environment=\\\"$environment\\\"}) by (currency)",
+          "expr": "sum(meltica_provider_fake_balance_total{environment=\"$environment\"}) by (currency)",
           "legendFormat": "{{currency}}",
           "refId": "A"
         }
@@ -535,7 +535,7 @@
       },
       "targets": [
         {
-          "expr": "sum(meltica_provider_fake_balance_available{environment=\\\"$environment\\\"}) by (currency)",
+          "expr": "sum(meltica_provider_fake_balance_available{environment=\"$environment\"}) by (currency)",
           "legendFormat": "{{currency}}",
           "refId": "A"
         }
