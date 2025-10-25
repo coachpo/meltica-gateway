@@ -524,6 +524,18 @@ func InstrumentCurrencies(symbol string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
+// NormalizeCurrencyCode normalizes a currency identifier to uppercase and validates its format.
+func NormalizeCurrencyCode(code string) string {
+	trimmed := strings.ToUpper(strings.TrimSpace(code))
+	if trimmed == "" {
+		return ""
+	}
+	if !isCurrencyCode(trimmed) {
+		return ""
+	}
+	return trimmed
+}
+
 // CloneInstrument creates a deep copy of the provided instrument.
 func CloneInstrument(inst Instrument) Instrument {
 	clone := inst

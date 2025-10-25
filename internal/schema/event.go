@@ -9,12 +9,28 @@ import (
 	"github.com/coachpo/meltica/internal/errs"
 )
 
-// CanonicalType identifies canonical Meltica event categories (e.g. TICKER, ORDERBOOK.SNAPSHOT).
-type CanonicalType string
+// RouteType identifies canonical Meltica event categories (e.g. TICKER, ORDERBOOK.SNAPSHOT).
+type RouteType string
 
 const (
-	// CanonicalTypeAccountBalance represents balance updates for account currencies.
-	CanonicalTypeAccountBalance CanonicalType = "ACCOUNT.BALANCE"
+	// RouteTypeAccountBalance represents balance updates for account currencies.
+	RouteTypeAccountBalance RouteType = "ACCOUNT.BALANCE"
+	// RouteTypeOrderbookSnapshot represents full depth snapshots.
+	RouteTypeOrderbookSnapshot RouteType = "ORDERBOOK.SNAPSHOT"
+	// RouteTypeOrderbookDelta represents order book deltas.
+	RouteTypeOrderbookDelta RouteType = "ORDERBOOK.DELTA"
+	// RouteTypeOrderbookUpdate represents aggregated order book updates.
+	RouteTypeOrderbookUpdate RouteType = "ORDERBOOK.UPDATE"
+	// RouteTypeTrade represents trade executions.
+	RouteTypeTrade RouteType = "TRADE"
+	// RouteTypeTicker represents ticker summary events.
+	RouteTypeTicker RouteType = "TICKER"
+	// RouteTypeExecutionReport represents execution report events.
+	RouteTypeExecutionReport RouteType = "EXECUTION.REPORT"
+	// RouteTypeKlineSummary represents kline summary events.
+	RouteTypeKlineSummary RouteType = "KLINE.SUMMARY"
+	// RouteTypeKline represents raw kline events.
+	RouteTypeKline RouteType = "KLINE"
 )
 
 // RawInstance is a pre-canonicalized payload produced by upstream adapters.
@@ -34,19 +50,19 @@ func (r RawInstance) Clone() RawInstance {
 
 // Subscribe represents a control plane command to add a canonical route.
 type Subscribe struct {
-	Type      CanonicalType  `json:"type"`
+	Type      RouteType      `json:"type"`
 	Filters   map[string]any `json:"filters,omitempty"`
 	RequestID string         `json:"requestId,omitempty"`
 }
 
 // Unsubscribe represents a control plane command to remove a canonical route.
 type Unsubscribe struct {
-	Type      CanonicalType `json:"type"`
-	RequestID string        `json:"requestId,omitempty"`
+	Type      RouteType `json:"type"`
+	RequestID string    `json:"requestId,omitempty"`
 }
 
 // Validate ensures the canonical type adheres to spec.
-func (c CanonicalType) Validate() error {
+func (c RouteType) Validate() error {
 	if c == "" {
 		return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type required"))
 	}
@@ -75,7 +91,7 @@ func ValidateInstrument(symbol string) error {
 }
 
 // BuildEventKey constructs the default idempotency key for an event.
-func BuildEventKey(instr string, typ CanonicalType, seq uint64) string {
+func BuildEventKey(instr string, typ RouteType, seq uint64) string {
 	return fmt.Sprintf("%s:%s:%d", strings.TrimSpace(instr), string(typ), seq)
 }
 

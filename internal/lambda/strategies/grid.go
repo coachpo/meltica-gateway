@@ -30,15 +30,15 @@ type Grid struct {
 	initialized bool
 }
 
-var gridSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("EXECUTION.REPORT"),
-	schema.CanonicalTypeAccountBalance,
+var gridSubscribedEvents = []schema.RouteType{
+	schema.RouteTypeTrade,
+	schema.RouteTypeExecutionReport,
+	schema.RouteTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *Grid) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), gridSubscribedEvents...)
+func (s *Grid) SubscribedEvents() []schema.RouteType {
+	return append([]schema.RouteType(nil), gridSubscribedEvents...)
 }
 
 // OnTrade initializes grid if needed.

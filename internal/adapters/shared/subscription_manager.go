@@ -13,20 +13,20 @@ import (
 // RouteSubscriber defines the subset of provider capabilities required to manage subscriptions.
 type RouteSubscriber interface {
 	SubscribeRoute(route dispatcher.Route) error
-	UnsubscribeRoute(typ schema.CanonicalType) error
+	UnsubscribeRoute(typ schema.RouteType) error
 }
 
 // SubscriptionManager coordinates native adapter subscription updates.
 type SubscriptionManager struct {
 	mu         sync.Mutex
-	active     map[schema.CanonicalType]dispatcher.Route
+	active     map[schema.RouteType]dispatcher.Route
 	subscriber RouteSubscriber
 }
 
 // NewSubscriptionManager creates a new manager instance.
 func NewSubscriptionManager(subscriber RouteSubscriber) *SubscriptionManager {
 	manager := new(SubscriptionManager)
-	manager.active = make(map[schema.CanonicalType]dispatcher.Route)
+	manager.active = make(map[schema.RouteType]dispatcher.Route)
 	manager.subscriber = subscriber
 	return manager
 }
@@ -57,7 +57,7 @@ func (m *SubscriptionManager) Activate(ctx context.Context, route dispatcher.Rou
 }
 
 // Deactivate removes the route from the active set and notifies the provider.
-func (m *SubscriptionManager) Deactivate(ctx context.Context, typ schema.CanonicalType) error {
+func (m *SubscriptionManager) Deactivate(ctx context.Context, typ schema.RouteType) error {
 	_ = ctx
 	m.mu.Lock()
 	_, ok := m.active[typ]

@@ -32,15 +32,15 @@ type Momentum struct {
 	position      int32 // 1 = long, -1 = short, 0 = flat
 }
 
-var momentumSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("EXECUTION.REPORT"),
-	schema.CanonicalTypeAccountBalance,
+var momentumSubscribedEvents = []schema.RouteType{
+	schema.RouteTypeTrade,
+	schema.RouteTypeExecutionReport,
+	schema.RouteTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *Momentum) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), momentumSubscribedEvents...)
+func (s *Momentum) SubscribedEvents() []schema.RouteType {
+	return append([]schema.RouteType(nil), momentumSubscribedEvents...)
 }
 
 type pricePoint struct {

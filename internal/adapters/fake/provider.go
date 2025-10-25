@@ -91,12 +91,15 @@ type instrumentSupplier func() []nativeInstrument
 type currencySupplier func() []string
 
 type providerMetrics struct {
-	eventsEmitted    metric.Int64Counter
-	ordersReceived   metric.Int64Counter
-	ordersRejected   metric.Int64Counter
-	orderLatency     metric.Float64Histogram
-	venueDisruptions metric.Int64Counter
-	venueErrors      metric.Int64Counter
+	eventsEmitted     metric.Int64Counter
+	ordersReceived    metric.Int64Counter
+	ordersRejected    metric.Int64Counter
+	orderLatency      metric.Float64Histogram
+	venueDisruptions  metric.Int64Counter
+	venueErrors       metric.Int64Counter
+	balanceUpdates    metric.Int64Counter
+	balanceTotalGauge metric.Float64ObservableGauge
+	balanceAvailGauge metric.Float64ObservableGauge
 }
 
 type instrumentConstraints struct {
@@ -243,6 +246,45 @@ func (p *Provider) initMetrics() {
 	if err != nil {
 		p.metrics.venueErrors = nil
 	}
+	p.metrics.balanceUpdates, err = meter.Int64Counter("provider.fake.balance.updates",
+		metric.WithDescription("Balance updates emitted by the fake provider"),
+		metric.WithUnit("{event}"))
+	if err != nil {
+		p.metrics.balanceUpdates = nil
+	}
+	p.metrics.balanceTotalGauge, err = meter.Float64ObservableGauge("provider.fake.balance.total",
+		metric.WithDescription("Total synthetic balance per currency"),
+		metric.WithUnit("{currency}"),
+		metric.WithFloat64Callback(func(_ context.Context, observer metric.Float64Observer) error {
+			p.observeBalances(observer, false)
+			return nil
+		}))
+	if err != nil {
+		p.metrics.balanceTotalGauge = nil
+	}
+	p.metrics.balanceAvailGauge, err = meter.Float64ObservableGauge("provider.fake.balance.available",
+		metric.WithDescription("Available synthetic balance per currency"),
+		metric.WithUnit("{currency}"),
+		metric.WithFloat64Callback(func(_ context.Context, observer metric.Float64Observer) error {
+			p.observeBalances(observer, true)
+			return nil
+		}))
+	if err != nil {
+		p.metrics.balanceAvailGauge = nil
+	}
+}
+
+func (p *Provider) observeBalances(observer metric.Float64Observer, available bool) {
+	p.balanceMu.Lock()
+	defer p.balanceMu.Unlock()
+	for currency, state := range p.balances {
+		value := state.total
+		if available {
+			value = state.available
+		}
+		attrs := telemetry.BalanceAttributes(telemetry.Environment(), p.name, currency)
+		observer.Observe(value, metric.WithAttributes(attrs...))
+	}
 }
 
 func intPtr(v int) *int {
@@ -310,7 +352,7 @@ type Provider struct {
 	started atomic.Bool
 
 	mu     sync.Mutex
-	routes map[schema.CanonicalType]*routeHandle
+	routes map[schema.RouteType]*routeHandle
 
 	pools *pool.PoolManager
 
@@ -951,7 +993,7 @@ func NewProvider(opts Options) *Provider {
 		events:                make(chan *schema.Event, 128),
 		errs:                  make(chan error, 8),
 		orders:                make(chan schema.OrderRequest, 64),
-		routes:                make(map[schema.CanonicalType]*routeHandle),
+		routes:                make(map[schema.RouteType]*routeHandle),
 		seq:                   make(map[string]uint64),
 		state:                 make(map[string]*instrumentState),
 		clock:                 time.Now,
@@ -1095,7 +1137,7 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 }
 
 // UnsubscribeRoute stops streaming for the canonical type.
-func (p *Provider) UnsubscribeRoute(typ schema.CanonicalType) error {
+func (p *Provider) UnsubscribeRoute(typ schema.RouteType) error {
 	if typ == "" {
 		return errors.New("route type required")
 	}
@@ -1219,23 +1261,23 @@ func (p *Provider) currenciesFromRoute(route dispatcher.Route) []string {
 		}
 		switch v := filter.Value.(type) {
 		case string:
-			if currency := normalizeCurrency(v); currency != "" {
+			if currency := schema.NormalizeCurrencyCode(v); currency != "" {
 				set[currency] = struct{}{}
 			}
 		case []string:
 			for _, entry := range v {
-				if currency := normalizeCurrency(entry); currency != "" {
+				if currency := schema.NormalizeCurrencyCode(entry); currency != "" {
 					set[currency] = struct{}{}
 				}
 			}
 		case []any:
 			for _, entry := range v {
-				if currency := normalizeCurrency(fmt.Sprint(entry)); currency != "" {
+				if currency := schema.NormalizeCurrencyCode(fmt.Sprint(entry)); currency != "" {
 					set[currency] = struct{}{}
 				}
 			}
 		default:
-			if currency := normalizeCurrency(fmt.Sprint(filter.Value)); currency != "" {
+			if currency := schema.NormalizeCurrencyCode(fmt.Sprint(filter.Value)); currency != "" {
 				set[currency] = struct{}{}
 			}
 		}
@@ -1259,10 +1301,10 @@ func (p *Provider) defaultCurrencies() []string {
 	}
 	set := make(map[string]struct{})
 	for _, inst := range p.instruments {
-		if currency := normalizeCurrency(inst.BaseCurrency); currency != "" {
+		if currency := schema.NormalizeCurrencyCode(inst.BaseCurrency); currency != "" {
 			set[currency] = struct{}{}
 		}
-		if currency := normalizeCurrency(inst.QuoteCurrency); currency != "" {
+		if currency := schema.NormalizeCurrencyCode(inst.QuoteCurrency); currency != "" {
 			set[currency] = struct{}{}
 		}
 	}
@@ -1446,7 +1488,7 @@ func (p *Provider) emitKline(instrument nativeInstrument) {
 }
 
 func (p *Provider) emitBalanceUpdate(currency string) {
-	normalized := normalizeCurrency(currency)
+	normalized := schema.NormalizeCurrencyCode(currency)
 	if normalized == "" {
 		return
 	}
@@ -1477,6 +1519,7 @@ func (p *Provider) emitBalanceUpdate(currency string) {
 		return
 	}
 	p.emitEvent(evt)
+	p.recordBalanceUpdate(normalized, state)
 }
 
 func (p *Provider) emitTicker(instrument nativeInstrument) {
@@ -2365,19 +2408,6 @@ func normalizeInstrument(symbol string) string {
 	return strings.ToUpper(strings.TrimSpace(symbol))
 }
 
-func normalizeCurrency(code string) string {
-	code = strings.ToUpper(strings.TrimSpace(code))
-	if len(code) < 2 || len(code) > 10 {
-		return ""
-	}
-	for _, r := range code {
-		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
-			return ""
-		}
-	}
-	return code
-}
-
 func defaultBasePrice(symbol string) float64 {
 	switch symbol {
 	case "BTC-USDT":
@@ -2427,19 +2457,19 @@ func formatLevels(levels []bookLevel, cons instrumentConstraints) []schema.Price
 	return out
 }
 
-func canonicalToEventType(c schema.CanonicalType) (schema.EventType, bool) {
+func canonicalToEventType(c schema.RouteType) (schema.EventType, bool) {
 	switch c {
-	case schema.CanonicalType("ORDERBOOK.SNAPSHOT"), schema.CanonicalType("ORDERBOOK.DELTA"), schema.CanonicalType("ORDERBOOK.UPDATE"):
+	case schema.RouteTypeOrderbookSnapshot, schema.RouteTypeOrderbookDelta, schema.RouteTypeOrderbookUpdate:
 		return schema.EventTypeBookSnapshot, true
-	case schema.CanonicalType("TRADE"):
+	case schema.RouteTypeTrade:
 		return schema.EventTypeTrade, true
-	case schema.CanonicalType("TICKER"):
+	case schema.RouteTypeTicker:
 		return schema.EventTypeTicker, true
-	case schema.CanonicalType("EXECUTION.REPORT"):
+	case schema.RouteTypeExecutionReport:
 		return schema.EventTypeExecReport, true
-	case schema.CanonicalType("KLINE.SUMMARY"), schema.CanonicalType("KLINE"):
+	case schema.RouteTypeKlineSummary, schema.RouteTypeKline:
 		return schema.EventTypeKlineSummary, true
-	case schema.CanonicalTypeAccountBalance:
+	case schema.RouteTypeAccountBalance:
 		return schema.EventTypeBalanceUpdate, true
 	default:
 		return "", false
@@ -2516,6 +2546,16 @@ func (p *Provider) recordVenueError(result string) {
 	}
 	attrs := telemetry.OperationResultAttributes(telemetry.Environment(), p.name, "venue_error", result)
 	p.metrics.venueErrors.Add(p.ctx, 1, metric.WithAttributes(attrs...))
+}
+
+func (p *Provider) recordBalanceUpdate(currency string, state balanceState) {
+	if p.ctx == nil {
+		return
+	}
+	attrs := telemetry.BalanceAttributes(telemetry.Environment(), p.name, currency)
+	if p.metrics.balanceUpdates != nil {
+		p.metrics.balanceUpdates.Add(p.ctx, 1, metric.WithAttributes(attrs...))
+	}
 }
 
 func formatPrice(value float64) string {

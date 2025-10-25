@@ -20,7 +20,7 @@ type ProviderRouter interface {
 
 // RouteDeclaration captures a lambda's routing requirement.
 type RouteDeclaration struct {
-	Type    schema.CanonicalType
+	Type    schema.RouteType
 	Filters map[string]any
 }
 

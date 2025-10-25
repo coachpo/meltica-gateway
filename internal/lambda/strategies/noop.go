@@ -9,16 +9,16 @@ import (
 // NoOp is a strategy that does nothing - useful for monitoring-only lambdas.
 type NoOp struct{}
 
-var noopSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("TICKER"),
-	schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
-	schema.CanonicalTypeAccountBalance,
+var noopSubscribedEvents = []schema.RouteType{
+	schema.RouteTypeTrade,
+	schema.RouteTypeTicker,
+	schema.RouteTypeOrderbookSnapshot,
+	schema.RouteTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *NoOp) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), noopSubscribedEvents...)
+func (s *NoOp) SubscribedEvents() []schema.RouteType {
+	return append([]schema.RouteType(nil), noopSubscribedEvents...)
 }
 
 // OnTrade does nothing.

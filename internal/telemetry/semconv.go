@@ -7,17 +7,18 @@ import (
 
 // Semantic convention attribute keys for Meltica-specific telemetry.
 // Following OpenTelemetry naming conventions: namespace.attribute_name
+
 const (
 	// Event attributes
 	AttrEventType   = attribute.Key("event.type")
 	AttrProvider    = attribute.Key("provider")
 	AttrSymbol      = attribute.Key("symbol")
 	AttrMessageType = attribute.Key("message.type")
+	AttrCurrency    = attribute.Key("currency")
 	AttrOrderSide   = attribute.Key("order.side")
 	AttrOrderType   = attribute.Key("order.type")
 	AttrOrderTIF    = attribute.Key("order.tif")
 	AttrOrderState  = attribute.Key("order.state")
-	AttrCurrency    = attribute.Key("currency")
 
 	// Pool attributes
 	AttrPoolName   = attribute.Key("pool.name")
@@ -85,6 +86,18 @@ func OrderAttributes(environment, provider, symbol, side, orderType, tif string)
 	}
 	if tif != "" {
 		attrs = append(attrs, AttrOrderTIF.String(tif))
+	}
+	return attrs
+}
+
+// BalanceAttributes returns attributes for balance telemetry.
+func BalanceAttributes(environment, provider, currency string) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		AttrEnvironment.String(environment),
+		AttrProvider.String(provider),
+	}
+	if currency != "" {
+		attrs = append(attrs, AttrCurrency.String(currency))
 	}
 	return attrs
 }

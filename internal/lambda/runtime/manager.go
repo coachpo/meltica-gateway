@@ -48,11 +48,11 @@ type StrategyConfigField struct {
 
 // StrategyMetadata describes a trading strategy's interface and configuration.
 type StrategyMetadata struct {
-	Name        string                 `json:"name"`
-	DisplayName string                 `json:"displayName"`
-	Description string                 `json:"description,omitempty"`
-	Config      []StrategyConfigField  `json:"config"`
-	Events      []schema.CanonicalType `json:"events"`
+	Name        string                `json:"name"`
+	DisplayName string                `json:"displayName"`
+	Description string                `json:"description,omitempty"`
+	Config      []StrategyConfigField `json:"config"`
+	Events      []schema.RouteType    `json:"events"`
 }
 
 // StrategyDefinition combines strategy metadata with a factory function.
@@ -65,7 +65,7 @@ type StrategyDefinition struct {
 func (d StrategyDefinition) Metadata() StrategyMetadata {
 	fields := make([]StrategyConfigField, len(d.meta.Config))
 	copy(fields, d.meta.Config)
-	events := make([]schema.CanonicalType, len(d.meta.Events))
+	events := make([]schema.RouteType, len(d.meta.Events))
 	copy(events, d.meta.Events)
 	meta := d.meta
 	meta.Config = fields
@@ -132,7 +132,7 @@ func (m *Manager) registerDefaults() {
 			DisplayName: "No-Op",
 			Description: "Pass-through strategy that performs no actions.",
 			Config:      []StrategyConfigField{},
-			Events:      []schema.CanonicalType{},
+			Events:      []schema.RouteType{},
 		},
 		factory: func(_ map[string]any) (lambda.TradingStrategy, error) {
 			return &strategies.NoOp{}, nil
@@ -148,7 +148,7 @@ func (m *Manager) registerDefaults() {
 				{Name: "min_delay", Type: "duration", Description: "Lower bound for the random delay interval", Default: "100ms", Required: false},
 				{Name: "max_delay", Type: "duration", Description: "Upper bound for the random delay interval", Default: "500ms", Required: false},
 			},
-			Events: []schema.CanonicalType{},
+			Events: []schema.RouteType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
 			minDelay := durationValue(cfg, "min_delay", strategies.DefaultMinDelay)
@@ -180,7 +180,7 @@ func (m *Manager) registerDefaults() {
 				Default:     "[Logging] ",
 				Required:    false,
 			}},
-			Events: []schema.CanonicalType{},
+			Events: []schema.RouteType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
 			strat := &strategies.Logging{
@@ -203,7 +203,7 @@ func (m *Manager) registerDefaults() {
 				{Name: "order_size", Type: "string", Description: "Quantity for each market order", Default: "1", Required: false},
 				{Name: "cooldown", Type: "duration", Description: "Minimum time between trades", Default: "5s", Required: false},
 			},
-			Events: []schema.CanonicalType{},
+			Events: []schema.RouteType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
 			strat := &strategies.Momentum{
@@ -231,7 +231,7 @@ func (m *Manager) registerDefaults() {
 				{Name: "deviation_threshold", Type: "float", Description: "Deviation percentage required to open a position", Default: 0.5, Required: false},
 				{Name: "order_size", Type: "string", Description: "Order size when entering a position", Default: "1", Required: false},
 			},
-			Events: []schema.CanonicalType{},
+			Events: []schema.RouteType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
 			strat := &strategies.MeanReversion{
@@ -258,7 +258,7 @@ func (m *Manager) registerDefaults() {
 				{Name: "order_size", Type: "string", Description: "Order size per level", Default: "1", Required: false},
 				{Name: "base_price", Type: "float", Description: "Optional base price for the grid", Default: 0.0, Required: false},
 			},
-			Events: []schema.CanonicalType{},
+			Events: []schema.RouteType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
 			strat := &strategies.Grid{
@@ -286,7 +286,7 @@ func (m *Manager) registerDefaults() {
 				{Name: "order_size", Type: "string", Description: "Quoted order size", Default: "1", Required: false},
 				{Name: "max_open_orders", Type: "int", Description: "Maximum concurrent orders per side", Default: 2, Required: false},
 			},
-			Events: []schema.CanonicalType{},
+			Events: []schema.RouteType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
 			strat := &strategies.MarketMaking{
@@ -321,10 +321,10 @@ func (m *Manager) registerStrategy(def StrategyDefinition) {
 	if len(def.meta.Events) == 0 {
 		strat, err := def.factory(map[string]any{})
 		if err == nil && strat != nil {
-			def.meta.Events = append([]schema.CanonicalType(nil), strat.SubscribedEvents()...)
+			def.meta.Events = append([]schema.RouteType(nil), strat.SubscribedEvents()...)
 		}
 	}
-	def.meta.Events = append([]schema.CanonicalType(nil), def.meta.Events...)
+	def.meta.Events = append([]schema.RouteType(nil), def.meta.Events...)
 
 	fields := make([]StrategyConfigField, len(def.meta.Config))
 	copy(fields, def.meta.Config)
@@ -357,7 +357,7 @@ func (m *Manager) StrategyDetail(name string) (StrategyMetadata, bool) {
 			DisplayName: "",
 			Description: "",
 			Config:      []StrategyConfigField{},
-			Events:      []schema.CanonicalType{},
+			Events:      []schema.RouteType{},
 		}, false
 	}
 	return def.Metadata(), true
@@ -695,7 +695,7 @@ func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaS
 			continue
 		}
 		switch typ {
-		case schema.CanonicalTypeAccountBalance:
+		case schema.RouteTypeAccountBalance:
 			candidates := []string{baseCurrency, quoteCurrency}
 			for _, currency := range candidates {
 				currency = strings.ToUpper(strings.TrimSpace(currency))

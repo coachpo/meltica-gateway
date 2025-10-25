@@ -4,20 +4,20 @@ import (
 	"testing"
 )
 
-func TestCanonicalTypeValidate(t *testing.T) {
+func TestRouteTypeValidate(t *testing.T) {
 	tests := []struct {
 		name    string
-		ct      CanonicalType
+		ct      RouteType
 		wantErr bool
 	}{
 		{
 			name:    "valid simple type",
-			ct:      "TICKER",
+			ct:      RouteTypeTicker,
 			wantErr: false,
 		},
 		{
 			name:    "valid compound type",
-			ct:      "ORDERBOOK.SNAPSHOT",
+			ct:      RouteTypeOrderbookSnapshot,
 			wantErr: false,
 		},
 		{
@@ -27,17 +27,17 @@ func TestCanonicalTypeValidate(t *testing.T) {
 		},
 		{
 			name:    "lowercase type",
-			ct:      "ticker",
+			ct:      RouteType("ticker"),
 			wantErr: true,
 		},
 		{
 			name:    "type with invalid chars",
-			ct:      "TICKER-INVALID",
+			ct:      RouteType("TICKER-INVALID"),
 			wantErr: true,
 		},
 		{
 			name:    "type with empty segment",
-			ct:      "TICKER..INVALID",
+			ct:      RouteType("TICKER..INVALID"),
 			wantErr: true,
 		},
 	}
@@ -111,7 +111,7 @@ func TestValidateInstrument(t *testing.T) {
 }
 
 func TestBuildEventKey(t *testing.T) {
-	key := BuildEventKey("BTC-USD", "TICKER", 123)
+	key := BuildEventKey("BTC-USD", RouteTypeTicker, 123)
 
 	if key == "" {
 		t.Error("expected non-empty key")

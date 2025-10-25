@@ -15,17 +15,17 @@ type Logging struct {
 	LoggerPrefix string
 }
 
-var loggingSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("TICKER"),
-	schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
-	schema.CanonicalType("EXECUTION.REPORT"),
-	schema.CanonicalTypeAccountBalance,
+var loggingSubscribedEvents = []schema.RouteType{
+	schema.RouteTypeTrade,
+	schema.RouteTypeTicker,
+	schema.RouteTypeOrderbookSnapshot,
+	schema.RouteTypeExecutionReport,
+	schema.RouteTypeAccountBalance,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *Logging) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), loggingSubscribedEvents...)
+func (s *Logging) SubscribedEvents() []schema.RouteType {
+	return append([]schema.RouteType(nil), loggingSubscribedEvents...)
 }
 
 func (s *Logging) logger() *log.Logger {
