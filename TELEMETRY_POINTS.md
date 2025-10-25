@@ -134,6 +134,28 @@ Tracks retries needed (0=first attempt success, 5=all attempts exhausted).
 
 ---
 
+## 6. Fake Provider (`internal/adapters/fake/provider.go`)
+
+### Metrics
+
+| Metric Name | Type | Unit | Description | Labels |
+|-------------|------|------|-------------|--------|
+| `provider.fake.events.emitted` | Counter | `{event}` | Total synthetic events emitted | environment, provider, symbol, event_type |
+| `provider.fake.orders.received` | Counter | `{order}` | Orders accepted for simulation (pre-validation) | environment, provider, symbol, order.side, order.type, order.tif |
+| `provider.fake.orders.rejected` | Counter | `{order}` | Orders rejected after validation | environment, provider, symbol, order.side, order.type, order.tif, reason |
+| `provider.fake.order.latency` | Histogram | `ms` | Submission-to-final-state latency | environment, provider, symbol, order.side, order.type, order.tif, order.state |
+| `provider.fake.venue.disruptions` | Counter | `{event}` | Simulated venue disconnect/reconnect cycles | environment, provider, operation, result |
+| `provider.fake.venue.errors` | Counter | `{event}` | Injected transient venue errors | environment, provider, operation, result |
+| `provider.fake.balance.updates` | Counter | `{event}` | Balance updates emitted per currency | environment, provider, currency |
+| `provider.fake.balance.total` | ObservableGauge | `{currency}` | Current total balance per currency | environment, provider, currency |
+| `provider.fake.balance.available` | ObservableGauge | `{currency}` | Current available balance per currency | environment, provider, currency |
+
+**Notes**:
+- Balance gauges are observed asynchronously by the provider at every update tick.
+- Currency codes follow `schema.NormalizeCurrencyCode` (uppercase, 2-10 alphanumeric characters).
+
+---
+
 ## Semantic Conventions
 
 ### Standard Labels (Applied to All Metrics)
