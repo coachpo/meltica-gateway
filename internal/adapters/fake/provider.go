@@ -1120,16 +1120,20 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 	if p.ctx == nil {
 		return errors.New("provider not started")
 	}
-	evtType, ok := canonicalToEventType(route.Type)
+	if err := route.Type.Validate(); err != nil {
+		return fmt.Errorf("route type: %w", err)
+	}
+	evtType, ok := schema.EventTypeForRoute(route.Type)
 	if !ok {
 		return fmt.Errorf("unsupported canonical type %s", route.Type)
 	}
-	key := route.Type
+	key := schema.NormalizeRouteType(route.Type)
 	p.mu.Lock()
 	if _, exists := p.routes[key]; exists {
 		p.mu.Unlock()
 		return nil
 	}
+	route.Type = key
 	handle := p.startRouteLocked(route, evtType)
 	p.routes[key] = handle
 	p.mu.Unlock()
@@ -1140,6 +1144,9 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 func (p *Provider) UnsubscribeRoute(typ schema.RouteType) error {
 	if typ == "" {
 		return errors.New("route type required")
+	}
+	if err := typ.Validate(); err != nil {
+		return fmt.Errorf("route type: %w", err)
 	}
 	p.mu.Lock()
 	handle, ok := p.routes[typ]
@@ -1519,7 +1526,7 @@ func (p *Provider) emitBalanceUpdate(currency string) {
 		return
 	}
 	p.emitEvent(evt)
-	p.recordBalanceUpdate(normalized, state)
+	p.recordBalanceUpdate(normalized)
 }
 
 func (p *Provider) emitTicker(instrument nativeInstrument) {
@@ -2457,25 +2464,6 @@ func formatLevels(levels []bookLevel, cons instrumentConstraints) []schema.Price
 	return out
 }
 
-func canonicalToEventType(c schema.RouteType) (schema.EventType, bool) {
-	switch c {
-	case schema.RouteTypeOrderbookSnapshot, schema.RouteTypeOrderbookDelta, schema.RouteTypeOrderbookUpdate:
-		return schema.EventTypeBookSnapshot, true
-	case schema.RouteTypeTrade:
-		return schema.EventTypeTrade, true
-	case schema.RouteTypeTicker:
-		return schema.EventTypeTicker, true
-	case schema.RouteTypeExecutionReport:
-		return schema.EventTypeExecReport, true
-	case schema.RouteTypeKlineSummary, schema.RouteTypeKline:
-		return schema.EventTypeKlineSummary, true
-	case schema.RouteTypeAccountBalance:
-		return schema.EventTypeBalanceUpdate, true
-	default:
-		return "", false
-	}
-}
-
 func checksum(instrument string, evtType schema.EventType, seq uint64) string {
 	base := fmt.Sprintf("%s|%s|%d", instrument, evtType, seq)
 	sum := uint32(0)
@@ -2548,7 +2536,7 @@ func (p *Provider) recordVenueError(result string) {
 	p.metrics.venueErrors.Add(p.ctx, 1, metric.WithAttributes(attrs...))
 }
 
-func (p *Provider) recordBalanceUpdate(currency string, state balanceState) {
+func (p *Provider) recordBalanceUpdate(currency string) {
 	if p.ctx == nil {
 		return
 	}

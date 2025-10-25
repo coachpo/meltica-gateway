@@ -30,15 +30,15 @@ type MeanReversion struct {
 	hasPosition bool
 }
 
-var meanReversionSubscribedEvents = []schema.RouteType{
-	schema.RouteTypeTrade,
-	schema.RouteTypeExecutionReport,
-	schema.RouteTypeAccountBalance,
+var meanReversionSubscribedEvents = []schema.EventType{
+	schema.EventTypeTrade,
+	schema.EventTypeExecReport,
+	schema.EventTypeBalanceUpdate,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *MeanReversion) SubscribedEvents() []schema.RouteType {
-	return append([]schema.RouteType(nil), meanReversionSubscribedEvents...)
+func (s *MeanReversion) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), meanReversionSubscribedEvents...)
 }
 
 // OnTrade analyzes price deviation from moving average.

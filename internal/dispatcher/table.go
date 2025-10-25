@@ -51,7 +51,7 @@ type RouteKey struct {
 func (k RouteKey) normalize() RouteKey {
 	return RouteKey{
 		Provider: strings.TrimSpace(strings.ToLower(k.Provider)),
-		Type:     k.Type,
+		Type:     schema.NormalizeRouteType(k.Type),
 	}
 }
 
@@ -67,6 +67,7 @@ func (t *Table) Upsert(route Route) error {
 	if err := route.Type.Validate(); err != nil {
 		return fmt.Errorf("validate route type: %w", err)
 	}
+	route.Type = schema.NormalizeRouteType(route.Type)
 	route.Provider = strings.TrimSpace(route.Provider)
 	if route.Provider == "" {
 		return fmt.Errorf("provider required")

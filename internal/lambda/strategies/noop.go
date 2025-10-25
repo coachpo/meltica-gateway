@@ -9,16 +9,16 @@ import (
 // NoOp is a strategy that does nothing - useful for monitoring-only lambdas.
 type NoOp struct{}
 
-var noopSubscribedEvents = []schema.RouteType{
-	schema.RouteTypeTrade,
-	schema.RouteTypeTicker,
-	schema.RouteTypeOrderbookSnapshot,
-	schema.RouteTypeAccountBalance,
+var noopSubscribedEvents = []schema.EventType{
+	schema.EventTypeTrade,
+	schema.EventTypeTicker,
+	schema.EventTypeBookSnapshot,
+	schema.EventTypeBalanceUpdate,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *NoOp) SubscribedEvents() []schema.RouteType {
-	return append([]schema.RouteType(nil), noopSubscribedEvents...)
+func (s *NoOp) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), noopSubscribedEvents...)
 }
 
 // OnTrade does nothing.

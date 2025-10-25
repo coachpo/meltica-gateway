@@ -25,18 +25,18 @@ const (
 )
 
 var (
-	delaySubscribedEvents = []schema.RouteType{
-		schema.RouteTypeTrade,
-		schema.RouteTypeTicker,
-		schema.RouteTypeOrderbookSnapshot,
-		schema.RouteTypeAccountBalance,
+	delaySubscribedEvents = []schema.EventType{
+		schema.EventTypeTrade,
+		schema.EventTypeTicker,
+		schema.EventTypeBookSnapshot,
+		schema.EventTypeBalanceUpdate,
 	}
 	delayRandMu sync.Mutex
 )
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *Delay) SubscribedEvents() []schema.RouteType {
-	return append([]schema.RouteType(nil), delaySubscribedEvents...)
+func (s *Delay) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), delaySubscribedEvents...)
 }
 
 func (s *Delay) sleep() {

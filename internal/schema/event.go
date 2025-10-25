@@ -9,29 +9,99 @@ import (
 	"github.com/coachpo/meltica/internal/errs"
 )
 
-// RouteType identifies canonical Meltica event categories (e.g. TICKER, ORDERBOOK.SNAPSHOT).
+// RouteType identifies canonical Meltica route identifiers used across control-plane interactions.
 type RouteType string
 
 const (
-	// RouteTypeAccountBalance represents balance updates for account currencies.
+	// RouteTypeAccountBalance designates account balance updates emitted by providers.
 	RouteTypeAccountBalance RouteType = "ACCOUNT.BALANCE"
-	// RouteTypeOrderbookSnapshot represents full depth snapshots.
+	// RouteTypeOrderbookSnapshot designates full orderbook snapshot streams.
 	RouteTypeOrderbookSnapshot RouteType = "ORDERBOOK.SNAPSHOT"
-	// RouteTypeOrderbookDelta represents order book deltas.
-	RouteTypeOrderbookDelta RouteType = "ORDERBOOK.DELTA"
-	// RouteTypeOrderbookUpdate represents aggregated order book updates.
-	RouteTypeOrderbookUpdate RouteType = "ORDERBOOK.UPDATE"
-	// RouteTypeTrade represents trade executions.
+	// RouteTypeTrade designates trade execution streams.
 	RouteTypeTrade RouteType = "TRADE"
-	// RouteTypeTicker represents ticker summary events.
+	// RouteTypeTicker designates ticker summary streams.
 	RouteTypeTicker RouteType = "TICKER"
-	// RouteTypeExecutionReport represents execution report events.
+	// RouteTypeExecutionReport designates order execution report streams.
 	RouteTypeExecutionReport RouteType = "EXECUTION.REPORT"
-	// RouteTypeKlineSummary represents kline summary events.
+	// RouteTypeKlineSummary designates candlestick summary streams.
 	RouteTypeKlineSummary RouteType = "KLINE.SUMMARY"
-	// RouteTypeKline represents raw kline events.
-	RouteTypeKline RouteType = "KLINE"
 )
+
+var (
+	routeToEventType = map[RouteType]EventType{
+		RouteTypeAccountBalance:    EventTypeBalanceUpdate,
+		RouteTypeOrderbookSnapshot: EventTypeBookSnapshot,
+		RouteTypeTrade:             EventTypeTrade,
+		RouteTypeTicker:            EventTypeTicker,
+		RouteTypeExecutionReport:   EventTypeExecReport,
+		RouteTypeKlineSummary:      EventTypeKlineSummary,
+	}
+	eventTypeToRoutes = map[EventType]RouteType{
+		EventTypeBalanceUpdate: RouteTypeAccountBalance,
+		EventTypeBookSnapshot:  RouteTypeOrderbookSnapshot,
+		EventTypeTrade:         RouteTypeTrade,
+		EventTypeTicker:        RouteTypeTicker,
+		EventTypeExecReport:    RouteTypeExecutionReport,
+		EventTypeKlineSummary:  RouteTypeKlineSummary,
+	}
+)
+
+// NormalizeRouteType trims spaces and uppercases the provided canonical route.
+func NormalizeRouteType(route RouteType) RouteType {
+	trimmed := strings.TrimSpace(string(route))
+	if trimmed == "" {
+		return ""
+	}
+	return RouteType(strings.ToUpper(trimmed))
+}
+
+// Validate ensures the canonical route name adheres to spec.
+func (r RouteType) Validate() error {
+	normalized := NormalizeRouteType(r)
+	if normalized == "" {
+		return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type required"))
+	}
+	if normalized != r {
+		return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type must be uppercase alphanumeric"))
+	}
+	parts := strings.Split(string(normalized), ".")
+	for _, part := range parts {
+		if part == "" {
+			return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("empty canonical type segment"))
+		}
+		for _, ch := range part {
+			if ch < 'A' || ch > 'Z' && (ch < '0' || ch > '9') {
+				return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type must be uppercase alphanumeric"))
+			}
+		}
+	}
+	return nil
+}
+
+// EventTypeForRoute resolves the event type associated with a canonical route.
+func EventTypeForRoute(route RouteType) (EventType, bool) {
+	normalized := NormalizeRouteType(route)
+	if normalized == "" {
+		return "", false
+	}
+	evt, ok := routeToEventType[normalized]
+	return evt, ok
+}
+
+// RoutesForEvent returns the canonical routes that map to the supplied event type.
+func RoutesForEvent(evt EventType) []RouteType {
+	route, ok := eventTypeToRoutes[evt]
+	if !ok {
+		return nil
+	}
+	return []RouteType{route}
+}
+
+// PrimaryRouteForEvent returns the preferred canonical route for an event type.
+func PrimaryRouteForEvent(evt EventType) (RouteType, bool) {
+	route, ok := eventTypeToRoutes[evt]
+	return route, ok
+}
 
 // RawInstance is a pre-canonicalized payload produced by upstream adapters.
 type RawInstance map[string]any
@@ -61,25 +131,6 @@ type Unsubscribe struct {
 	RequestID string    `json:"requestId,omitempty"`
 }
 
-// Validate ensures the canonical type adheres to spec.
-func (c RouteType) Validate() error {
-	if c == "" {
-		return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type required"))
-	}
-	parts := strings.Split(string(c), ".")
-	for _, part := range parts {
-		if part == "" {
-			return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("empty canonical type segment"))
-		}
-		for _, r := range part {
-			if r < 'A' || r > 'Z' && (r < '0' || r > '9') {
-				return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type must be uppercase alphanumeric"))
-			}
-		}
-	}
-	return nil
-}
-
 // ValidateInstrument verifies the canonical instrument formatting.
 func ValidateInstrument(symbol string) error {
 	symbol = strings.TrimSpace(symbol)
@@ -91,8 +142,8 @@ func ValidateInstrument(symbol string) error {
 }
 
 // BuildEventKey constructs the default idempotency key for an event.
-func BuildEventKey(instr string, typ RouteType, seq uint64) string {
-	return fmt.Sprintf("%s:%s:%d", strings.TrimSpace(instr), string(typ), seq)
+func BuildEventKey(instr string, route RouteType, seq uint64) string {
+	return fmt.Sprintf("%s:%s:%d", strings.TrimSpace(instr), NormalizeRouteType(route), seq)
 }
 
 // Event represents a canonical event emitted by providers or dispatcher.

@@ -9,35 +9,43 @@ import (
 // Following OpenTelemetry naming conventions: namespace.attribute_name
 
 const (
-	// Event attributes
-	AttrEventType   = attribute.Key("event.type")
-	AttrProvider    = attribute.Key("provider")
-	AttrSymbol      = attribute.Key("symbol")
+	// AttrEventType is the attribute key for event type labels.
+	AttrEventType = attribute.Key("event.type")
+	// AttrProvider is the attribute key for provider identifiers.
+	AttrProvider = attribute.Key("provider")
+	// AttrSymbol is the attribute key for instrument symbols.
+	AttrSymbol = attribute.Key("symbol")
+	// AttrMessageType is the attribute key for provider message kinds.
 	AttrMessageType = attribute.Key("message.type")
-	AttrCurrency    = attribute.Key("currency")
-	AttrOrderSide   = attribute.Key("order.side")
-	AttrOrderType   = attribute.Key("order.type")
-	AttrOrderTIF    = attribute.Key("order.tif")
-	AttrOrderState  = attribute.Key("order.state")
-
-	// Pool attributes
-	AttrPoolName   = attribute.Key("pool.name")
+	// AttrCurrency is the attribute key for currency codes.
+	AttrCurrency = attribute.Key("currency")
+	// AttrOrderSide is the attribute key for order side labels.
+	AttrOrderSide = attribute.Key("order.side")
+	// AttrOrderType is the attribute key for order type labels.
+	AttrOrderType = attribute.Key("order.type")
+	// AttrOrderTIF is the attribute key for time-in-force descriptors.
+	AttrOrderTIF = attribute.Key("order.tif")
+	// AttrOrderState is the attribute key for order state labels.
+	AttrOrderState = attribute.Key("order.state")
+	// AttrPoolName is the attribute key for pool identifiers.
+	AttrPoolName = attribute.Key("pool.name")
+	// AttrObjectType is the attribute key for pooled object types.
 	AttrObjectType = attribute.Key("object.type")
-	AttrOperation  = attribute.Key("operation")
-	AttrResult     = attribute.Key("result")
-
-	// Environment attribute
+	// AttrOperation is the attribute key for operation labels.
+	AttrOperation = attribute.Key("operation")
+	// AttrResult is the attribute key for operation result labels.
+	AttrResult = attribute.Key("result")
+	// AttrEnvironment is the attribute key for environment identifiers.
 	AttrEnvironment = attribute.Key("environment")
-
-	// Error attributes
+	// AttrErrorType is the attribute key for error type labels.
 	AttrErrorType = attribute.Key("error.type")
-	AttrReason    = attribute.Key("reason")
-
-	// Control bus attributes
+	// AttrReason is the attribute key for error reasons.
+	AttrReason = attribute.Key("reason")
+	// AttrCommandType is the attribute key for control bus command types.
 	AttrCommandType = attribute.Key("command.type")
-	AttrStatus      = attribute.Key("status")
-
-	// Connection attributes
+	// AttrStatus is the attribute key for command status values.
+	AttrStatus = attribute.Key("status")
+	// AttrConnectionState is the attribute key for connection state labels.
 	AttrConnectionState = attribute.Key("connection.state")
 )
 

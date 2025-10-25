@@ -34,16 +34,16 @@ type MarketMaking struct {
 	lastQuotePrice   atomic.Value // float64
 }
 
-var marketMakingSubscribedEvents = []schema.RouteType{
-	schema.RouteTypeTrade,
-	schema.RouteTypeTicker,
-	schema.RouteTypeExecutionReport,
-	schema.RouteTypeAccountBalance,
+var marketMakingSubscribedEvents = []schema.EventType{
+	schema.EventTypeTrade,
+	schema.EventTypeTicker,
+	schema.EventTypeExecReport,
+	schema.EventTypeBalanceUpdate,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *MarketMaking) SubscribedEvents() []schema.RouteType {
-	return append([]schema.RouteType(nil), marketMakingSubscribedEvents...)
+func (s *MarketMaking) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), marketMakingSubscribedEvents...)
 }
 
 // MarketState represents the current market snapshot.

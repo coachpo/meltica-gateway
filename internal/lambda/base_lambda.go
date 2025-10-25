@@ -38,8 +38,8 @@ type TradingStrategy interface {
 	OnOrderAcknowledged(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
 	OnOrderExpired(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
 
-	// SubscribedEvents declares the canonical event types the strategy consumes.
-	SubscribedEvents() []schema.RouteType
+	// SubscribedEvents declares the event types the strategy consumes.
+	SubscribedEvents() []schema.EventType
 }
 
 // MarketState represents the current market state for a symbol.

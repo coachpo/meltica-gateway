@@ -72,7 +72,7 @@ func TestSubscribe(t *testing.T) {
 		t.Error("expected non-empty RequestID")
 	}
 
-	// Test type validation through RouteType
+	// Test type validation through canonical route validation
 	err := sub.Type.Validate()
 	if err != nil {
 		t.Errorf("Type.Validate failed: %v", err)
@@ -99,7 +99,7 @@ func TestUnsubscribe(t *testing.T) {
 		t.Error("expected non-empty Type")
 	}
 
-	// Test type validation through RouteType
+	// Test type validation through canonical route validation
 	err := unsub.Type.Validate()
 	if err != nil {
 		t.Errorf("Type.Validate failed: %v", err)
