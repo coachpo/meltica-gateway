@@ -4,14 +4,12 @@
 
 Meltica is a Go 1.25 gateway for aggregating exchange market data, routing events through deterministic pipelines, and running lightweight trading lambdas. The codebase favors zero-copy transports, pooled objects, and explicit observability hooks.
 
-> The current pooling/network stack shipped in v2 introduces new requirements for adapters and telemetry exporters. Review [`MIGRATION.md`](MIGRATION.md) before upgrading existing deployments.
-
 ## Supported Providers
 
-| Provider | Capabilities | Notes |
-|----------|--------------|-------|
-| Fake (synthetic) | Spot-style ticks, trades, book snapshots, balances | Ships with the repo for perf, regression, and contract testing.
-| Binance (aliases) | Configuration scaffolding in `config/app.example.yaml` | The canonical adapter lives in a private module; aliases show how to register real venues when available.
+| Provider          | Capabilities                                           | Notes                                                                                                     |
+| ----------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Fake (synthetic)  | Spot-style ticks, trades, book snapshots, balances     | Ships with the repo for perf, regression, and contract testing.                                           |
+| Binance (aliases) | Configuration scaffolding in `config/app.example.yaml` | The canonical adapter lives in a private module; aliases show how to register real venues when available. |
 
 ## Key Features
 
@@ -60,28 +58,27 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
 
 ## Development Workflow
 
-| Command | Purpose |
-|---------|---------|
-| `make build` | Compile all packages into `bin/` for local smoke tests.
-| `make run` | Execute the gateway with the current configuration.
-| `make test` | Run `go test ./... -race -count=1 -timeout=30s` across the module.
-| `make lint` | Execute `golangci-lint` with `.golangci.yml`.
-| `make coverage` | Enforce the ≥70% TS-01 coverage bar and emit `coverage.out`.
-| `make contract-ws-routing` | Run the focused contract suite in `tests/contract/ws-routing`.
-| `make bench` | Launch benchmark runs for hot paths.
+| Command                    | Purpose                                                            |
+| -------------------------- | ------------------------------------------------------------------ |
+| `make build`               | Compile all packages into `bin/` for local smoke tests.            |
+| `make run`                 | Execute the gateway with the current configuration.                |
+| `make test`                | Run `go test ./... -race -count=1 -timeout=30s` across the module. |
+| `make lint`                | Execute `golangci-lint` with `.golangci.yml`.                      |
+| `make coverage`            | Enforce the ≥70% TS-01 coverage bar and emit `coverage.out`.       |
+| `make contract-ws-routing` | Run the focused contract suite in `tests/contract/ws-routing`.     |
+| `make bench`               | Launch benchmark runs for hot paths.                               |
 
 ## Observability & Control References
 
 - [`docs/lambdas-api.md`](docs/lambdas-api.md): REST contract for lifecycle operations.
 - [`docs/dashboards/README.md`](docs/dashboards/README.md): How to import/update Grafana dashboards.
 - [`deployments/telemetry/PROMETHEUS_SETUP.md`](deployments/telemetry/PROMETHEUS_SETUP.md): Collector wiring instructions.
-- [`TELEMETRY_POINTS.md`](TELEMETRY_POINTS.md): Enumerates emitted metrics/traces and the packages that own them.
 
 ## Contributor & Process Docs
 
-- [`AGENTS.md`](AGENTS.md): Contributor guidelines.
-- [`MIGRATION.md`](MIGRATION.md): Adapter and performance migration notes.
-- [`GEMINI.md`](GEMINI.md): Additional context for AI agents working inside the repo.
+- [`AGENTS.md`](AGENTS.md): Contributor guidelines and coding conventions.
+- [`GEMINI.md`](GEMINI.md): Additional context for Gemini AI agents working inside the repo.
+- [`CLAUDE.md`](CLAUDE.md): Additional context for Claude AI agents working inside the repo.
 
 ## License
 
