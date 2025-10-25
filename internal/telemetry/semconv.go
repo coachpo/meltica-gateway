@@ -9,43 +9,43 @@ import (
 // Following OpenTelemetry naming conventions: namespace.attribute_name
 
 const (
-	// AttrEventType is the attribute key for event type labels.
+	// AttrEventType annotates counters/histograms with the canonical Meltica event classification (e.g. Trade, Ticker).
 	AttrEventType = attribute.Key("event.type")
-	// AttrProvider is the attribute key for provider identifiers.
+	// AttrProvider identifies which upstream venue or adapter produced the signal.
 	AttrProvider = attribute.Key("provider")
-	// AttrSymbol is the attribute key for instrument symbols.
+	// AttrSymbol captures the tradable instrument symbol (e.g. BTC-USDT).
 	AttrSymbol = attribute.Key("symbol")
-	// AttrMessageType is the attribute key for provider message kinds.
+	// AttrMessageType differentiates provider-specific payload classes inside a single transport stream.
 	AttrMessageType = attribute.Key("message.type")
-	// AttrCurrency is the attribute key for currency codes.
+	// AttrCurrency stores ISO-like currency codes for balance metrics.
 	AttrCurrency = attribute.Key("currency")
-	// AttrOrderSide is the attribute key for order side labels.
+	// AttrOrderSide labels order telemetry with Buy/Sell intent.
 	AttrOrderSide = attribute.Key("order.side")
-	// AttrOrderType is the attribute key for order type labels.
+	// AttrOrderType distinguishes limit vs market orders in execution metrics.
 	AttrOrderType = attribute.Key("order.type")
-	// AttrOrderTIF is the attribute key for time-in-force descriptors.
+	// AttrOrderTIF records time-in-force hints (GTC, IOC, etc.) for order analytics.
 	AttrOrderTIF = attribute.Key("order.tif")
-	// AttrOrderState is the attribute key for order state labels.
+	// AttrOrderState captures the execution lifecycle state reported (ACK, FILLED, REJECTED, ...).
 	AttrOrderState = attribute.Key("order.state")
-	// AttrPoolName is the attribute key for pool identifiers.
+	// AttrPoolName labels pooled object metrics by logical pool (Event, OrderRequest, ...).
 	AttrPoolName = attribute.Key("pool.name")
-	// AttrObjectType is the attribute key for pooled object types.
+	// AttrObjectType captures the Go type being managed inside a pool.
 	AttrObjectType = attribute.Key("object.type")
-	// AttrOperation is the attribute key for operation labels.
+	// AttrOperation differentiates specific provider operations (e.g. venue_link, venue_error).
 	AttrOperation = attribute.Key("operation")
-	// AttrResult is the attribute key for operation result labels.
+	// AttrResult records the outcome of an operation (success, error class, etc.).
 	AttrResult = attribute.Key("result")
-	// AttrEnvironment is the attribute key for environment identifiers.
+	// AttrEnvironment specifies the deployment environment (dev/staging/prod) for every metric.
 	AttrEnvironment = attribute.Key("environment")
-	// AttrErrorType is the attribute key for error type labels.
+	// AttrErrorType categorizes failures by canonical error family.
 	AttrErrorType = attribute.Key("error.type")
-	// AttrReason is the attribute key for error reasons.
+	// AttrReason provides additional free-form context for errors/rejections.
 	AttrReason = attribute.Key("reason")
-	// AttrCommandType is the attribute key for control bus command types.
+	// AttrCommandType indicates which control-plane command (SUBSCRIBE/UNSUBSCRIBE/etc.) was processed.
 	AttrCommandType = attribute.Key("command.type")
-	// AttrStatus is the attribute key for command status values.
+	// AttrStatus communicates the success/failure state of a control command.
 	AttrStatus = attribute.Key("status")
-	// AttrConnectionState is the attribute key for connection state labels.
+	// AttrConnectionState labels connection lifecycle signals (connected, reconnecting, ...).
 	AttrConnectionState = attribute.Key("connection.state")
 )
 
