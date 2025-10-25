@@ -542,6 +542,126 @@
       ],
       "title": "Available Balance by Currency",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "uid": "$datasource"
+      },
+      "description": "Orders by side (buy/sell)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "id": 116,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(meltica_provider_fake_orders_received{environment=\"$environment\"}[1m])) by (order_side)",
+          "legendFormat": "{{order_side}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Orders by Side",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "uid": "$datasource"
+      },
+      "description": "Orders by type (limit/market)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "id": 117,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(meltica_provider_fake_orders_received{environment=\"$environment\"}[1m])) by (order_type)",
+          "legendFormat": "{{order_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Orders by Type",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "uid": "$datasource"
+      },
+      "description": "Rejections by order state",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "id": 118,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(meltica_provider_fake_orders_rejected{environment=\"$environment\"}[5m])) by (order_state)",
+          "legendFormat": "{{order_state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Rejections by State",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -596,5 +716,5 @@
   "timezone": "browser",
   "title": "Fake Provider Overview",
   "uid": "fake-provider-overview",
-  "version": 1
+  "version": 2
 }
