@@ -3,6 +3,8 @@ package dispatcher
 import (
 	"testing"
 	"time"
+
+	"github.com/coachpo/meltica/internal/schema"
 )
 
 // Test Table helper functions
@@ -36,7 +38,7 @@ func TestTableRemoveRoute(t *testing.T) {
 	// Add a route
 	route := Route{
 		Provider: "fake",
-		Type:     "TRADE",
+		Type:     schema.RouteTypeTrade,
 		WSTopics: []string{"trade@btcusd"},
 	}
 
@@ -46,16 +48,16 @@ func TestTableRemoveRoute(t *testing.T) {
 	}
 
 	// Verify it exists
-	_, ok := table.Lookup("fake", "TRADE")
+	_, ok := table.Lookup("fake", schema.RouteTypeTrade)
 	if !ok {
 		t.Fatal("expected route to exist")
 	}
 
 	// Remove it
-	table.Remove("fake", "TRADE")
+	table.Remove("fake", schema.RouteTypeTrade)
 
 	// Verify it's gone
-	_, ok = table.Lookup("fake", "TRADE")
+	_, ok = table.Lookup("fake", schema.RouteTypeTrade)
 	if ok {
 		t.Error("expected route to be removed")
 	}
@@ -65,7 +67,7 @@ func TestTableRemoveNonExistent(t *testing.T) {
 	table := NewTable()
 
 	// Removing non-existent route should not panic
-	table.Remove("fake", "NON_EXISTENT")
+	table.Remove("fake", schema.RouteType("NON_EXISTENT"))
 }
 
 func TestValidateRestFn(t *testing.T) {
@@ -137,7 +139,7 @@ func TestRouteWithRestFns(t *testing.T) {
 
 	route := Route{
 		Provider: "fake",
-		Type:     "TICKER",
+		Type:     schema.RouteTypeTicker,
 		WSTopics: []string{"ticker@btcusd"},
 		RestFns: []RestFn{
 			{
@@ -154,7 +156,7 @@ func TestRouteWithRestFns(t *testing.T) {
 		t.Fatalf("Upsert with RestFns failed: %v", err)
 	}
 
-	retrieved, ok := table.Lookup("fake", "TICKER")
+	retrieved, ok := table.Lookup("fake", schema.RouteTypeTicker)
 	if !ok {
 		t.Fatal("expected to find route")
 	}
@@ -173,7 +175,7 @@ func TestRouteWithInvalidRestFn(t *testing.T) {
 
 	route := Route{
 		Provider: "fake",
-		Type:     "TICKER",
+		Type:     schema.RouteTypeTicker,
 		WSTopics: []string{"ticker@btcusd"},
 		RestFns: []RestFn{
 			{
@@ -250,7 +252,7 @@ func TestRouteWithInvalidFilter(t *testing.T) {
 
 	route := Route{
 		Provider: "fake",
-		Type:     "TICKER",
+		Type:     schema.RouteTypeTicker,
 		WSTopics: []string{"ticker@btcusd"},
 		Filters: []FilterRule{
 			{

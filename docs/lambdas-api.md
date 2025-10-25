@@ -1,75 +1,111 @@
-# Lambda Lifecycle HTTP API
+# Strategy Management HTTP API
 
-The gateway exposes a REST surface under `/lambdas` for managing trading strategies at runtime. The handler is mounted alongside the existing control endpoints on port `:8880`.
+The gateway exposes REST endpoints for strategy discovery and instance lifecycle management. Handlers are mounted alongside control endpoints on port `:8880`.
 
-## Collection Endpoints
+## Strategy Catalog
 
-### `GET /lambdas`
-Returns the currently running lambda specifications.
+### `GET /strategies`
+Returns available strategy definitions and their configurable fields.
 
 ```json
 {
-  "lambdas": [
+  "strategies": [
+    {
+      "name": "logging",
+      "displayName": "Logging",
+      "description": "Emits detailed logs for all inbound events.",
+      "config": [
+        { "name": "logger_prefix", "type": "string", "description": "Prefix prepended to each log message", "default": "[Logging] ", "required": false }
+      ],
+      "events": ["Trade", "Ticker", "BookSnapshot", "ExecReport", "KlineSummary", "BalanceUpdate"]
+    }
+  ]
+}
+```
+
+### `GET /strategies/{name}`
+Returns the metadata for a single strategy.
+
+## Strategy Instances
+
+Instance resources are exposed under `/strategy-instances`.
+
+### `GET /strategy-instances`
+Lists all known instances (running or stopped).
+
+```json
+{
+  "instances": [
     {
       "id": "lambda-fake-btc",
       "provider": "fake",
       "symbol": "BTC-USDT",
       "strategy": "noop",
       "config": {},
-      "auto_start": true
+      "autoStart": true,
+      "running": true
     }
   ]
 }
 ```
 
-### `POST /lambdas`
-Creates and starts a new lambda instance.
+### `POST /strategy-instances`
+Creates and starts a new instance.
 
-**Request**
+Request body (minimum fields):
 ```json
 {
   "id": "lambda-fake-eth",
   "provider": "fake",
   "symbol": "ETH-USDT",
   "strategy": "logging",
-  "config": {
-    "logger_prefix": "[eth-strat] "
-  }
+  "config": { "logger_prefix": "[eth-strat] " }
 }
 ```
 
-**Responses**
-- `201 Created` with the persisted spec on success.
-- `400 Bad Request` if validation fails or the provider/strategy is unknown.
+Responses:
+- `201 Created` with the created instance snapshot on success.
+- `400 Bad Request` if validation fails or the provider/strategy is invalid/unavailable.
 
-> `auto_start` is managed by the application; omit or set to `false` when creating lambdas at runtime.
+Note: `autoStart` in the request is ignored by the server; runtime-created instances are started immediately and returned as a snapshot.
 
-## Item Endpoints
+## Instance Item Endpoints
 
-All item endpoints operate on `/lambdas/{id}`.
+All item endpoints operate on `/strategy-instances/{id}`.
 
-### `GET /lambdas/{id}`
-Retrieves the stored specification for a running lambda.
+### `GET /strategy-instances/{id}`
+Returns the instance snapshot, or `404` if not found.
 
-### `PUT /lambdas/{id}`
-Replaces the configuration for the lambda. The body mirrors the `POST` payload. The manager restarts the lambda with the new settings.
+### `PUT /strategy-instances/{id}`
+Replaces the configuration and restarts the instance. Provider, symbol, and strategy are immutable and cannot be changed; only `config` can be updated.
 
-### `DELETE /lambdas/{id}`
-Stops the lambda and removes it from the manager.
+### `DELETE /strategy-instances/{id}`
+Stops the instance (if running) and removes it from the manager. Returns:
+
+```json
+{ "status": "removed", "id": "<id>" }
+```
+
+### Actions
+
+Action endpoints accept `POST` only:
+- `POST /strategy-instances/{id}/start` – starts a stopped instance (`409` if already running)
+- `POST /strategy-instances/{id}/stop` – stops a running instance (`409` if not running)
 
 ## Error Model
 
-Errors are returned in a consistent JSON envelope:
+Errors use a consistent JSON envelope:
 
 ```json
-{
-  "status": "error",
-  "error": "lambda not found"
-}
+{ "status": "error", "error": "strategy instance not found" }
 ```
 
-HTTP status codes communicate the class of error (`400` validation, `404` missing, `409` conflicts).
+Status codes:
+- `400` validation or generic errors
+- `404` resource not found
+- `409` conflict (exists, already running, not running)
+- `405` method not allowed
 
 ## Authentication & Transport
 
-The API is served over HTTP without authentication by default. Deployments should place the gateway behind an ingress or service mesh that enforces TLS and access control as needed.
+The API is served over HTTP without authentication by default. Place the gateway behind an ingress or service mesh that enforces TLS and access control as needed.

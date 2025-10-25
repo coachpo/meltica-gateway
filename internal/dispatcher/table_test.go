@@ -25,7 +25,7 @@ func TestTableUpsert(t *testing.T) {
 
 	route := Route{
 		Provider: "fake",
-		Type:     "TICKER",
+		Type:     schema.RouteTypeTicker,
 		WSTopics: []string{"ticker@btcusd"},
 		Filters:  []FilterRule{{Field: "instrument", Op: "eq", Value: "BTC-USD"}},
 	}
@@ -35,7 +35,7 @@ func TestTableUpsert(t *testing.T) {
 		t.Fatalf("Upsert() error = %v", err)
 	}
 
-	retrieved, ok := table.Lookup("fake", "TICKER")
+	retrieved, ok := table.Lookup("fake", schema.RouteTypeTicker)
 	if !ok {
 		t.Fatal("expected to find route")
 	}
@@ -50,7 +50,7 @@ func TestTableUpsertInvalidType(t *testing.T) {
 
 	route := Route{
 		Provider: "fake",
-		Type:     "", // Invalid
+		Type:     schema.RouteType(""), // Invalid
 	}
 
 	err := table.Upsert(route)
@@ -64,14 +64,14 @@ func TestTableRemove(t *testing.T) {
 
 	route := Route{
 		Provider: "fake",
-		Type:     "TICKER",
+		Type:     schema.RouteTypeTicker,
 	}
 
 	_ = table.Upsert(route)
 
-	table.Remove("fake", "TICKER")
+	table.Remove("fake", schema.RouteTypeTicker)
 
-	_, ok := table.Lookup("fake", "TICKER")
+	_, ok := table.Lookup("fake", schema.RouteTypeTicker)
 	if ok {
 		t.Error("expected route to be removed")
 	}
@@ -80,7 +80,7 @@ func TestTableRemove(t *testing.T) {
 func TestTableLookup(t *testing.T) {
 	table := NewTable()
 
-	_, ok := table.Lookup("fake", "NONEXISTENT")
+	_, ok := table.Lookup("fake", schema.RouteType("NONEXISTENT"))
 	if ok {
 		t.Error("expected lookup to fail for nonexistent route")
 	}
@@ -103,8 +103,8 @@ func TestTableVersion(t *testing.T) {
 func TestTableRoutes(t *testing.T) {
 	table := NewTable()
 
-	route1 := Route{Provider: "fake", Type: "TICKER"}
-	route2 := Route{Provider: "binance", Type: "TRADE"}
+	route1 := Route{Provider: "fake", Type: schema.RouteTypeTicker}
+	route2 := Route{Provider: "binance", Type: schema.RouteTypeTrade}
 
 	_ = table.Upsert(route1)
 	_ = table.Upsert(route2)
@@ -118,7 +118,7 @@ func TestTableRoutes(t *testing.T) {
 
 func TestRouteMatch(t *testing.T) {
 	route := Route{
-		Type: "TICKER",
+		Type: schema.RouteTypeTicker,
 		Filters: []FilterRule{
 			{Field: "instrument", Op: "eq", Value: "BTC-USD"},
 		},
@@ -223,7 +223,7 @@ func TestRestFnValidation(t *testing.T) {
 	table := NewTable()
 
 	route := Route{
-		Type: "TICKER",
+		Type: schema.RouteTypeTicker,
 		RestFns: []RestFn{
 			{
 				Name:     "",

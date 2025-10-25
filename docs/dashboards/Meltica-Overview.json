@@ -392,7 +392,7 @@
       },
       "targets": [
         {
-          "expr": "meltica_dispatcher_routing_version{environment=\"$environment\"}",
+          "expr": "meltica_dispatcher_routing_revision{environment=\"$environment\"}",
           "refId": "A"
         }
       ],
@@ -1566,5 +1566,5 @@
   "timezone": "browser",
   "title": "Meltica-Overview",
   "uid": "meltica-overview",
-  "version": 1
+  "version": 2
 }

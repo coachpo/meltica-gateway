@@ -30,14 +30,15 @@ type MeanReversion struct {
 	hasPosition bool
 }
 
-var meanReversionSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("EXECUTION.REPORT"),
+var meanReversionSubscribedEvents = []schema.EventType{
+	schema.EventTypeTrade,
+	schema.EventTypeExecReport,
+	schema.EventTypeBalanceUpdate,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *MeanReversion) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), meanReversionSubscribedEvents...)
+func (s *MeanReversion) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), meanReversionSubscribedEvents...)
 }
 
 // OnTrade analyzes price deviation from moving average.
@@ -148,10 +149,12 @@ func (s *MeanReversion) OnOrderExpired(_ context.Context, _ *schema.Event, _ sch
 func (s *MeanReversion) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {
 }
 
-// OnControlAck tracks control acknowledgments (no-op for this strategy).
-func (s *MeanReversion) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {
+// OnInstrumentUpdate is a no-op for this strategy.
+func (s *MeanReversion) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
 }
 
-// OnControlResult tracks control results (no-op for this strategy).
-func (s *MeanReversion) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
+// OnBalanceUpdate logs balance updates for visibility.
+func (s *MeanReversion) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.Lambda.Logger().Printf("[MEAN_REV] Balance update: currency=%s total=%s available=%s",
+		payload.Currency, payload.Total, payload.Available)
 }

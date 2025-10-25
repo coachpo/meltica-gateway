@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +25,8 @@ type TradingStrategy interface {
 	OnTicker(ctx context.Context, evt *schema.Event, payload schema.TickerPayload)
 	OnBookSnapshot(ctx context.Context, evt *schema.Event, payload schema.BookSnapshotPayload)
 	OnKlineSummary(ctx context.Context, evt *schema.Event, payload schema.KlineSummaryPayload)
+	OnInstrumentUpdate(ctx context.Context, evt *schema.Event, payload schema.InstrumentUpdatePayload)
+	OnBalanceUpdate(ctx context.Context, evt *schema.Event, payload schema.BalanceUpdatePayload)
 
 	// Order lifecycle callbacks (trading decisions)
 	OnOrderFilled(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
@@ -35,12 +38,8 @@ type TradingStrategy interface {
 	OnOrderAcknowledged(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
 	OnOrderExpired(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
 
-	// Control plane callbacks (for monitoring, metrics, operational decisions)
-	OnControlAck(ctx context.Context, evt *schema.Event, payload schema.ControlAckPayload)
-	OnControlResult(ctx context.Context, evt *schema.Event, payload schema.ControlResultPayload)
-
-	// SubscribedEvents declares the canonical event types the strategy consumes.
-	SubscribedEvents() []schema.CanonicalType
+	// SubscribedEvents declares the event types the strategy consumes.
+	SubscribedEvents() []schema.EventType
 }
 
 // MarketState represents the current market state for a symbol.
@@ -63,6 +62,8 @@ type BaseLambda struct {
 	pools          *pool.PoolManager
 	logger         *log.Logger
 	strategy       TradingStrategy
+	baseCurrency   string
+	quoteCurrency  string
 
 	// Market state (thread-safe via atomic)
 	lastPrice atomic.Value // float64
@@ -99,11 +100,20 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 		pools:          pools,
 		logger:         log.New(os.Stdout, "", log.LstdFlags),
 		strategy:       strategy,
+		baseCurrency:   "",
+		quoteCurrency:  "",
 		lastPrice:      atomic.Value{},
 		bidPrice:       atomic.Value{},
 		askPrice:       atomic.Value{},
 		tradingActive:  atomic.Bool{},
 		orderCount:     atomic.Int64{},
+	}
+
+	if base, quote, err := schema.InstrumentCurrencies(config.Symbol); err == nil {
+		lambda.baseCurrency = strings.ToUpper(base)
+		lambda.quoteCurrency = strings.ToUpper(quote)
+	} else if config.Symbol != "" {
+		lambda.logger.Printf("[%s] unable to derive currencies from symbol %q: %v", lambda.id, config.Symbol, err)
 	}
 
 	lambda.lastPrice.Store(float64(0))
@@ -128,6 +138,8 @@ func (l *BaseLambda) Start(ctx context.Context) (<-chan error, error) {
 		schema.EventTypeTicker,
 		schema.EventTypeBookSnapshot,
 		schema.EventTypeExecReport,
+		schema.EventTypeInstrumentUpdate,
+		schema.EventTypeBalanceUpdate,
 	}
 
 	errs := make(chan error, len(eventTypes))
@@ -191,8 +203,16 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 
 	defer l.recycleEvent(evt)
 
-	// Filter by symbol and provider
-	if !l.matchesSymbol(evt) || !l.matchesProvider(evt) {
+	// Filter by provider and symbol
+	if !l.matchesProvider(evt) {
+		return
+	}
+
+	if typ == schema.EventTypeBalanceUpdate {
+		if !l.matchesBalanceCurrency(evt.Symbol) {
+			return
+		}
+	} else if !l.matchesSymbol(evt) {
 		return
 	}
 
@@ -207,10 +227,10 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 		l.handleExecReport(ctx, evt)
 	case schema.EventTypeKlineSummary:
 		l.handleKlineSummary(ctx, evt)
-	case schema.EventTypeControlAck:
-		l.handleControlAck(ctx, evt)
-	case schema.EventTypeControlResult:
-		l.handleControlResult(ctx, evt)
+	case schema.EventTypeInstrumentUpdate:
+		l.handleInstrumentUpdate(ctx, evt)
+	case schema.EventTypeBalanceUpdate:
+		l.handleBalanceUpdate(ctx, evt)
 	}
 }
 
@@ -316,6 +336,17 @@ func (l *BaseLambda) handleExecReport(ctx context.Context, evt *schema.Event) {
 	}
 }
 
+func (l *BaseLambda) handleInstrumentUpdate(ctx context.Context, evt *schema.Event) {
+	if l.strategy == nil {
+		return
+	}
+	payload, ok := evt.Payload.(schema.InstrumentUpdatePayload)
+	if !ok {
+		return
+	}
+	l.strategy.OnInstrumentUpdate(ctx, evt, payload)
+}
+
 func (l *BaseLambda) handleKlineSummary(ctx context.Context, evt *schema.Event) {
 	payload, ok := evt.Payload.(schema.KlineSummaryPayload)
 	if !ok {
@@ -327,39 +358,15 @@ func (l *BaseLambda) handleKlineSummary(ctx context.Context, evt *schema.Event) 
 	}
 }
 
-func (l *BaseLambda) handleControlAck(ctx context.Context, evt *schema.Event) {
-	payload, ok := evt.Payload.(schema.ControlAckPayload)
+func (l *BaseLambda) handleBalanceUpdate(ctx context.Context, evt *schema.Event) {
+	if l.strategy == nil {
+		return
+	}
+	payload, ok := evt.Payload.(schema.BalanceUpdatePayload)
 	if !ok {
 		return
 	}
-
-	// Log at base level for infrastructure monitoring
-	if payload.Success {
-		l.logger.Printf("[%s] Control ACK: command=%s consumer=%s", l.id, payload.CommandType, payload.ConsumerID)
-	} else {
-		l.logger.Printf("[%s] Control ACK FAILED: command=%s consumer=%s error=%s",
-			l.id, payload.CommandType, payload.ConsumerID, payload.ErrorMessage)
-	}
-
-	// Delegate to strategy for operational decisions
-	if l.strategy != nil {
-		l.strategy.OnControlAck(ctx, evt, payload)
-	}
-}
-
-func (l *BaseLambda) handleControlResult(ctx context.Context, evt *schema.Event) {
-	payload, ok := evt.Payload.(schema.ControlResultPayload)
-	if !ok {
-		return
-	}
-
-	// Log at base level for infrastructure monitoring
-	l.logger.Printf("[%s] Control RESULT: command=%s consumer=%s", l.id, payload.CommandType, payload.ConsumerID)
-
-	// Delegate to strategy for operational decisions
-	if l.strategy != nil {
-		l.strategy.OnControlResult(ctx, evt, payload)
-	}
+	l.strategy.OnBalanceUpdate(ctx, evt, payload)
 }
 
 // SubmitOrder submits an order request to the provider.
@@ -553,4 +560,18 @@ func (l *BaseLambda) recycleEvent(evt *schema.Event) {
 	if l.pools != nil {
 		l.pools.ReturnEventInst(evt)
 	}
+}
+
+func (l *BaseLambda) matchesBalanceCurrency(symbol string) bool {
+	currency := strings.ToUpper(strings.TrimSpace(symbol))
+	if currency == "" {
+		return false
+	}
+	if l.baseCurrency != "" && currency == l.baseCurrency {
+		return true
+	}
+	if l.quoteCurrency != "" && currency == l.quoteCurrency {
+		return true
+	}
+	return false
 }

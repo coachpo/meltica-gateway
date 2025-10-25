@@ -25,17 +25,18 @@ const (
 )
 
 var (
-	delaySubscribedEvents = []schema.CanonicalType{
-		schema.CanonicalType("TRADE"),
-		schema.CanonicalType("TICKER"),
-		schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
+	delaySubscribedEvents = []schema.EventType{
+		schema.EventTypeTrade,
+		schema.EventTypeTicker,
+		schema.EventTypeBookSnapshot,
+		schema.EventTypeBalanceUpdate,
 	}
 	delayRandMu sync.Mutex
 )
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *Delay) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), delaySubscribedEvents...)
+func (s *Delay) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), delaySubscribedEvents...)
 }
 
 func (s *Delay) sleep() {
@@ -139,12 +140,12 @@ func (s *Delay) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.Klin
 	s.sleep()
 }
 
-// OnControlAck handles control acknowledgment events by adding a delay.
-func (s *Delay) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {
+// OnInstrumentUpdate handles instrument catalogue refreshes by adding a delay.
+func (s *Delay) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
 	s.sleep()
 }
 
-// OnControlResult handles control result events by adding a delay.
-func (s *Delay) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
+// OnBalanceUpdate handles balance updates by adding a delay.
+func (s *Delay) OnBalanceUpdate(_ context.Context, _ *schema.Event, _ schema.BalanceUpdatePayload) {
 	s.sleep()
 }

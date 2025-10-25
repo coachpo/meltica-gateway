@@ -34,15 +34,16 @@ type MarketMaking struct {
 	lastQuotePrice   atomic.Value // float64
 }
 
-var marketMakingSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("TICKER"),
-	schema.CanonicalType("EXECUTION.REPORT"),
+var marketMakingSubscribedEvents = []schema.EventType{
+	schema.EventTypeTrade,
+	schema.EventTypeTicker,
+	schema.EventTypeExecReport,
+	schema.EventTypeBalanceUpdate,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *MarketMaking) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), marketMakingSubscribedEvents...)
+func (s *MarketMaking) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), marketMakingSubscribedEvents...)
 }
 
 // MarketState represents the current market snapshot.
@@ -189,11 +190,14 @@ func (s *MarketMaking) OnOrderExpired(_ context.Context, _ *schema.Event, _ sche
 func (s *MarketMaking) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {
 }
 
-// OnControlAck tracks control acknowledgments (no-op for this strategy).
-func (s *MarketMaking) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {}
+// OnInstrumentUpdate is a no-op for this strategy.
+func (s *MarketMaking) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
 
-// OnControlResult tracks control results (no-op for this strategy).
-func (s *MarketMaking) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
+// OnBalanceUpdate logs balance changes for awareness.
+func (s *MarketMaking) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.Lambda.Logger().Printf("[MM] Balance update: currency=%s total=%s available=%s",
+		payload.Currency, payload.Total, payload.Available)
 }
 
 // ParseFloat safely parses a string to float64.

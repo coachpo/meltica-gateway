@@ -14,7 +14,7 @@ import (
 // Route captures dispatcher routing metadata for a canonical type.
 type Route struct {
 	Provider string
-	Type     schema.CanonicalType
+	Type     schema.RouteType
 	WSTopics []string
 	RestFns  []RestFn
 	Filters  []FilterRule
@@ -45,13 +45,13 @@ type Table struct {
 // RouteKey uniquely identifies a route dimension for a provider and canonical type.
 type RouteKey struct {
 	Provider string
-	Type     schema.CanonicalType
+	Type     schema.RouteType
 }
 
 func (k RouteKey) normalize() RouteKey {
 	return RouteKey{
 		Provider: strings.TrimSpace(strings.ToLower(k.Provider)),
-		Type:     k.Type,
+		Type:     schema.NormalizeRouteType(k.Type),
 	}
 }
 
@@ -67,6 +67,7 @@ func (t *Table) Upsert(route Route) error {
 	if err := route.Type.Validate(); err != nil {
 		return fmt.Errorf("validate route type: %w", err)
 	}
+	route.Type = schema.NormalizeRouteType(route.Type)
 	route.Provider = strings.TrimSpace(route.Provider)
 	if route.Provider == "" {
 		return fmt.Errorf("provider required")
@@ -91,7 +92,7 @@ func (t *Table) Upsert(route Route) error {
 }
 
 // Remove deletes the route if present.
-func (t *Table) Remove(provider string, typ schema.CanonicalType) {
+func (t *Table) Remove(provider string, typ schema.RouteType) {
 	key := RouteKey{Provider: provider, Type: typ}.normalize()
 	t.mu.Lock()
 	delete(t.routes, key)
@@ -99,7 +100,7 @@ func (t *Table) Remove(provider string, typ schema.CanonicalType) {
 }
 
 // Lookup returns the route if present.
-func (t *Table) Lookup(provider string, typ schema.CanonicalType) (Route, bool) {
+func (t *Table) Lookup(provider string, typ schema.RouteType) (Route, bool) {
 	key := RouteKey{Provider: provider, Type: typ}.normalize()
 	t.mu.RLock()
 	route, ok := t.routes[key]

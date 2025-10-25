@@ -32,14 +32,15 @@ type Momentum struct {
 	position      int32 // 1 = long, -1 = short, 0 = flat
 }
 
-var momentumSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("EXECUTION.REPORT"),
+var momentumSubscribedEvents = []schema.EventType{
+	schema.EventTypeTrade,
+	schema.EventTypeExecReport,
+	schema.EventTypeBalanceUpdate,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *Momentum) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), momentumSubscribedEvents...)
+func (s *Momentum) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), momentumSubscribedEvents...)
 }
 
 type pricePoint struct {
@@ -147,11 +148,14 @@ func (s *Momentum) OnOrderExpired(_ context.Context, _ *schema.Event, _ schema.E
 // OnKlineSummary tracks kline data (no-op for this strategy).
 func (s *Momentum) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {}
 
-// OnControlAck tracks control acknowledgments (no-op for this strategy).
-func (s *Momentum) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {}
+// OnInstrumentUpdate is a no-op for this strategy.
+func (s *Momentum) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
 
-// OnControlResult tracks control results (no-op for this strategy).
-func (s *Momentum) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {
+// OnBalanceUpdate logs balance updates to track available capital.
+func (s *Momentum) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.Lambda.Logger().Printf("[MOMENTUM] Balance update: currency=%s total=%s available=%s",
+		payload.Currency, payload.Total, payload.Available)
 }
 
 // calculateMomentum returns the price change ratio over the lookback period.

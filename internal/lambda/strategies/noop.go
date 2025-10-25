@@ -9,15 +9,16 @@ import (
 // NoOp is a strategy that does nothing - useful for monitoring-only lambdas.
 type NoOp struct{}
 
-var noopSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("TICKER"),
-	schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
+var noopSubscribedEvents = []schema.EventType{
+	schema.EventTypeTrade,
+	schema.EventTypeTicker,
+	schema.EventTypeBookSnapshot,
+	schema.EventTypeBalanceUpdate,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *NoOp) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), noopSubscribedEvents...)
+func (s *NoOp) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), noopSubscribedEvents...)
 }
 
 // OnTrade does nothing.
@@ -28,6 +29,13 @@ func (s *NoOp) OnTicker(_ context.Context, _ *schema.Event, _ schema.TickerPaylo
 
 // OnBookSnapshot does nothing.
 func (s *NoOp) OnBookSnapshot(_ context.Context, _ *schema.Event, _ schema.BookSnapshotPayload) {}
+
+// OnInstrumentUpdate does nothing.
+func (s *NoOp) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
+
+// OnBalanceUpdate does nothing.
+func (s *NoOp) OnBalanceUpdate(_ context.Context, _ *schema.Event, _ schema.BalanceUpdatePayload) {}
 
 // OnOrderFilled does nothing.
 func (s *NoOp) OnOrderFilled(_ context.Context, _ *schema.Event, _ schema.ExecReportPayload) {}
@@ -50,9 +58,3 @@ func (s *NoOp) OnOrderExpired(_ context.Context, _ *schema.Event, _ schema.ExecR
 
 // OnKlineSummary does nothing.
 func (s *NoOp) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {}
-
-// OnControlAck does nothing.
-func (s *NoOp) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {}
-
-// OnControlResult does nothing.
-func (s *NoOp) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {}

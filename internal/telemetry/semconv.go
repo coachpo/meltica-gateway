@@ -7,41 +7,56 @@ import (
 
 // Semantic convention attribute keys for Meltica-specific telemetry.
 // Following OpenTelemetry naming conventions: namespace.attribute_name
+
 const (
-	// Event attributes
-	AttrEventType   = attribute.Key("event.type")
-	AttrProvider    = attribute.Key("provider")
-	AttrSymbol      = attribute.Key("symbol")
+	// AttrEventType annotates counters/histograms with the canonical Meltica event classification (e.g. Trade, Ticker).
+	AttrEventType = attribute.Key("event.type")
+	// AttrProvider identifies which upstream venue or adapter produced the signal.
+	AttrProvider = attribute.Key("provider")
+	// AttrSymbol captures the tradable instrument symbol (e.g. BTC-USDT).
+	AttrSymbol = attribute.Key("symbol")
+	// AttrMessageType differentiates provider-specific payload classes inside a single transport stream.
 	AttrMessageType = attribute.Key("message.type")
-
-	// Pool attributes
-	AttrPoolName   = attribute.Key("pool.name")
+	// AttrCurrency stores ISO-like currency codes for balance metrics.
+	AttrCurrency = attribute.Key("currency")
+	// AttrOrderSide labels order telemetry with Buy/Sell intent.
+	AttrOrderSide = attribute.Key("order.side")
+	// AttrOrderType distinguishes limit vs market orders in execution metrics.
+	AttrOrderType = attribute.Key("order.type")
+	// AttrOrderTIF records time-in-force hints (GTC, IOC, etc.) for order analytics.
+	AttrOrderTIF = attribute.Key("order.tif")
+	// AttrOrderState captures the execution lifecycle state reported (ACK, FILLED, REJECTED, ...).
+	AttrOrderState = attribute.Key("order.state")
+	// AttrPoolName labels pooled object metrics by logical pool (Event, OrderRequest, ...).
+	AttrPoolName = attribute.Key("pool.name")
+	// AttrObjectType captures the Go type being managed inside a pool.
 	AttrObjectType = attribute.Key("object.type")
-	AttrOperation  = attribute.Key("operation")
-	AttrResult     = attribute.Key("result")
-
-	// Environment attribute
+	// AttrOperation differentiates specific provider operations (e.g. venue_link, venue_error).
+	AttrOperation = attribute.Key("operation")
+	// AttrResult records the outcome of an operation (success, error class, etc.).
+	AttrResult = attribute.Key("result")
+	// AttrEnvironment specifies the deployment environment (dev/staging/prod) for every metric.
 	AttrEnvironment = attribute.Key("environment")
-
-	// Error attributes
+	// AttrErrorType categorizes failures by canonical error family.
 	AttrErrorType = attribute.Key("error.type")
-	AttrReason    = attribute.Key("reason")
-
-	// Control bus attributes
+	// AttrReason provides additional free-form context for errors/rejections.
+	AttrReason = attribute.Key("reason")
+	// AttrCommandType indicates which control-plane command (SUBSCRIBE/UNSUBSCRIBE/etc.) was processed.
 	AttrCommandType = attribute.Key("command.type")
-	AttrStatus      = attribute.Key("status")
-
-	// Connection attributes
+	// AttrStatus communicates the success/failure state of a control command.
+	AttrStatus = attribute.Key("status")
+	// AttrConnectionState labels connection lifecycle signals (connected, reconnecting, ...).
 	AttrConnectionState = attribute.Key("connection.state")
 )
 
 // Event type values
 const (
-	EventTypeBookSnapshot = "book_snapshot"
-	EventTypeTrade        = "trade"
-	EventTypeTicker       = "ticker"
-	EventTypeKline        = "kline"
-	EventTypeExecReport   = "exec_report"
+	EventTypeBookSnapshot  = "book_snapshot"
+	EventTypeTrade         = "trade"
+	EventTypeTicker        = "ticker"
+	EventTypeKline         = "kline"
+	EventTypeExecReport    = "exec_report"
+	EventTypeBalanceUpdate = "balance_update"
 )
 
 // Provider values
@@ -60,6 +75,39 @@ func EventAttributes(environment, eventType, provider, symbol string) []attribut
 		AttrProvider.String(provider),
 		AttrSymbol.String(symbol),
 	}
+}
+
+// OrderAttributes returns attributes for order-related metrics.
+func OrderAttributes(environment, provider, symbol, side, orderType, tif string) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		AttrEnvironment.String(environment),
+		AttrProvider.String(provider),
+	}
+	if symbol != "" {
+		attrs = append(attrs, AttrSymbol.String(symbol))
+	}
+	if side != "" {
+		attrs = append(attrs, AttrOrderSide.String(side))
+	}
+	if orderType != "" {
+		attrs = append(attrs, AttrOrderType.String(orderType))
+	}
+	if tif != "" {
+		attrs = append(attrs, AttrOrderTIF.String(tif))
+	}
+	return attrs
+}
+
+// BalanceAttributes returns attributes for balance telemetry.
+func BalanceAttributes(environment, provider, currency string) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		AttrEnvironment.String(environment),
+		AttrProvider.String(provider),
+	}
+	if currency != "" {
+		attrs = append(attrs, AttrCurrency.String(currency))
+	}
+	return attrs
 }
 
 // PoolAttributes returns common attributes for pool metrics.

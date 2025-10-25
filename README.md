@@ -2,107 +2,84 @@
 
 **Package:** `github.com/coachpo/meltica`
 
-A high-performance cryptocurrency exchange adapter framework written in Go.
-
-> **Breaking Change (v2.0.0):** The legacy `market_data/framework/parser` package has been removed. Review the upgrade guide in [`BREAKING_CHANGES_v2.md`](./BREAKING_CHANGES_v2.md) before updating existing integrations.
+Meltica is a Go 1.25 gateway for aggregating exchange market data, routing events through deterministic pipelines, and running lightweight trading lambdas. The codebase favors zero-copy transports, pooled objects, and explicit observability hooks.
 
 ## Supported Providers
 
-| Exchange | Spot | Linear Futures | Inverse Futures | WebSocket Public | WebSocket Private |
-|----------|------|----------------|-----------------|------------------|-------------------|
-| Binance  | ✅   | ✅             | ✅              | ✅               | ✅                |
+| Provider          | Capabilities                                           | Notes                                                                                                     |
+| ----------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Fake (synthetic)  | Spot-style ticks, trades, book snapshots, balances     | Ships with the repo for perf, regression, and contract testing.                                           |
+| Binance (aliases) | Configuration scaffolding in `config/app.example.yaml` | The canonical adapter lives in a private module; aliases show how to register real venues when available. |
 
-**Legend:** ✅ = Fully Supported
+## Key Features
 
-## Architecture
+- Pooled `schema.Event`/`schema.OrderRequest` types managed by `internal/pool` to cap allocation churn.
+- In-memory fan-out bus (`internal/bus/eventbus`) feeding dispatcher routes and strategy instances.
+- Lambda runtime with a REST control plane (`docs/lambdas-api.md`) for creating, updating, and removing strategies on the fly.
+- OTLP-ready telemetry provider (`internal/telemetry`) plus curated Grafana dashboards under `docs/dashboards/` and metric definitions in `TELEMETRY_POINTS.md`.
+- Configuration-driven provider registry, making it easy to alias multiple venues to a single adapter implementation.
 
-The system follows a formal four-layer architecture:
+## Architecture Overview
 
-1. **Layer 1 – Connection** (`core/layers/connection.go`): WebSocket and REST transports; legacy provider shims have been removed in v2.
-2. **Layer 2 – Routing** (`core/layers/routing.go`): Normalizes transport payloads, manages subscription lifecycles, and translates API requests.
-3. **Layer 3 – Business** (`core/layers/business.go`): Coordinates domain workflows, maintains business state, and bridges routing outputs to filters.
-4. **Layer 4 – Filter** (`core/layers/filter.go`): Final pipeline stage that transforms events for downstream clients and handles cleanup.
+1. `cmd/gateway` is the entrypoint. It loads `config/app.yaml`, wires pools, the event bus, the dispatcher table, and HTTP control server, then blocks on OS signals.
+2. `internal/provider` hosts the registry/manager that instantiates adapters registered via `internal/adapters`. `internal/adapters/fake` is built-in; additional adapters register through the same hook.
+3. `internal/dispatcher` maintains routing tables that map provider events into downstream fan-outs and strategy queues.
+4. `internal/lambda/runtime` spins strategies declared in the manifest or via the REST API, consuming events from the dispatcher and publishing responses back onto the bus.
+5. `internal/telemetry` configures OpenTelemetry exporters and propagates tracing/metrics context through the pipeline.
 
-Supporting assets:
-- `lib/ws-routing/`: Business-agnostic routing session, router, middleware, telemetry, and admin API packages imported via `github.com/coachpo/meltica/lib/ws-routing`.
-- `tests/architecture/`: Contract tests, reusable mocks, and isolation examples.
+## Repository Layout
 
-See [`specs/008-architecture-requirements-req/quickstart.md`](specs/008-architecture-requirements-req/quickstart.md) for end-to-end guidance.
+- `cmd/gateway`: Main binary; exposes `-config` to point at any `app.yaml`.
+- `internal/`: Core implementation packages (adapters, config loader, dispatcher, event bus, pools, telemetry, schema helpers, etc.).
+- `api/`: Holds public API contracts and future protobuf/OpenAPI material.
+- `config/`: Shipping configuration (`app.yaml`) plus `app.example.yaml` for local overrides.
+- `deployments/`: IaC and telemetry deployment notes (`deployments/telemetry/PROMETHEUS_SETUP.md`).
+- `docs/`: Lambdas API reference and Grafana dashboards.
+- `test/` and `tests/`: Shared fixtures, architecture/contract suites, and package-level `_test.go` files.
+- `scripts/`: Utility helpers for CI or local tooling.
 
 ## Quick Start
 
-```go
-import (
-    "context"
-    "time"
+1. **Install dependencies**: Go 1.25+, `golangci-lint`, and (optionally) Docker/Prometheus if you plan to exercise telemetry pipelines.
+2. **Configure the gateway**:
+   ```bash
+   cp config/app.example.yaml config/app.yaml
+   # edit exchanges, telemetry endpoint, or lambda manifest as needed
+   ```
+3. **Run locally**:
+   ```bash
+   make run              # shorthand for go run ./cmd/gateway
+   # or build & execute
+   make build
+   ./bin/gateway -config config/app.yaml
+   ```
+4. **Control the runtime**: Use the REST surface on `:8880` (see [`docs/lambdas-api.md`](docs/lambdas-api.md)) to list or mutate running strategies.
+5. **Inspect telemetry**: Point OTLP endpoints at your collector and import the dashboards from `docs/dashboards/` into Grafana.
 
-    "github.com/coachpo/meltica/core/registry"
-    binanceplugin "github.com/coachpo/meltica/exchanges/binance/plugin"
-    wsrouting "github.com/coachpo/meltica/lib/ws-routing"
-)
+## Development Workflow
 
-// Create a Binance provider
-exchange, err := registry.Resolve(binanceplugin.Name)
-if err != nil {
-    log.Fatal(err)
-}
-defer exchange.Close()
+| Command                    | Purpose                                                            |
+| -------------------------- | ------------------------------------------------------------------ |
+| `make build`               | Compile all packages into `bin/` for local smoke tests.            |
+| `make run`                 | Execute the gateway with the current configuration.                |
+| `make test`                | Run `go test ./... -race -count=1 -timeout=30s` across the module. |
+| `make lint`                | Execute `golangci-lint` with `.golangci.yml`.                      |
+| `make coverage`            | Enforce the ≥70% TS-01 coverage bar and emit `coverage.out`.       |
+| `make contract-ws-routing` | Run the focused contract suite in `tests/contract/ws-routing`.     |
+| `make bench`               | Launch benchmark runs for hot paths.                               |
 
-// Use the exchange for market data or trading operations
+## Observability & Control References
 
-ctx := context.Background()
+- [`docs/lambdas-api.md`](docs/lambdas-api.md): REST contract for lifecycle operations.
+- [`docs/dashboards/README.md`](docs/dashboards/README.md): How to import/update Grafana dashboards.
+- [`deployments/telemetry/PROMETHEUS_SETUP.md`](deployments/telemetry/PROMETHEUS_SETUP.md): Collector wiring instructions.
 
-// Configure a universal routing session via lib/ws-routing
-session, err := wsrouting.Init(ctx, wsrouting.Options{
-    SessionID: "binance-stream",
-    Dialer:    myDialer,
-    Parser:    myParser,
-    Publish:   myPublisher,
-    Backoff:   wsrouting.BackoffConfig{Initial: 250 * time.Millisecond},
-})
-if err != nil {
-    log.Fatal(err)
-}
-```
+## Contributor & Process Docs
 
-## Features
-
-- **Unified API**: Single interface for multiple exchanges (currently Binance)
-- **High Performance**: Optimized for low-latency trading
-- **Type Safety**: Strongly typed Go interfaces
-- **Extensible**: Easy to add new exchanges following the Binance pattern
-- **Production Ready**: Comprehensive error handling and logging
-- **Typed Event Stream**: Clients consume strongly typed `ClientEvent` payloads instead of raw envelopes
-- **Zero-Copy Transport**: Uses `github.com/coder/websocket` for context-aware WebSocket IO and `github.com/goccy/go-json` for fast serialization
-- **Object Pooling**: Bounded pools backed by `sync.Pool` with 100ms acquisition timeouts and debug tooling reduce allocations by >40%
-
-## Development
-
-### Building
-
-```bash
-make build
-```
-
-### Testing
-
-```bash
-make test
-```
-
-### Cross-compilation
-
-```bash
-make build-linux-arm64
-```
-
-## Documentation
-
-- [Getting Started](docs/getting-started/START-HERE.md)
-- [Project Overview](docs/getting-started/PROJECT_OVERVIEW.md)
-- [Adding New Exchanges](docs/guides/exchange-implementation/onboarding-new-exchange.md)
-- [Architecture Standards](docs/standards/expectations/abstractions-guidelines.md)
+- [`AGENTS.md`](AGENTS.md): Contributor guidelines and coding conventions.
+- [`GEMINI.md`](GEMINI.md): Additional context for Gemini AI agents working inside the repo.
+- [`CLAUDE.md`](CLAUDE.md): Additional context for Claude AI agents working inside the repo.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License - see [`LICENSE`](LICENSE) for details.

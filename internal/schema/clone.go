@@ -48,6 +48,14 @@ func clonePayload(payload any) any {
 		}
 		cloned := *v
 		return &cloned
+	case InstrumentUpdatePayload:
+		return cloneInstrumentUpdatePayload(v)
+	case *InstrumentUpdatePayload:
+		if v == nil {
+			return nil
+		}
+		cloned := cloneInstrumentUpdatePayload(*v)
+		return &cloned
 	case []byte:
 		return append([]byte(nil), v...)
 	case map[string]any:
@@ -65,6 +73,12 @@ func cloneBookSnapshotPayload(payload BookSnapshotPayload) BookSnapshotPayload {
 	if len(payload.Asks) > 0 {
 		cloned.Asks = clonePriceLevels(payload.Asks)
 	}
+	return cloned
+}
+
+func cloneInstrumentUpdatePayload(payload InstrumentUpdatePayload) InstrumentUpdatePayload {
+	cloned := payload
+	cloned.Instrument = CloneInstrument(payload.Instrument)
 	return cloned
 }
 
@@ -105,6 +119,14 @@ func cloneInterface(value any) any {
 			return nil
 		}
 		cloned := cloneBookSnapshotPayload(*v)
+		return &cloned
+	case InstrumentUpdatePayload:
+		return cloneInstrumentUpdatePayload(v)
+	case *InstrumentUpdatePayload:
+		if v == nil {
+			return nil
+		}
+		cloned := cloneInstrumentUpdatePayload(*v)
 		return &cloned
 	default:
 		return v

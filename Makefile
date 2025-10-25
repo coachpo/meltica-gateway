@@ -1,6 +1,6 @@
 GO111MODULE=on
 
-.PHONY: test bench lint vet tidy build build-linux-arm64 standards ci clean binance-ws-test coverage-architecture coverage-full coverage contract-ws-routing
+.PHONY: test bench lint vet tidy build build-linux-arm64 standards ci clean binance-ws-test coverage-architecture coverage-full coverage contract-ws-routing run
 
 lint:
 	golangci-lint run --config .golangci.yml
@@ -49,3 +49,6 @@ coverage-full:
 clean:
 	rm -rf bin/
 	rm -rf coverage/
+
+run:
+	go run ./cmd/gateway/main.go

@@ -13,15 +13,15 @@ func TestControlMessageDecodePayload(t *testing.T) {
 		Payload:    []byte(`{"type":"TICKER"}`),
 		Timestamp:  time.Now(),
 	}
-	
+
 	var dest Subscribe
 	err := msg.DecodePayload(&dest)
 	if err != nil {
 		t.Fatalf("DecodePayload failed: %v", err)
 	}
-	
-	if dest.Type != "TICKER" {
-		t.Errorf("expected type TICKER, got %s", dest.Type)
+
+	if dest.Type != RouteTypeTicker {
+		t.Errorf("expected type %s, got %s", RouteTypeTicker, dest.Type)
 	}
 }
 
@@ -33,7 +33,7 @@ func TestControlMessageDecodePayloadEmpty(t *testing.T) {
 		Payload:    nil,
 		Timestamp:  time.Now(),
 	}
-	
+
 	var dest Subscribe
 	err := msg.DecodePayload(&dest)
 	if err == nil {
@@ -49,7 +49,7 @@ func TestControlMessageDecodePayloadNilDest(t *testing.T) {
 		Payload:    []byte(`{}`),
 		Timestamp:  time.Now(),
 	}
-	
+
 	err := msg.DecodePayload(nil)
 	if err == nil {
 		t.Error("expected error for nil destination")
@@ -58,21 +58,21 @@ func TestControlMessageDecodePayloadNilDest(t *testing.T) {
 
 func TestSubscribe(t *testing.T) {
 	sub := Subscribe{
-		Type: "TICKER",
+		Type: RouteTypeTicker,
 		Filters: map[string]any{
 			"symbol": "BTC-USD",
 		},
 		RequestID: "req-123",
 	}
-	
+
 	if sub.Type == "" {
 		t.Error("expected non-empty Type")
 	}
 	if sub.RequestID == "" {
 		t.Error("expected non-empty RequestID")
 	}
-	
-	// Test type validation through CanonicalType
+
+	// Test type validation through canonical route validation
 	err := sub.Type.Validate()
 	if err != nil {
 		t.Errorf("Type.Validate failed: %v", err)
@@ -81,7 +81,7 @@ func TestSubscribe(t *testing.T) {
 
 func TestSubscribeValidateEmpty(t *testing.T) {
 	sub := Subscribe{}
-	
+
 	// Empty type should fail validation
 	err := sub.Type.Validate()
 	if err == nil {
@@ -91,15 +91,15 @@ func TestSubscribeValidateEmpty(t *testing.T) {
 
 func TestUnsubscribe(t *testing.T) {
 	unsub := Unsubscribe{
-		Type:      "TICKER",
+		Type:      RouteTypeTicker,
 		RequestID: "req-123",
 	}
-	
+
 	if unsub.Type == "" {
 		t.Error("expected non-empty Type")
 	}
-	
-	// Test type validation through CanonicalType
+
+	// Test type validation through canonical route validation
 	err := unsub.Type.Validate()
 	if err != nil {
 		t.Errorf("Type.Validate failed: %v", err)
@@ -108,7 +108,7 @@ func TestUnsubscribe(t *testing.T) {
 
 func TestUnsubscribeValidateEmpty(t *testing.T) {
 	unsub := Unsubscribe{}
-	
+
 	// Empty type should fail validation
 	err := unsub.Type.Validate()
 	if err == nil {
@@ -116,17 +116,15 @@ func TestUnsubscribeValidateEmpty(t *testing.T) {
 	}
 }
 
-
-
 func TestTradingModePayload(t *testing.T) {
 	payload := TradingModePayload{
 		Enabled: true,
 	}
-	
+
 	if !payload.Enabled {
 		t.Error("expected enabled to be true")
 	}
-	
+
 	payload.Enabled = false
 	if payload.Enabled {
 		t.Error("expected enabled to be false")
@@ -141,7 +139,7 @@ func TestControlAcknowledgement(t *testing.T) {
 		RoutingVersion: 5,
 		Timestamp:      time.Now(),
 	}
-	
+
 	if ack.MessageID == "" {
 		t.Error("expected non-empty MessageID")
 	}

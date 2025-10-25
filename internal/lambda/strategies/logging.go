@@ -15,16 +15,17 @@ type Logging struct {
 	LoggerPrefix string
 }
 
-var loggingSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("TICKER"),
-	schema.CanonicalType("ORDERBOOK.SNAPSHOT"),
-	schema.CanonicalType("EXECUTION.REPORT"),
+var loggingSubscribedEvents = []schema.EventType{
+	schema.EventTypeTrade,
+	schema.EventTypeTicker,
+	schema.EventTypeBookSnapshot,
+	schema.EventTypeExecReport,
+	schema.EventTypeBalanceUpdate,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *Logging) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), loggingSubscribedEvents...)
+func (s *Logging) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), loggingSubscribedEvents...)
 }
 
 func (s *Logging) logger() *log.Logger {
@@ -112,19 +113,13 @@ func (s *Logging) OnKlineSummary(_ context.Context, evt *schema.Event, payload s
 		evt.Provider, evt.Symbol, payload.OpenPrice, payload.ClosePrice, payload.HighPrice, payload.LowPrice, payload.Volume)
 }
 
-// OnControlAck logs control acknowledgment events.
-func (s *Logging) OnControlAck(_ context.Context, evt *schema.Event, payload schema.ControlAckPayload) {
-	if payload.Success {
-		s.logger().Printf("Control ACK: provider=%s symbol=%s command=%s consumer=%s success=true",
-			evt.Provider, evt.Symbol, payload.CommandType, payload.ConsumerID)
-	} else {
-		s.logger().Printf("Control ACK: provider=%s symbol=%s command=%s consumer=%s success=false error=%s",
-			evt.Provider, evt.Symbol, payload.CommandType, payload.ConsumerID, payload.ErrorMessage)
-	}
+// OnInstrumentUpdate logs instrument catalogue refresh events.
+func (s *Logging) OnInstrumentUpdate(_ context.Context, evt *schema.Event, payload schema.InstrumentUpdatePayload) {
+	s.logger().Printf("Instrument updated: provider=%s symbol=%s", evt.Provider, payload.Instrument.Symbol)
 }
 
-// OnControlResult logs control result events.
-func (s *Logging) OnControlResult(_ context.Context, evt *schema.Event, payload schema.ControlResultPayload) {
-	s.logger().Printf("Control RESULT: provider=%s symbol=%s command=%s consumer=%s",
-		evt.Provider, evt.Symbol, payload.CommandType, payload.ConsumerID)
+// OnBalanceUpdate logs account balance updates.
+func (s *Logging) OnBalanceUpdate(_ context.Context, evt *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.logger().Printf("Balance update: provider=%s currency=%s total=%s available=%s",
+		evt.Provider, payload.Currency, payload.Total, payload.Available)
 }

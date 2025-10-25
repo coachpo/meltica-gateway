@@ -56,8 +56,8 @@ func NewRuntime(bus eventbus.Bus, table *Table, pools *pool.PoolManager) *Runtim
 	runtime.processingDuration, _ = meter.Float64Histogram("dispatcher.processing.duration",
 		metric.WithDescription("Event processing duration"),
 		metric.WithUnit("ms"))
-	runtime.routingVersionGauge, _ = meter.Int64ObservableGauge("dispatcher.routing.version",
-		metric.WithDescription("Current routing table version"),
+	runtime.routingVersionGauge, _ = meter.Int64ObservableGauge("dispatcher.routing.revision",
+		metric.WithDescription("Current routing table revision counter"),
 		metric.WithUnit("{version}"),
 		metric.WithInt64Callback(func(_ context.Context, observer metric.Int64Observer) error {
 			if runtime.table != nil {

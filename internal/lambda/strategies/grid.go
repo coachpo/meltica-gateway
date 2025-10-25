@@ -30,14 +30,15 @@ type Grid struct {
 	initialized bool
 }
 
-var gridSubscribedEvents = []schema.CanonicalType{
-	schema.CanonicalType("TRADE"),
-	schema.CanonicalType("EXECUTION.REPORT"),
+var gridSubscribedEvents = []schema.EventType{
+	schema.EventTypeTrade,
+	schema.EventTypeExecReport,
+	schema.EventTypeBalanceUpdate,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
-func (s *Grid) SubscribedEvents() []schema.CanonicalType {
-	return append([]schema.CanonicalType(nil), gridSubscribedEvents...)
+func (s *Grid) SubscribedEvents() []schema.EventType {
+	return append([]schema.EventType(nil), gridSubscribedEvents...)
 }
 
 // OnTrade initializes grid if needed.
@@ -148,8 +149,11 @@ func (s *Grid) OnOrderExpired(_ context.Context, _ *schema.Event, _ schema.ExecR
 // OnKlineSummary tracks kline data (no-op for this strategy).
 func (s *Grid) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {}
 
-// OnControlAck tracks control acknowledgments (no-op for this strategy).
-func (s *Grid) OnControlAck(_ context.Context, _ *schema.Event, _ schema.ControlAckPayload) {}
+// OnInstrumentUpdate refreshes strategy state when instruments change (no-op for grid).
+func (s *Grid) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.InstrumentUpdatePayload) {
+}
 
-// OnControlResult tracks control results (no-op for this strategy).
-func (s *Grid) OnControlResult(_ context.Context, _ *schema.Event, _ schema.ControlResultPayload) {}
+// OnBalanceUpdate logs balance updates for monitoring.
+func (s *Grid) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
+	s.Lambda.Logger().Printf("[GRID] Balance update: currency=%s available=%s total=%s", payload.Currency, payload.Available, payload.Total)
+}

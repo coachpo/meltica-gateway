@@ -9,8 +9,103 @@ import (
 	"github.com/coachpo/meltica/internal/errs"
 )
 
-// CanonicalType identifies canonical Meltica event categories (e.g. TICKER, ORDERBOOK.SNAPSHOT).
-type CanonicalType string
+// RouteType identifies canonical Meltica route identifiers used across control-plane interactions.
+type RouteType string
+
+const (
+	// RouteTypeAccountBalance designates account balance updates emitted by providers.
+	RouteTypeAccountBalance RouteType = "ACCOUNT.BALANCE"
+	// RouteTypeOrderbookSnapshot designates full orderbook snapshot streams.
+	RouteTypeOrderbookSnapshot RouteType = "ORDERBOOK.SNAPSHOT"
+	// RouteTypeTrade designates trade execution streams.
+	RouteTypeTrade RouteType = "TRADE"
+	// RouteTypeTicker designates ticker summary streams.
+	RouteTypeTicker RouteType = "TICKER"
+	// RouteTypeExecutionReport designates order execution report streams.
+	RouteTypeExecutionReport RouteType = "EXECUTION.REPORT"
+	// RouteTypeKlineSummary designates candlestick summary streams.
+	RouteTypeKlineSummary RouteType = "KLINE.SUMMARY"
+	// RouteTypeInstrumentUpdate designates instrument catalogue refresh notifications.
+	RouteTypeInstrumentUpdate RouteType = "INSTRUMENT.UPDATE"
+)
+
+var (
+	routeToEventType = map[RouteType]EventType{
+		RouteTypeAccountBalance:    EventTypeBalanceUpdate,
+		RouteTypeOrderbookSnapshot: EventTypeBookSnapshot,
+		RouteTypeTrade:             EventTypeTrade,
+		RouteTypeTicker:            EventTypeTicker,
+		RouteTypeExecutionReport:   EventTypeExecReport,
+		RouteTypeKlineSummary:      EventTypeKlineSummary,
+		RouteTypeInstrumentUpdate:  EventTypeInstrumentUpdate,
+	}
+	eventTypeToRoutes = map[EventType]RouteType{
+		EventTypeBalanceUpdate:    RouteTypeAccountBalance,
+		EventTypeBookSnapshot:     RouteTypeOrderbookSnapshot,
+		EventTypeTrade:            RouteTypeTrade,
+		EventTypeTicker:           RouteTypeTicker,
+		EventTypeExecReport:       RouteTypeExecutionReport,
+		EventTypeKlineSummary:     RouteTypeKlineSummary,
+		EventTypeInstrumentUpdate: RouteTypeInstrumentUpdate,
+	}
+)
+
+// NormalizeRouteType trims spaces and uppercases the provided canonical route.
+func NormalizeRouteType(route RouteType) RouteType {
+	trimmed := strings.TrimSpace(string(route))
+	if trimmed == "" {
+		return ""
+	}
+	return RouteType(strings.ToUpper(trimmed))
+}
+
+// Validate ensures the canonical route name adheres to spec.
+func (r RouteType) Validate() error {
+	normalized := NormalizeRouteType(r)
+	if normalized == "" {
+		return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type required"))
+	}
+	if normalized != r {
+		return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type must be uppercase alphanumeric"))
+	}
+	parts := strings.Split(string(normalized), ".")
+	for _, part := range parts {
+		if part == "" {
+			return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("empty canonical type segment"))
+		}
+		for _, ch := range part {
+			if ch < 'A' || ch > 'Z' && (ch < '0' || ch > '9') {
+				return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type must be uppercase alphanumeric"))
+			}
+		}
+	}
+	return nil
+}
+
+// EventTypeForRoute resolves the event type associated with a canonical route.
+func EventTypeForRoute(route RouteType) (EventType, bool) {
+	normalized := NormalizeRouteType(route)
+	if normalized == "" {
+		return "", false
+	}
+	evt, ok := routeToEventType[normalized]
+	return evt, ok
+}
+
+// RoutesForEvent returns the canonical routes that map to the supplied event type.
+func RoutesForEvent(evt EventType) []RouteType {
+	route, ok := eventTypeToRoutes[evt]
+	if !ok {
+		return nil
+	}
+	return []RouteType{route}
+}
+
+// PrimaryRouteForEvent returns the preferred canonical route for an event type.
+func PrimaryRouteForEvent(evt EventType) (RouteType, bool) {
+	route, ok := eventTypeToRoutes[evt]
+	return route, ok
+}
 
 // RawInstance is a pre-canonicalized payload produced by upstream adapters.
 type RawInstance map[string]any
@@ -29,63 +124,30 @@ func (r RawInstance) Clone() RawInstance {
 
 // Subscribe represents a control plane command to add a canonical route.
 type Subscribe struct {
-	Type      CanonicalType  `json:"type"`
+	Type      RouteType      `json:"type"`
 	Filters   map[string]any `json:"filters,omitempty"`
 	RequestID string         `json:"requestId,omitempty"`
 }
 
 // Unsubscribe represents a control plane command to remove a canonical route.
 type Unsubscribe struct {
-	Type      CanonicalType `json:"type"`
-	RequestID string        `json:"requestId,omitempty"`
+	Type      RouteType `json:"type"`
+	RequestID string    `json:"requestId,omitempty"`
 }
 
-// Validate ensures the canonical type adheres to spec.
-func (c CanonicalType) Validate() error {
-	if c == "" {
-		return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type required"))
-	}
-	parts := strings.Split(string(c), ".")
-	for _, part := range parts {
-		if part == "" {
-			return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("empty canonical type segment"))
-		}
-		for _, r := range part {
-			if r < 'A' || r > 'Z' && (r < '0' || r > '9') {
-				return errs.New("schema/canonical-type", errs.CodeInvalid, errs.WithMessage("canonical type must be uppercase alphanumeric"))
-			}
-		}
-	}
-	return nil
-}
-
-// ValidateInstrument verifies the canonical instrument representation (BASE-QUOTE).
+// ValidateInstrument verifies the canonical instrument formatting.
 func ValidateInstrument(symbol string) error {
 	symbol = strings.TrimSpace(symbol)
 	if symbol == "" {
 		return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument required"))
 	}
-	if !strings.Contains(symbol, "-") {
-		return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument must contain '-'"))
-	}
-	parts := strings.Split(symbol, "-")
-	if len(parts) != 2 {
-		return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument requires base-quote"))
-	}
-	for _, part := range parts {
-		if part == "" {
-			return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument contains empty leg"))
-		}
-		if strings.ToUpper(part) != part {
-			return errs.New("schema/instrument", errs.CodeInvalid, errs.WithMessage("instrument must be uppercase"))
-		}
-	}
-	return nil
+	_, err := validateInstrumentSymbol(symbol)
+	return err
 }
 
 // BuildEventKey constructs the default idempotency key for an event.
-func BuildEventKey(instr string, typ CanonicalType, seq uint64) string {
-	return fmt.Sprintf("%s:%s:%d", strings.TrimSpace(instr), string(typ), seq)
+func BuildEventKey(instr string, route RouteType, seq uint64) string {
+	return fmt.Sprintf("%s:%s:%d", strings.TrimSpace(instr), NormalizeRouteType(route), seq)
 }
 
 // Event represents a canonical event emitted by providers or dispatcher.
@@ -97,9 +159,9 @@ type Event struct {
 	Symbol         string    `json:"symbol"`
 	Type           EventType `json:"type"`
 	SeqProvider    uint64    `json:"seq_provider"`
-	IngestTS time.Time `json:"ingest_ts"`
-	EmitTS   time.Time `json:"emit_ts"`
-	Payload  any       `json:"payload"`
+	IngestTS       time.Time `json:"ingest_ts"`
+	EmitTS         time.Time `json:"emit_ts"`
+	Payload        any       `json:"payload"`
 }
 
 // Reset zeroes the event for pool reuse.
@@ -151,48 +213,11 @@ const (
 	EventTypeExecReport EventType = "ExecReport"
 	// EventTypeKlineSummary identifies candlestick summary events.
 	EventTypeKlineSummary EventType = "KlineSummary"
-	// EventTypeControlAck identifies control-plane acknowledgements.
-	EventTypeControlAck EventType = "ControlAck"
-	// EventTypeControlResult identifies control-plane command results.
-	EventTypeControlResult EventType = "ControlResult"
+	// EventTypeInstrumentUpdate identifies provider instrument catalogue refresh notifications.
+	EventTypeInstrumentUpdate EventType = "InstrumentUpdate"
+	// EventTypeBalanceUpdate identifies account balance updates emitted by providers.
+	EventTypeBalanceUpdate EventType = "BalanceUpdate"
 )
-
-// Coalescable reports whether an event type can be coalesced under backpressure.
-func (et EventType) Coalescable() bool {
-	switch et {
-	case EventTypeTicker, EventTypeKlineSummary:
-		return true
-	case EventTypeBookSnapshot,
-		EventTypeTrade,
-		EventTypeExecReport,
-		EventTypeControlAck,
-		EventTypeControlResult:
-		return false
-	default:
-		return false
-	}
-}
-
-// ControlAckPayload carries control acknowledgement metadata delivered over the data bus.
-type ControlAckPayload struct {
-	MessageID      string             `json:"message_id"`
-	ConsumerID     string             `json:"consumer_id"`
-	CommandType    ControlMessageType `json:"command_type"`
-	Success        bool               `json:"success"`
-	RoutingVersion int                `json:"routing_version"`
-	ErrorMessage   string             `json:"error_message,omitempty"`
-	Timestamp      time.Time          `json:"timestamp"`
-}
-
-// ControlResultPayload carries control command results delivered over the data bus.
-type ControlResultPayload struct {
-	MessageID      string             `json:"message_id"`
-	ConsumerID     string             `json:"consumer_id"`
-	CommandType    ControlMessageType `json:"command_type"`
-	RoutingVersion int                `json:"routing_version"`
-	Result         any                `json:"result,omitempty"`
-	Timestamp      time.Time          `json:"timestamp"`
-}
 
 // PriceLevel describes an order book price level using decimal strings.
 type PriceLevel struct {
@@ -208,7 +233,7 @@ type BookSnapshotPayload struct {
 	Asks       []PriceLevel `json:"asks"`
 	Checksum   string       `json:"checksum"`
 	LastUpdate time.Time    `json:"last_update"`
-	
+
 	// Binance-specific sequence tracking (optional, used internally during assembly)
 	FirstUpdateID uint64 `json:"first_update_id,omitempty"` // U - First update ID in event
 	FinalUpdateID uint64 `json:"final_update_id,omitempty"` // u - Final update ID in event
@@ -295,4 +320,17 @@ type KlineSummaryPayload struct {
 	Volume     string    `json:"volume"`
 	OpenTime   time.Time `json:"open_time"`
 	CloseTime  time.Time `json:"close_time"`
+}
+
+// InstrumentUpdatePayload advertises an updated instrument definition for a provider.
+type InstrumentUpdatePayload struct {
+	Instrument Instrument `json:"instrument"`
+}
+
+// BalanceUpdatePayload reports the current account balance for a given currency.
+type BalanceUpdatePayload struct {
+	Currency  string    `json:"currency"`
+	Total     string    `json:"total"`
+	Available string    `json:"available"`
+	Timestamp time.Time `json:"timestamp"`
 }
