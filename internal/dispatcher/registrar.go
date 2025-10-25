@@ -63,8 +63,12 @@ func (r *Registrar) RegisterLambda(ctx context.Context, lambdaID string, provide
 
 	copied := make([]RouteDeclaration, len(routes))
 	for i, route := range routes {
+		if err := route.Type.Validate(); err != nil {
+			return fmt.Errorf("lambda route[%d]: %w", i, err)
+		}
+		normalized := schema.NormalizeRouteType(route.Type)
 		copied[i] = RouteDeclaration{
-			Type:    route.Type,
+			Type:    normalized,
 			Filters: cloneFilterMap(route.Filters),
 		}
 	}

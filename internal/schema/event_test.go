@@ -7,48 +7,96 @@ import (
 func TestRouteTypeValidate(t *testing.T) {
 	tests := []struct {
 		name    string
-		ct      RouteType
+		route   RouteType
 		wantErr bool
 	}{
 		{
 			name:    "valid simple type",
-			ct:      RouteTypeTicker,
+			route:   RouteTypeTicker,
 			wantErr: false,
 		},
 		{
 			name:    "valid compound type",
-			ct:      RouteTypeOrderbookSnapshot,
+			route:   RouteTypeOrderbookSnapshot,
 			wantErr: false,
 		},
 		{
 			name:    "empty type",
-			ct:      "",
+			route:   "",
 			wantErr: true,
 		},
 		{
 			name:    "lowercase type",
-			ct:      RouteType("ticker"),
+			route:   RouteType("ticker"),
 			wantErr: true,
 		},
 		{
 			name:    "type with invalid chars",
-			ct:      RouteType("TICKER-INVALID"),
+			route:   RouteType("TICKER-INVALID"),
 			wantErr: true,
 		},
 		{
 			name:    "type with empty segment",
-			ct:      RouteType("TICKER..INVALID"),
+			route:   RouteType("TICKER..INVALID"),
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.ct.Validate()
+			err := tt.route.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestEventRouteMappings(t *testing.T) {
+	type routeEventPair struct {
+		route RouteType
+		event EventType
+	}
+	pairs := []routeEventPair{
+		{route: RouteTypeAccountBalance, event: EventTypeBalanceUpdate},
+		{route: RouteTypeOrderbookSnapshot, event: EventTypeBookSnapshot},
+		{route: RouteTypeTrade, event: EventTypeTrade},
+		{route: RouteTypeTicker, event: EventTypeTicker},
+		{route: RouteTypeExecutionReport, event: EventTypeExecReport},
+		{route: RouteTypeKlineSummary, event: EventTypeKlineSummary},
+	}
+
+	for _, pair := range pairs {
+		evt, ok := EventTypeForRoute(pair.route)
+		if !ok {
+			t.Fatalf("EventTypeForRoute(%s) expected ok", pair.route)
+		}
+		if evt != pair.event {
+			t.Fatalf("EventTypeForRoute(%s) expected %s, got %s", pair.route, pair.event, evt)
+		}
+
+		routes := RoutesForEvent(pair.event)
+		if len(routes) != 1 || routes[0] != pair.route {
+			t.Fatalf("RoutesForEvent(%s) expected [%s], got %v", pair.event, pair.route, routes)
+		}
+
+		primary, ok := PrimaryRouteForEvent(pair.event)
+		if !ok {
+			t.Fatalf("PrimaryRouteForEvent(%s) expected ok", pair.event)
+		}
+		if primary != pair.route {
+			t.Fatalf("PrimaryRouteForEvent(%s) expected %s, got %s", pair.event, pair.route, primary)
+		}
+	}
+
+	if _, ok := EventTypeForRoute(RouteType("UNKNOWN.ROUTE")); ok {
+		t.Fatal("EventTypeForRoute should fail for unknown route")
+	}
+	if routes := RoutesForEvent(EventType("UnknownEvent")); routes != nil {
+		t.Fatalf("RoutesForEvent unknown should be nil, got %v", routes)
+	}
+	if _, ok := PrimaryRouteForEvent(EventType("UnknownEvent")); ok {
+		t.Fatal("PrimaryRouteForEvent unknown expected !ok")
 	}
 }
 
