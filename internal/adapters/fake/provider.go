@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/coachpo/meltica/internal/adapters/shared"
 	"github.com/coachpo/meltica/internal/dispatcher"
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/schema"
@@ -44,6 +45,7 @@ const (
 	floatTolerance                   = 1e-9
 	defaultInstrumentRefreshInterval = 30 * time.Minute
 	defaultBookLevels                = 10
+	defaultBookDiffInterval          = 100 * time.Millisecond
 	defaultPriceDrift                = 0.00025
 	defaultPriceVolatility           = 0.0125
 	defaultShockProbability          = 0.045
@@ -339,6 +341,7 @@ type Provider struct {
 	tickerInterval        time.Duration
 	tradeInterval         time.Duration
 	bookSnapshotInterval  time.Duration
+	bookDiffInterval      time.Duration
 	klineInterval         time.Duration
 	balanceUpdateInterval time.Duration
 
@@ -407,6 +410,7 @@ type instrumentState struct {
 	asks         map[priceTick]*bookDepth
 	orderIndex   map[string]*activeOrder
 	lastDiff     bookDiff
+	assembler    *shared.OrderBookAssembler
 	currentKline *klineWindow
 	completed    []klineWindow
 }
@@ -988,6 +992,7 @@ func NewProvider(opts Options) *Provider {
 		tickerInterval:        tickerInterval,
 		tradeInterval:         tradeInterval,
 		bookSnapshotInterval:  bookSnapshotInterval,
+		bookDiffInterval:      defaultBookDiffInterval,
 		klineInterval:         opts.KlineInterval,
 		balanceUpdateInterval: balanceInterval,
 		events:                make(chan *schema.Event, 128),
@@ -1466,18 +1471,41 @@ func (p *Provider) streamTrades(ctx context.Context, supply instrumentSupplier) 
 }
 
 func (p *Provider) streamBookSnapshots(ctx context.Context, supply instrumentSupplier) {
-	p.emitSnapshots(supply())
-	ticker := time.NewTicker(p.bookSnapshotInterval)
-	defer ticker.Stop()
+	emit := func() {
+		instruments := supply()
+		if len(instruments) == 0 {
+			instruments = p.currentDefaultNative()
+		}
+		if len(instruments) == 0 {
+			return
+		}
+		p.emitSnapshots(instruments)
+	}
+
+	emit()
+
+	snapshotTicker := time.NewTicker(p.bookSnapshotInterval)
+	diffInterval := p.bookDiffInterval
+	if diffInterval <= 0 {
+		diffInterval = defaultBookDiffInterval
+	}
+	diffTicker := time.NewTicker(diffInterval)
+	defer snapshotTicker.Stop()
+	defer diffTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-snapshotTicker.C:
 			if !p.applyVenueLatency(ctx) {
 				return
 			}
-			p.emitSnapshots(supply())
+			emit()
+		case <-diffTicker.C:
+			if !p.applyVenueLatency(ctx) {
+				return
+			}
+			emit()
 		}
 	}
 }
@@ -1720,19 +1748,61 @@ func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 	}
 	seq := p.nextSeq(schema.EventTypeBookSnapshot, instrument)
 	state.mu.Lock()
-	state.lastDiff = state.mutateBook(p, state.lastPrice)
-	levelsBids := formatLevels(state.snapshotLevels(state.bids, p.bookOptions.Levels, true), state.constraints)
-	levelsAsks := formatLevels(state.snapshotLevels(state.asks, p.bookOptions.Levels, false), state.constraints)
-	state.hasSnapshot = true
-	checksum := checksum(instrument.Symbol(), schema.EventTypeBookSnapshot, seq)
-	state.mu.Unlock()
-	payload := schema.BookSnapshotPayload{ //nolint:exhaustruct // optional update fields are intentionally omitted
-		Bids:       levelsBids,
-		Asks:       levelsAsks,
-		Checksum:   checksum,
-		LastUpdate: ts,
+	if state.assembler == nil {
+		state.assembler = shared.NewOrderBookAssembler(state.bookLevels)
 	}
-	evt := p.newEvent(schema.EventTypeBookSnapshot, instrument, seq, payload, ts)
+	assembler := state.assembler
+	hasSnapshot := assembler.HasSnapshot()
+	var (
+		eventPayload schema.BookSnapshotPayload
+		err          error
+		applied      bool
+	)
+	if !hasSnapshot {
+		levelsBids := formatLevels(state.snapshotLevels(state.bids, p.bookOptions.Levels, true), state.constraints)
+		levelsAsks := formatLevels(state.snapshotLevels(state.asks, p.bookOptions.Levels, false), state.constraints)
+		snapshotPayload := schema.BookSnapshotPayload{
+			Bids:       levelsBids,
+			Asks:       levelsAsks,
+			LastUpdate: ts,
+		}
+		state.hasSnapshot = true
+		state.mu.Unlock()
+		eventPayload, err = assembler.ApplySnapshot(seq, snapshotPayload)
+		applied = err == nil
+	} else {
+		diff := state.mutateBook(p, state.lastPrice)
+		state.lastDiff = diff
+		state.hasSnapshot = true
+		bidLevels := formatLevelChanges(diff.bids, state.constraints)
+		askLevels := formatLevelChanges(diff.asks, state.constraints)
+		diffPayload := shared.OrderBookDiff{
+			SequenceID: seq,
+			Bids:       bidLevels,
+			Asks:       askLevels,
+			Timestamp:  ts,
+		}
+		state.mu.Unlock()
+		eventPayload, applied, err = assembler.ApplyDiff(diffPayload)
+	}
+	if err != nil {
+		p.emitError(fmt.Errorf("fake provider %s: orderbook assembly failed: %w", p.name, err))
+		return
+	}
+	if !applied {
+		return
+	}
+	if eventPayload.LastUpdate.IsZero() {
+		eventPayload.LastUpdate = ts
+	}
+	eventPayload.Checksum = checksum(instrument.Symbol(), schema.EventTypeBookSnapshot, seq)
+	if eventPayload.FirstUpdateID == 0 {
+		eventPayload.FirstUpdateID = seq
+	}
+	if eventPayload.FinalUpdateID == 0 {
+		eventPayload.FinalUpdateID = seq
+	}
+	evt := p.newEvent(schema.EventTypeBookSnapshot, instrument, seq, eventPayload, ts)
 	if evt == nil {
 		return
 	}
@@ -2128,6 +2198,7 @@ func newInstrumentState(symbol string, basePrice float64, meta instrumentConstra
 		asks:         make(map[priceTick]*bookDepth, levels),
 		orderIndex:   make(map[string]*activeOrder),
 		lastDiff:     bookDiff{bids: nil, asks: nil},
+		assembler:    shared.NewOrderBookAssembler(levels),
 		currentKline: nil,
 		completed:    nil,
 	}
@@ -2540,6 +2611,20 @@ func formatLevels(levels []bookLevel, cons instrumentConstraints) []schema.Price
 			Price:    formatWithPrecision(lvl.price, cons.pricePrecision),
 			Quantity: formatWithPrecision(lvl.quantity, cons.quantityPrecision),
 		}
+	}
+	return out
+}
+
+func formatLevelChanges(changes []bookLevelChange, cons instrumentConstraints) []shared.DiffLevel {
+	if len(changes) == 0 {
+		return nil
+	}
+	out := make([]shared.DiffLevel, 0, len(changes))
+	for _, change := range changes {
+		out = append(out, shared.DiffLevel{
+			Price:    formatWithPrecision(change.price, cons.pricePrecision),
+			Quantity: formatWithPrecision(change.quantity, cons.quantityPrecision),
+		})
 	}
 	return out
 }
