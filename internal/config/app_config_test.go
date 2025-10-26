@@ -2,8 +2,10 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -80,8 +82,8 @@ lambdaManifest:
 	if cfg.Eventbus.BufferSize != 128 {
 		t.Fatalf("expected buffer size 128, got %d", cfg.Eventbus.BufferSize)
 	}
-	if cfg.Eventbus.FanoutWorkers != 4 {
-		t.Fatalf("expected fanout workers 4, got %d", cfg.Eventbus.FanoutWorkers)
+	if workers := cfg.Eventbus.FanoutWorkerCount(); workers != 4 {
+		t.Fatalf("expected fanout workers 4, got %d", workers)
 	}
 
 	if cfg.APIServer.Addr != ":9999" {
@@ -122,4 +124,78 @@ lambdaManifest:
 	if cfg.Risk.MaxConcurrentOrders != 0 {
 		t.Fatalf("expected default max concurrent orders 0, got %d", cfg.Risk.MaxConcurrentOrders)
 	}
+}
+
+func TestFanoutWorkersAuto(t *testing.T) {
+	cfg := loadConfigWithFanout(t, "  fanoutWorkers: auto\n")
+	expected := runtime.NumCPU()
+	if expected <= 0 {
+		expected = 4
+	}
+	if workers := cfg.Eventbus.FanoutWorkerCount(); workers != expected {
+		t.Fatalf("expected fanout workers %d, got %d", expected, workers)
+	}
+}
+
+func TestFanoutWorkersDefaultString(t *testing.T) {
+	cfg := loadConfigWithFanout(t, "  fanoutWorkers: default\n")
+	if workers := cfg.Eventbus.FanoutWorkerCount(); workers != 4 {
+		t.Fatalf("expected default fanout workers 4, got %d", workers)
+	}
+}
+
+func TestFanoutWorkersMissing(t *testing.T) {
+	cfg := loadConfigWithFanout(t, "")
+	if workers := cfg.Eventbus.FanoutWorkerCount(); workers != 4 {
+		t.Fatalf("expected missing fanout workers to default to 4, got %d", workers)
+	}
+}
+
+func loadConfigWithFanout(t *testing.T, fanoutLine string) AppConfig {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.yaml")
+	yaml := fmt.Sprintf(`
+environment: dev
+exchanges:
+  fake:
+    exchange:
+      name: fake
+      option: value
+eventbus:
+  bufferSize: 128
+%spools:
+  eventSize: 100
+  orderRequestSize: 50
+risk:
+  maxPositionSize: "10"
+  maxNotionalValue: "1000"
+  notionalCurrency: "USD"
+  orderThrottle: 5
+
+apiServer:
+  addr: ":9999"
+telemetry:
+  otlpEndpoint: http://localhost:4318
+  serviceName: test-service
+  otlpInsecure: true
+  enableMetrics: false
+lambdaManifest:
+  lambdas:
+    - id: test-lambda
+      providers: [fake]
+      symbol: BTC-USDT
+      strategy: delay
+      auto_start: false
+`, fanoutLine)
+
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	cfg, err := Load(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	return cfg
 }

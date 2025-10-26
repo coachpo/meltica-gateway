@@ -168,7 +168,7 @@ func buildPoolManager(cfg config.PoolConfig) (*pool.PoolManager, error) {
 func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager) eventbus.Bus {
 	return eventbus.NewMemoryBus(eventbus.MemoryConfig{
 		BufferSize:    cfg.BufferSize,
-		FanoutWorkers: cfg.FanoutWorkers,
+		FanoutWorkers: cfg.FanoutWorkerCount(),
 		Pools:         pools,
 	})
 }

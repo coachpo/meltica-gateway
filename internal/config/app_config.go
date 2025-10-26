@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -14,8 +16,84 @@ import (
 
 // EventbusConfig sets in-memory event bus sizing characteristics.
 type EventbusConfig struct {
-	BufferSize    int `yaml:"bufferSize"`
-	FanoutWorkers int `yaml:"fanoutWorkers"`
+	BufferSize    int                 `yaml:"bufferSize"`
+	FanoutWorkers FanoutWorkerSetting `yaml:"fanoutWorkers"`
+}
+
+type fanoutWorkerKind int
+
+const (
+	fanoutWorkerUnset fanoutWorkerKind = iota
+	fanoutWorkerExplicit
+	fanoutWorkerAuto
+	fanoutWorkerDefault
+)
+
+// FanoutWorkerSetting encapsulates the fanout worker configuration allowing both numeric and symbolic values.
+type FanoutWorkerSetting struct {
+	kind  fanoutWorkerKind
+	value int
+}
+
+// UnmarshalYAML supports integer, "auto", and "default" values for fanout workers.
+func (s *FanoutWorkerSetting) UnmarshalYAML(node *yaml.Node) error {
+	if node == nil {
+		*s = FanoutWorkerSetting{kind: fanoutWorkerUnset, value: 0}
+		return nil
+	}
+
+	text := strings.TrimSpace(node.Value)
+	if text == "" {
+		s.kind = fanoutWorkerUnset
+		s.value = 0
+		return nil
+	}
+
+	lower := strings.ToLower(text)
+	switch lower {
+	case "auto":
+		s.kind = fanoutWorkerAuto
+		s.value = 0
+		return nil
+	case "default":
+		s.kind = fanoutWorkerDefault
+		s.value = 0
+		return nil
+	}
+
+	// Attempt numeric parse for both explicit integers and scalar yaml ints.
+	val, err := strconv.Atoi(text)
+	if err != nil {
+		return fmt.Errorf("fanoutWorkers: invalid value %q", node.Value)
+	}
+	if val <= 0 {
+		return fmt.Errorf("fanoutWorkers: numeric value must be > 0")
+	}
+	s.kind = fanoutWorkerExplicit
+	s.value = val
+	return nil
+}
+
+// resolve returns the effective worker count derived from the setting.
+func (s FanoutWorkerSetting) resolve() int {
+	switch s.kind {
+	case fanoutWorkerExplicit:
+		return s.value
+	case fanoutWorkerAuto:
+		if cores := runtime.NumCPU(); cores > 0 {
+			return cores
+		}
+		return 4
+	case fanoutWorkerDefault, fanoutWorkerUnset:
+		return 4
+	default:
+		return 4
+	}
+}
+
+// FanoutWorkerCount returns the resolved worker count for use by runtime components.
+func (c EventbusConfig) FanoutWorkerCount() int {
+	return c.FanoutWorkers.resolve()
 }
 
 // PoolConfig controls pooled object capacities.
@@ -140,7 +218,7 @@ func (c AppConfig) Validate() error {
 	if c.Eventbus.BufferSize <= 0 {
 		return fmt.Errorf("eventbus bufferSize must be >0")
 	}
-	if c.Eventbus.FanoutWorkers <= 0 {
+	if c.Eventbus.FanoutWorkerCount() <= 0 {
 		return fmt.Errorf("eventbus fanoutWorkers must be >0")
 	}
 
