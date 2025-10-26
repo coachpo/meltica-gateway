@@ -2,7 +2,10 @@ package shared
 
 import (
 	"errors"
+<<<<<<< HEAD
 	"fmt"
+=======
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 	"sort"
 	"strings"
 	"sync"
@@ -45,6 +48,7 @@ type OrderBookAssembler struct {
 // NewOrderBookAssembler constructs a new assembler limited to depth price levels (<=0 keeps full depth).
 func NewOrderBookAssembler(depth int) *OrderBookAssembler {
 	return &OrderBookAssembler{
+<<<<<<< HEAD
 		mu:          sync.Mutex{},
 		depth:       depth,
 		initialized: false,
@@ -53,6 +57,11 @@ func NewOrderBookAssembler(depth int) *OrderBookAssembler {
 		pending:     nil,
 		lastSeq:     0,
 		lastUpdate:  time.Time{},
+=======
+		depth: depth,
+		bids:  make(map[string]decimal.Decimal),
+		asks:  make(map[string]decimal.Decimal),
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 	}
 }
 
@@ -73,8 +82,12 @@ func (a *OrderBookAssembler) ApplySnapshot(seq uint64, snapshot schema.BookSnaps
 		}
 	}
 	if seq == 0 {
+<<<<<<< HEAD
 		var empty schema.BookSnapshotPayload
 		return empty, ErrSnapshotIDRequired
+=======
+		return schema.BookSnapshotPayload{}, ErrSnapshotIDRequired
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 	}
 
 	a.mu.Lock()
@@ -82,12 +95,19 @@ func (a *OrderBookAssembler) ApplySnapshot(seq uint64, snapshot schema.BookSnaps
 
 	a.resetLocked()
 	if err := a.replaceSideLocked(a.bids, snapshot.Bids); err != nil {
+<<<<<<< HEAD
 		var empty schema.BookSnapshotPayload
 		return empty, err
 	}
 	if err := a.replaceSideLocked(a.asks, snapshot.Asks); err != nil {
 		var empty schema.BookSnapshotPayload
 		return empty, err
+=======
+		return schema.BookSnapshotPayload{}, err
+	}
+	if err := a.replaceSideLocked(a.asks, snapshot.Asks); err != nil {
+		return schema.BookSnapshotPayload{}, err
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 	}
 	a.initialized = true
 	a.lastSeq = seq
@@ -112,8 +132,12 @@ func (a *OrderBookAssembler) ApplySnapshot(seq uint64, snapshot schema.BookSnaps
 		}
 		updated, err := a.applyDiffLocked(diff)
 		if err != nil {
+<<<<<<< HEAD
 			var empty schema.BookSnapshotPayload
 			return empty, err
+=======
+			return schema.BookSnapshotPayload{}, err
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 		}
 		result = updated
 	}
@@ -128,30 +152,48 @@ func (a *OrderBookAssembler) ApplyDiff(diff OrderBookDiff) (schema.BookSnapshotP
 
 	if !a.initialized {
 		a.pending = append(a.pending, diff)
+<<<<<<< HEAD
 		var empty schema.BookSnapshotPayload
 		return empty, false, nil
 	}
 	if diff.SequenceID == 0 || diff.SequenceID <= a.lastSeq {
 		var empty schema.BookSnapshotPayload
 		return empty, false, nil
+=======
+		return schema.BookSnapshotPayload{}, false, nil
+	}
+	if diff.SequenceID == 0 || diff.SequenceID <= a.lastSeq {
+		return schema.BookSnapshotPayload{}, false, nil
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 	}
 
 	payload, err := a.applyDiffLocked(diff)
 	if err != nil {
+<<<<<<< HEAD
 		var empty schema.BookSnapshotPayload
 		return empty, false, err
+=======
+		return schema.BookSnapshotPayload{}, false, err
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 	}
 	return payload, true, nil
 }
 
 func (a *OrderBookAssembler) applyDiffLocked(diff OrderBookDiff) (schema.BookSnapshotPayload, error) {
 	if err := a.updateSideLocked(a.bids, diff.Bids); err != nil {
+<<<<<<< HEAD
 		var empty schema.BookSnapshotPayload
 		return empty, err
 	}
 	if err := a.updateSideLocked(a.asks, diff.Asks); err != nil {
 		var empty schema.BookSnapshotPayload
 		return empty, err
+=======
+		return schema.BookSnapshotPayload{}, err
+	}
+	if err := a.updateSideLocked(a.asks, diff.Asks); err != nil {
+		return schema.BookSnapshotPayload{}, err
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 	}
 	a.lastSeq = diff.SequenceID
 	if !diff.Timestamp.IsZero() {
@@ -183,7 +225,11 @@ func (a *OrderBookAssembler) replaceSideLocked(target map[string]decimal.Decimal
 	for _, level := range levels {
 		qty, err := decimal.NewFromString(strings.TrimSpace(level.Quantity))
 		if err != nil {
+<<<<<<< HEAD
 			return fmt.Errorf("parse snapshot quantity %q at price %q: %w", level.Quantity, level.Price, err)
+=======
+			return err
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 		}
 		if qty.Sign() <= 0 {
 			continue
@@ -207,7 +253,11 @@ func (a *OrderBookAssembler) updateSideLocked(target map[string]decimal.Decimal,
 		}
 		qty, err := decimal.NewFromString(qtyStr)
 		if err != nil {
+<<<<<<< HEAD
 			return fmt.Errorf("parse diff quantity %q at price %q: %w", update.Quantity, update.Price, err)
+=======
+			return err
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 		}
 		if qty.Sign() <= 0 {
 			delete(target, priceKey)
@@ -222,7 +272,10 @@ func (a *OrderBookAssembler) buildSnapshotLocked(firstSeq, finalSeq uint64) sche
 	return schema.BookSnapshotPayload{
 		Bids:          a.buildSideSnapshotLocked(a.bids, true),
 		Asks:          a.buildSideSnapshotLocked(a.asks, false),
+<<<<<<< HEAD
 		Checksum:      "",
+=======
+>>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 		LastUpdate:    a.lastUpdate,
 		FirstUpdateID: firstSeq,
 		FinalUpdateID: finalSeq,
