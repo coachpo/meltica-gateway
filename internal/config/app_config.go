@@ -29,6 +29,16 @@ type APIServerConfig struct {
 	Addr string `yaml:"addr"`
 }
 
+// RiskConfig defines risk parameters for a single strategy.
+
+type RiskConfig struct {
+	MaxPositionSize  string  `yaml:"maxPositionSize"`
+	MaxNotionalValue string  `yaml:"maxNotionalValue"`
+	NotionalCurrency string  `yaml:"notionalCurrency"`
+	OrderThrottle    float64 `yaml:"orderThrottle"`
+}
+
+
 // TelemetryConfig configures OTLP exporters (metrics only).
 type TelemetryConfig struct {
 	OTLPEndpoint  string `yaml:"otlpEndpoint"`
@@ -43,6 +53,7 @@ type AppConfig struct {
 	Exchanges      map[Exchange]map[string]any `yaml:"exchanges"`
 	Eventbus       EventbusConfig              `yaml:"eventbus"`
 	Pools          PoolConfig                  `yaml:"pools"`
+	Risk           RiskConfig                  `yaml:"risk"`
 	APIServer      APIServerConfig             `yaml:"apiServer"`
 	Telemetry      TelemetryConfig             `yaml:"telemetry"`
 	LambdaManifest LambdaManifest              `yaml:"lambdaManifest"`
@@ -115,6 +126,19 @@ func (c AppConfig) Validate() error {
 
 	if strings.TrimSpace(c.APIServer.Addr) == "" {
 		return fmt.Errorf("apiServer addr required")
+	}
+
+	if c.Risk.MaxPositionSize == "" {
+		return fmt.Errorf("risk maxPositionSize required")
+	}
+	if c.Risk.MaxNotionalValue == "" {
+		return fmt.Errorf("risk maxNotionalValue required")
+	}
+	if c.Risk.NotionalCurrency == "" {
+		return fmt.Errorf("risk notionalCurrency required")
+	}
+	if c.Risk.OrderThrottle <= 0 {
+		return fmt.Errorf("risk orderThrottle must be > 0")
 	}
 
 	if strings.TrimSpace(c.Telemetry.ServiceName) == "" {

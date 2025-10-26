@@ -52,3 +52,7 @@ clean:
 
 run:
 	go run ./cmd/gateway/main.go
+
+backtest:
+	go run ./cmd/backtest/main.go --data=./data.csv --strategy=$(STRATEGY)
+

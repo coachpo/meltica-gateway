@@ -366,6 +366,12 @@ pools:
   eventSize: 25000
   orderRequestSize: 25000
 
+risk:
+  maxPositionSize: "1000"
+  maxNotionalValue: "100000"
+  notionalCurrency: "USDT"
+  orderThrottle: 10
+
 # apiServer: control API bind address (host:port or :port)
 apiServer:
   addr: ":8880"

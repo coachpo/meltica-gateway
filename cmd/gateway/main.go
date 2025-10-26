@@ -85,7 +85,7 @@ func main() {
 
 	registrar := dispatcher.NewRegistrar(table, providerManager)
 
-	lambdaManager, err := startLambdaManager(ctx, appCfg.LambdaManifest, bus, poolMgr, providerManager, registrar, logger)
+	lambdaManager, err := startLambdaManager(ctx, appCfg, bus, poolMgr, providerManager, registrar, logger)
 	if err != nil {
 		logger.Fatalf("initialise lambdas: %v", err)
 	}
@@ -212,9 +212,9 @@ func startProviderPipelines(ctx context.Context, logger *log.Logger, providers m
 	}
 }
 
-func startLambdaManager(ctx context.Context, manifest config.LambdaManifest, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
-	manager := lambdaruntime.NewManager(bus, poolMgr, providers, logger, registrar)
-	if err := manager.StartFromManifest(ctx, manifest); err != nil {
+func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
+	manager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providers, logger, registrar)
+	if err := manager.StartFromManifest(ctx, appCfg.LambdaManifest); err != nil {
 		return nil, fmt.Errorf("start manifest lambdas: %w", err)
 	}
 	return manager, nil

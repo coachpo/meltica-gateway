@@ -20,7 +20,9 @@ import (
 	"github.com/coachpo/meltica/internal/lambda/strategies"
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/provider"
+	"github.com/coachpo/meltica/internal/risk"
 	"github.com/coachpo/meltica/internal/schema"
+	"github.com/shopspring/decimal"
 )
 
 var (
@@ -88,11 +90,12 @@ type RouteRegistrar interface {
 type Manager struct {
 	mu sync.RWMutex
 
-	bus       eventbus.Bus
-	pools     *pool.PoolManager
-	providers ProviderCatalog
-	logger    *log.Logger
-	registrar RouteRegistrar
+	bus         eventbus.Bus
+	pools       *pool.PoolManager
+	providers   ProviderCatalog
+	logger      *log.Logger
+	registrar   RouteRegistrar
+	riskManager *risk.Manager
 
 	strategies map[string]StrategyDefinition
 	specs      map[string]config.LambdaSpec
@@ -106,20 +109,32 @@ type lambdaInstance struct {
 }
 
 // NewManager creates a new lambda manager with the specified dependencies.
-func NewManager(bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) *Manager {
+func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) *Manager {
 	if logger == nil {
 		logger = log.New(os.Stdout, "lambda-manager ", log.LstdFlags|log.Lmicroseconds)
 	}
+
+	maxPosSize, _ := decimal.NewFromString(cfg.Risk.MaxPositionSize)
+	maxNotional, _ := decimal.NewFromString(cfg.Risk.MaxNotionalValue)
+
+	rm := risk.NewManager(risk.Limits{
+		MaxPositionSize:  maxPosSize,
+		MaxNotionalValue: maxNotional,
+		NotionalCurrency: cfg.Risk.NotionalCurrency,
+		OrderThrottle:    cfg.Risk.OrderThrottle,
+	})
+
 	mgr := &Manager{
-		mu:         sync.RWMutex{},
-		bus:        bus,
-		pools:      pools,
-		providers:  providers,
-		logger:     logger,
-		registrar:  registrar,
-		strategies: make(map[string]StrategyDefinition),
-		specs:      make(map[string]config.LambdaSpec),
-		instances:  make(map[string]*lambdaInstance),
+		mu:          sync.RWMutex{},
+		bus:         bus,
+		pools:       pools,
+		providers:   providers,
+		logger:      logger,
+		registrar:   registrar,
+		riskManager: rm,
+		strategies:  make(map[string]StrategyDefinition),
+		specs:       make(map[string]config.LambdaSpec),
+		instances:   make(map[string]*lambdaInstance),
 	}
 	mgr.registerDefaults()
 	return mgr
@@ -456,7 +471,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec) (*lambda.B
 		}
 	}
 
-	base := lambda.NewBaseLambda(spec.ID, lambda.Config{Symbol: spec.Symbol, Provider: spec.Provider}, m.bus, providerInst, m.pools, strategy)
+	base := lambda.NewBaseLambda(spec.ID, lambda.Config{Symbol: spec.Symbol, Provider: spec.Provider}, m.bus, providerInst, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
 
 	runCtx, cancel := context.WithCancel(ctx)

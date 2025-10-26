@@ -13,6 +13,7 @@ import (
 
 	"github.com/coachpo/meltica/internal/bus/eventbus"
 	"github.com/coachpo/meltica/internal/pool"
+	"github.com/coachpo/meltica/internal/risk"
 	"github.com/coachpo/meltica/internal/schema"
 	"github.com/sourcegraph/conc"
 )
@@ -62,6 +63,7 @@ type BaseLambda struct {
 	pools          *pool.PoolManager
 	logger         *log.Logger
 	strategy       TradingStrategy
+	riskManager    *risk.Manager
 	baseCurrency   string
 	quoteCurrency  string
 
@@ -87,7 +89,7 @@ type OrderSubmitter interface {
 }
 
 // NewBaseLambda creates a new base lambda with the provided strategy.
-func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter OrderSubmitter, pools *pool.PoolManager, strategy TradingStrategy) *BaseLambda {
+func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter OrderSubmitter, pools *pool.PoolManager, strategy TradingStrategy, riskManager *risk.Manager) *BaseLambda {
 	if id == "" {
 		id = fmt.Sprintf("lambda-%s-%s", config.Symbol, config.Provider)
 	}
@@ -100,6 +102,7 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 		pools:          pools,
 		logger:         log.New(os.Stdout, "", log.LstdFlags),
 		strategy:       strategy,
+		riskManager:    riskManager,
 		baseCurrency:   "",
 		quoteCurrency:  "",
 		lastPrice:      atomic.Value{},
@@ -397,6 +400,12 @@ func (l *BaseLambda) SubmitOrder(ctx context.Context, side schema.TradeSide, qua
 	orderReq.TIF = "GTC"
 	orderReq.Timestamp = time.Now().UTC()
 
+	if l.riskManager != nil {
+		if err := l.riskManager.CheckOrder(ctx, orderReq); err != nil {
+			return fmt.Errorf("risk check failed: %w", err)
+		}
+	}
+
 	if err := l.orderSubmitter.SubmitOrder(ctx, *orderReq); err != nil {
 		return fmt.Errorf("submit order: %w", err)
 	}
@@ -431,6 +440,12 @@ func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, side schema.TradeSid
 	orderReq.Quantity = quantity
 	orderReq.TIF = "IOC"
 	orderReq.Timestamp = time.Now().UTC()
+
+	if l.riskManager != nil {
+		if err := l.riskManager.CheckOrder(ctx, orderReq); err != nil {
+			return fmt.Errorf("risk check failed: %w", err)
+		}
+	}
 
 	if err := l.orderSubmitter.SubmitOrder(ctx, *orderReq); err != nil {
 		return fmt.Errorf("submit market order: %w", err)

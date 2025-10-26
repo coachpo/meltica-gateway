@@ -30,6 +30,12 @@ eventbus:
 pools:
   eventSize: 100
   orderRequestSize: 50
+risk:
+  maxPositionSize: "10"
+  maxNotionalValue: "1000"
+  notionalCurrency: "USD"
+  orderThrottle: 5
+
 apiServer:
   addr: ":9999"
 telemetry:
