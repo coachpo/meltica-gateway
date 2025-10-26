@@ -29,7 +29,9 @@ var (
 		schema.EventTypeTrade,
 		schema.EventTypeTicker,
 		schema.EventTypeBookSnapshot,
+		schema.EventTypeKlineSummary,
 		schema.EventTypeBalanceUpdate,
+		schema.EventTypeRiskControl,
 	}
 	delayRandMu sync.Mutex
 )
@@ -147,5 +149,10 @@ func (s *Delay) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.
 
 // OnBalanceUpdate handles balance updates by adding a delay.
 func (s *Delay) OnBalanceUpdate(_ context.Context, _ *schema.Event, _ schema.BalanceUpdatePayload) {
+	s.sleep()
+}
+
+// OnRiskControl handles risk control notifications by adding a delay.
+func (s *Delay) OnRiskControl(_ context.Context, _ *schema.Event, _ schema.RiskControlPayload) {
 	s.sleep()
 }

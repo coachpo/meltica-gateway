@@ -63,3 +63,17 @@ func TestOrderBook_Match(t *testing.T) {
 		t.Fatalf("expected 0 asks, got %d", len(ob.asks))
 	}
 }
+
+func TestOrderBook_BestPrice(t *testing.T) {
+	ob := NewOrderBook()
+	price := "100"
+	order := &schema.OrderRequest{
+		Side:  schema.TradeSideSell,
+		Price: &price,
+	}
+	ob.AddOrder(order)
+	best := ob.BestPrice(schema.TradeSideBuy)
+	if best == nil || *best != price {
+		t.Fatalf("expected best ask %s, got %v", price, best)
+	}
+}

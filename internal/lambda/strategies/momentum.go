@@ -36,6 +36,7 @@ var momentumSubscribedEvents = []schema.EventType{
 	schema.EventTypeTrade,
 	schema.EventTypeExecReport,
 	schema.EventTypeBalanceUpdate,
+	schema.EventTypeRiskControl,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -156,6 +157,14 @@ func (s *Momentum) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ sche
 func (s *Momentum) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
 	s.Lambda.Logger().Printf("[MOMENTUM] Balance update: currency=%s total=%s available=%s",
 		payload.Currency, payload.Total, payload.Available)
+}
+
+// OnRiskControl resets momentum state in response to risk notifications.
+func (s *Momentum) OnRiskControl(_ context.Context, _ *schema.Event, payload schema.RiskControlPayload) {
+	s.mu.Lock()
+	s.position = 0
+	s.mu.Unlock()
+	s.Lambda.Logger().Printf("[MOMENTUM] Risk control notification: status=%s breach=%s reason=%s", payload.Status, payload.BreachType, payload.Reason)
 }
 
 // calculateMomentum returns the price change ratio over the lookback period.

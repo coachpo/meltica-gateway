@@ -11,6 +11,7 @@ import (
 
 	"github.com/coachpo/meltica/internal/config"
 	"github.com/coachpo/meltica/internal/pool"
+	"github.com/coachpo/meltica/internal/risk"
 )
 
 // NewHTTPHandler creates an HTTP handler for lambda management operations.
@@ -21,6 +22,7 @@ func NewHTTPHandler(manager *Manager) http.Handler {
 	mux.HandleFunc("/strategies/", server.handleStrategy)
 	mux.HandleFunc("/strategy-instances", server.handleInstances)
 	mux.HandleFunc("/strategy-instances/", server.handleInstance)
+	mux.HandleFunc("/risk/limits", server.handleRiskLimits)
 	return mux
 }
 
@@ -74,6 +76,25 @@ func (s *httpServer) handleInstances(w http.ResponseWriter, r *http.Request) {
 		}
 		snapshot, _ := s.manager.Instance(spec.ID)
 		writeJSON(w, http.StatusCreated, snapshot)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *httpServer) handleRiskLimits(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		limits := s.manager.RiskLimits()
+		writeJSON(w, http.StatusOK, map[string]any{"limits": riskConfigFromLimits(limits)})
+	case http.MethodPut:
+		cfg, err := decodeRiskConfig(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		limits := buildRiskLimits(cfg, s.manager.logger)
+		s.manager.UpdateRiskLimits(limits)
+		writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "limits": riskConfigFromLimits(limits)})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -197,6 +218,98 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 		return spec, fmt.Errorf("strategy required")
 	}
 	return spec, nil
+}
+
+func decodeRiskConfig(r *http.Request) (config.RiskConfig, error) {
+	defer func() {
+		_ = r.Body.Close()
+	}()
+	var cfg config.RiskConfig
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&cfg); err != nil {
+		return cfg, fmt.Errorf("decode payload: %w", err)
+	}
+	cfg.MaxPositionSize = strings.TrimSpace(cfg.MaxPositionSize)
+	cfg.MaxNotionalValue = strings.TrimSpace(cfg.MaxNotionalValue)
+	cfg.NotionalCurrency = strings.TrimSpace(cfg.NotionalCurrency)
+	if cfg.OrderBurst <= 0 {
+		cfg.OrderBurst = 1
+	}
+	if cfg.MaxRiskBreaches < 0 {
+		cfg.MaxRiskBreaches = 0
+	}
+	if cfg.CircuitBreaker.Threshold < 0 {
+		cfg.CircuitBreaker.Threshold = 0
+	}
+	for i, ot := range cfg.AllowedOrderTypes {
+		cfg.AllowedOrderTypes[i] = strings.TrimSpace(ot)
+	}
+	if err := validateRiskConfig(cfg); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
+	allowed := make([]string, 0, len(limits.AllowedOrderTypes))
+	for _, ot := range limits.AllowedOrderTypes {
+		allowed = append(allowed, string(ot))
+	}
+	cooldown := ""
+	if limits.CircuitBreaker.Cooldown > 0 {
+		cooldown = limits.CircuitBreaker.Cooldown.String()
+	}
+	return config.RiskConfig{
+		MaxPositionSize:     limits.MaxPositionSize.String(),
+		MaxNotionalValue:    limits.MaxNotionalValue.String(),
+		NotionalCurrency:    limits.NotionalCurrency,
+		OrderThrottle:       limits.OrderThrottle,
+		OrderBurst:          limits.OrderBurst,
+		MaxConcurrentOrders: limits.MaxConcurrentOrders,
+		PriceBandPercent:    limits.PriceBandPercent,
+		AllowedOrderTypes:   allowed,
+		KillSwitchEnabled:   limits.KillSwitchEnabled,
+		MaxRiskBreaches:     limits.MaxRiskBreaches,
+		CircuitBreaker: config.CircuitBreakerConfig{
+			Enabled:   limits.CircuitBreaker.Enabled,
+			Threshold: limits.CircuitBreaker.Threshold,
+			Cooldown:  cooldown,
+		},
+	}
+}
+
+func validateRiskConfig(cfg config.RiskConfig) error {
+	if cfg.MaxPositionSize == "" {
+		return fmt.Errorf("maxPositionSize required")
+	}
+	if cfg.MaxNotionalValue == "" {
+		return fmt.Errorf("maxNotionalValue required")
+	}
+	if cfg.NotionalCurrency == "" {
+		return fmt.Errorf("notionalCurrency required")
+	}
+	if cfg.OrderThrottle <= 0 {
+		return fmt.Errorf("orderThrottle must be > 0")
+	}
+	if cfg.OrderBurst <= 0 {
+		return fmt.Errorf("orderBurst must be > 0")
+	}
+	if cfg.MaxConcurrentOrders < 0 {
+		return fmt.Errorf("maxConcurrentOrders must be >= 0")
+	}
+	if cfg.PriceBandPercent < 0 {
+		return fmt.Errorf("priceBandPercent must be >= 0")
+	}
+	if cfg.MaxRiskBreaches < 0 {
+		return fmt.Errorf("maxRiskBreaches must be >= 0")
+	}
+	if cfg.CircuitBreaker.Threshold < 0 {
+		return fmt.Errorf("circuitBreaker.threshold must be >= 0")
+	}
+	if cfg.CircuitBreaker.Enabled && strings.TrimSpace(cfg.CircuitBreaker.Cooldown) == "" {
+		return fmt.Errorf("circuitBreaker.cooldown required when enabled")
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -34,6 +34,7 @@ var gridSubscribedEvents = []schema.EventType{
 	schema.EventTypeTrade,
 	schema.EventTypeExecReport,
 	schema.EventTypeBalanceUpdate,
+	schema.EventTypeRiskControl,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -156,4 +157,9 @@ func (s *Grid) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ schema.I
 // OnBalanceUpdate logs balance updates for monitoring.
 func (s *Grid) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
 	s.Lambda.Logger().Printf("[GRID] Balance update: currency=%s available=%s total=%s", payload.Currency, payload.Available, payload.Total)
+}
+
+// OnRiskControl logs risk control notifications.
+func (s *Grid) OnRiskControl(_ context.Context, _ *schema.Event, payload schema.RiskControlPayload) {
+	s.Lambda.Logger().Printf("[GRID] Risk control trigger: status=%s breach=%s reason=%s", payload.Status, payload.BreachType, payload.Reason)
 }

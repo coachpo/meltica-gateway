@@ -31,13 +31,26 @@ type APIServerConfig struct {
 
 // RiskConfig defines risk parameters for a single strategy.
 
-type RiskConfig struct {
-	MaxPositionSize  string  `yaml:"maxPositionSize"`
-	MaxNotionalValue string  `yaml:"maxNotionalValue"`
-	NotionalCurrency string  `yaml:"notionalCurrency"`
-	OrderThrottle    float64 `yaml:"orderThrottle"`
+type CircuitBreakerConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Threshold int    `yaml:"threshold"`
+	Cooldown  string `yaml:"cooldown"`
 }
 
+// RiskConfig defines risk parameters for a single strategy.
+type RiskConfig struct {
+	MaxPositionSize     string               `yaml:"maxPositionSize"`
+	MaxNotionalValue    string               `yaml:"maxNotionalValue"`
+	NotionalCurrency    string               `yaml:"notionalCurrency"`
+	OrderThrottle       float64              `yaml:"orderThrottle"`
+	OrderBurst          int                  `yaml:"orderBurst"`
+	MaxConcurrentOrders int                  `yaml:"maxConcurrentOrders"`
+	PriceBandPercent    float64              `yaml:"priceBandPercent"`
+	AllowedOrderTypes   []string             `yaml:"allowedOrderTypes"`
+	KillSwitchEnabled   bool                 `yaml:"killSwitchEnabled"`
+	MaxRiskBreaches     int                  `yaml:"maxRiskBreaches"`
+	CircuitBreaker      CircuitBreakerConfig `yaml:"circuitBreaker"`
+}
 
 // TelemetryConfig configures OTLP exporters (metrics only).
 type TelemetryConfig struct {
@@ -100,6 +113,19 @@ func (c *AppConfig) normalise() {
 	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
 	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
 	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
+
+	if c.Risk.OrderBurst <= 0 {
+		c.Risk.OrderBurst = 1
+	}
+	if c.Risk.MaxRiskBreaches < 0 {
+		c.Risk.MaxRiskBreaches = 0
+	}
+	if c.Risk.CircuitBreaker.Threshold < 0 {
+		c.Risk.CircuitBreaker.Threshold = 0
+	}
+	for i, ot := range c.Risk.AllowedOrderTypes {
+		c.Risk.AllowedOrderTypes[i] = strings.TrimSpace(ot)
+	}
 }
 
 // Validate performs semantic validation on the configuration.
@@ -139,6 +165,24 @@ func (c AppConfig) Validate() error {
 	}
 	if c.Risk.OrderThrottle <= 0 {
 		return fmt.Errorf("risk orderThrottle must be > 0")
+	}
+	if c.Risk.OrderBurst <= 0 {
+		return fmt.Errorf("risk orderBurst must be > 0")
+	}
+	if c.Risk.MaxConcurrentOrders < 0 {
+		return fmt.Errorf("risk maxConcurrentOrders must be >= 0")
+	}
+	if c.Risk.PriceBandPercent < 0 {
+		return fmt.Errorf("risk priceBandPercent must be >= 0")
+	}
+	if c.Risk.MaxRiskBreaches < 0 {
+		return fmt.Errorf("risk maxRiskBreaches must be >= 0")
+	}
+	if c.Risk.CircuitBreaker.Threshold < 0 {
+		return fmt.Errorf("risk circuitBreaker threshold must be >= 0")
+	}
+	if c.Risk.CircuitBreaker.Enabled && strings.TrimSpace(c.Risk.CircuitBreaker.Cooldown) == "" {
+		return fmt.Errorf("risk circuitBreaker cooldown required when enabled")
 	}
 
 	if strings.TrimSpace(c.Telemetry.ServiceName) == "" {

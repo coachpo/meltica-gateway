@@ -13,13 +13,33 @@ func TestSimulatedExchange_SubmitOrder(t *testing.T) {
 	se := NewSimulatedExchange(strategy)
 
 	price := "100"
-	order := schema.OrderRequest{
-		Symbol: "BTC-USDT",
-		Side:   schema.TradeSideBuy,
-		Price:  &price,
+	quantity := "1"
+	ask := schema.OrderRequest{
+		Symbol:    "BTC-USDT",
+		Side:      schema.TradeSideSell,
+		OrderType: schema.OrderTypeLimit,
+		Price:     &price,
+		Quantity:  quantity,
 	}
 
-	if err := se.SubmitOrder(context.Background(), order); err != nil {
-		t.Fatalf("SubmitOrder failed: %v", err)
+	if _, err := se.SubmitOrder(context.Background(), ask); err != nil {
+		t.Fatalf("SubmitOrder (ask) failed: %v", err)
+	}
+
+	buyPrice := "105"
+	bid := schema.OrderRequest{
+		Symbol:    "BTC-USDT",
+		Side:      schema.TradeSideBuy,
+		OrderType: schema.OrderTypeLimit,
+		Price:     &buyPrice,
+		Quantity:  quantity,
+	}
+
+	result, err := se.SubmitOrder(context.Background(), bid)
+	if err != nil {
+		t.Fatalf("SubmitOrder (bid) failed: %v", err)
+	}
+	if result.Report.FilledQuantity != quantity {
+		t.Fatalf("expected filled quantity %s, got %s", quantity, result.Report.FilledQuantity)
 	}
 }

@@ -39,6 +39,7 @@ var marketMakingSubscribedEvents = []schema.EventType{
 	schema.EventTypeTicker,
 	schema.EventTypeExecReport,
 	schema.EventTypeBalanceUpdate,
+	schema.EventTypeRiskControl,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -198,6 +199,14 @@ func (s *MarketMaking) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ 
 func (s *MarketMaking) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
 	s.Lambda.Logger().Printf("[MM] Balance update: currency=%s total=%s available=%s",
 		payload.Currency, payload.Total, payload.Available)
+}
+
+// OnRiskControl resets state when risk controls trigger.
+func (s *MarketMaking) OnRiskControl(_ context.Context, _ *schema.Event, payload schema.RiskControlPayload) {
+	s.activeBuyOrders.Store(0)
+	s.activeSellOrders.Store(0)
+	s.lastQuotePrice.Store(float64(0))
+	s.Lambda.Logger().Printf("[MM] Risk control notification: status=%s breach=%s reason=%s", payload.Status, payload.BreachType, payload.Reason)
 }
 
 // ParseFloat safely parses a string to float64.

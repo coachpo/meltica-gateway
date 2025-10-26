@@ -3,6 +3,7 @@ package lambda
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/risk"
 	"github.com/coachpo/meltica/internal/schema"
+	"github.com/shopspring/decimal"
 	"github.com/sourcegraph/conc"
 )
 
@@ -38,6 +40,9 @@ type TradingStrategy interface {
 	// Order tracking callbacks (for persistence, auditing, metrics)
 	OnOrderAcknowledged(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
 	OnOrderExpired(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload)
+
+	// Risk control notifications
+	OnRiskControl(ctx context.Context, evt *schema.Event, payload schema.RiskControlPayload)
 
 	// SubscribedEvents declares the event types the strategy consumes.
 	SubscribedEvents() []schema.EventType
@@ -141,8 +146,10 @@ func (l *BaseLambda) Start(ctx context.Context) (<-chan error, error) {
 		schema.EventTypeTicker,
 		schema.EventTypeBookSnapshot,
 		schema.EventTypeExecReport,
+		schema.EventTypeKlineSummary,
 		schema.EventTypeInstrumentUpdate,
 		schema.EventTypeBalanceUpdate,
+		schema.EventTypeRiskControl,
 	}
 
 	errs := make(chan error, len(eventTypes))
@@ -234,6 +241,8 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 		l.handleInstrumentUpdate(ctx, evt)
 	case schema.EventTypeBalanceUpdate:
 		l.handleBalanceUpdate(ctx, evt)
+	case schema.EventTypeRiskControl:
+		l.handleRiskControl(ctx, evt)
 	}
 }
 
@@ -249,6 +258,11 @@ func (l *BaseLambda) handleTrade(ctx context.Context, evt *schema.Event) {
 	}
 
 	l.lastPrice.Store(price)
+	if l.riskManager != nil {
+		if decPrice, convErr := decimal.NewFromString(payload.Price); convErr == nil {
+			l.riskManager.ObserveMarketPrice(evt.Symbol, decPrice)
+		}
+	}
 
 	if l.strategy != nil {
 		l.strategy.OnTrade(ctx, evt, payload, price)
@@ -268,6 +282,11 @@ func (l *BaseLambda) handleTicker(ctx context.Context, evt *schema.Event) {
 	l.lastPrice.Store(lastPrice)
 	l.bidPrice.Store(bidPrice)
 	l.askPrice.Store(askPrice)
+	if l.riskManager != nil {
+		if decPrice, convErr := decimal.NewFromString(payload.LastPrice); convErr == nil {
+			l.riskManager.ObserveMarketPrice(evt.Symbol, decPrice)
+		}
+	}
 
 	if l.strategy != nil {
 		l.strategy.OnTicker(ctx, evt, payload)
@@ -290,6 +309,17 @@ func (l *BaseLambda) handleBookSnapshot(ctx context.Context, evt *schema.Event) 
 		l.askPrice.Store(askPrice)
 	}
 
+	if l.riskManager != nil {
+		if len(payload.Bids) > 0 && len(payload.Asks) > 0 {
+			if bidDec, errBid := decimal.NewFromString(payload.Bids[0].Price); errBid == nil {
+				if askDec, errAsk := decimal.NewFromString(payload.Asks[0].Price); errAsk == nil {
+					mid := bidDec.Add(askDec).Div(decimal.NewFromInt(2))
+					l.riskManager.ObserveMarketPrice(evt.Symbol, mid)
+				}
+			}
+		}
+	}
+
 	if l.strategy != nil {
 		l.strategy.OnBookSnapshot(ctx, evt, payload)
 	}
@@ -304,6 +334,10 @@ func (l *BaseLambda) handleExecReport(ctx context.Context, evt *schema.Event) {
 	// Only process ExecReports for orders submitted by this lambda
 	if !l.IsMyOrder(payload.ClientOrderID) {
 		return
+	}
+
+	if l.riskManager != nil {
+		l.riskManager.HandleExecution(evt.Symbol, payload)
 	}
 
 	// Delegate to strategy based on state
@@ -372,6 +406,31 @@ func (l *BaseLambda) handleBalanceUpdate(ctx context.Context, evt *schema.Event)
 	l.strategy.OnBalanceUpdate(ctx, evt, payload)
 }
 
+func (l *BaseLambda) handleRiskControl(ctx context.Context, evt *schema.Event) {
+	if l.strategy == nil {
+		return
+	}
+	var payload schema.RiskControlPayload
+	switch v := evt.Payload.(type) {
+	case schema.RiskControlPayload:
+		payload = v
+	case *schema.RiskControlPayload:
+		if v == nil {
+			return
+		}
+		payload = *v
+	default:
+		return
+	}
+	if payload.Provider == "" {
+		payload.Provider = evt.Provider
+	}
+	if payload.Symbol == "" {
+		payload.Symbol = evt.Symbol
+	}
+	l.strategy.OnRiskControl(ctx, evt, payload)
+}
+
 // SubmitOrder submits an order request to the provider.
 func (l *BaseLambda) SubmitOrder(ctx context.Context, side schema.TradeSide, quantity string, price *string) error {
 	if l.orderSubmitter == nil {
@@ -402,6 +461,7 @@ func (l *BaseLambda) SubmitOrder(ctx context.Context, side schema.TradeSide, qua
 
 	if l.riskManager != nil {
 		if err := l.riskManager.CheckOrder(ctx, orderReq); err != nil {
+			l.emitRiskControlEvent(ctx, l.buildRiskControlPayload(err))
 			return fmt.Errorf("risk check failed: %w", err)
 		}
 	}
@@ -443,6 +503,7 @@ func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, side schema.TradeSid
 
 	if l.riskManager != nil {
 		if err := l.riskManager.CheckOrder(ctx, orderReq); err != nil {
+			l.emitRiskControlEvent(ctx, l.buildRiskControlPayload(err))
 			return fmt.Errorf("risk check failed: %w", err)
 		}
 	}
@@ -589,4 +650,76 @@ func (l *BaseLambda) matchesBalanceCurrency(symbol string) bool {
 		return true
 	}
 	return false
+}
+
+func (l *BaseLambda) buildRiskControlPayload(err error) schema.RiskControlPayload {
+	payload := schema.RiskControlPayload{
+		StrategyID: l.id,
+		Provider:   l.config.Provider,
+		Symbol:     l.config.Symbol,
+		Status:     schema.RiskControlStatusTriggered,
+		Reason:     err.Error(),
+		BreachType: "UNKNOWN",
+		Timestamp:  time.Now().UTC(),
+	}
+
+	var breach *risk.BreachError
+	if errors.As(err, &breach) && breach != nil {
+		payload.Reason = breach.Reason
+		payload.BreachType = string(breach.Type)
+		if len(breach.Details) > 0 {
+			metrics := make(map[string]string, len(breach.Details))
+			for k, v := range breach.Details {
+				metrics[k] = v
+			}
+			payload.Metrics = metrics
+		}
+		payload.KillSwitchEngaged = breach.KillSwitchEngaged
+		payload.CircuitBreakerOpen = breach.CircuitBreakerOpen
+	} else if errors.Is(err, risk.ErrKillSwitchEngaged) {
+		payload.BreachType = string(risk.BreachTypeKillSwitch)
+		payload.KillSwitchEngaged = true
+		payload.Reason = "kill switch engaged"
+	} else if errors.Is(err, risk.ErrCircuitBreakerOpen) {
+		payload.BreachType = string(risk.BreachTypeKillSwitch)
+		payload.KillSwitchEngaged = true
+		payload.CircuitBreakerOpen = true
+		payload.Reason = "circuit breaker open"
+	}
+
+	return payload
+}
+
+func (l *BaseLambda) emitRiskControlEvent(ctx context.Context, payload schema.RiskControlPayload) {
+	if l.bus == nil {
+		return
+	}
+	if payload.Timestamp.IsZero() {
+		payload.Timestamp = time.Now().UTC()
+	}
+
+	if l.pools == nil {
+		l.logger.Printf("[%s] risk control event skipped: event pool unavailable", l.id)
+		return
+	}
+
+	evt, err := l.pools.BorrowEventInst(ctx)
+	if err != nil {
+		l.logger.Printf("[%s] unable to borrow event from pool: %v", l.id, err)
+		return
+	}
+	evt.EventID = fmt.Sprintf("risk:%s:%d", l.id, payload.Timestamp.UnixNano())
+	evt.Provider = l.config.Provider
+	evt.Symbol = l.config.Symbol
+	evt.Type = schema.EventTypeRiskControl
+	evt.IngestTS = payload.Timestamp
+	evt.EmitTS = payload.Timestamp
+	evt.Payload = payload
+
+	if err := l.bus.Publish(ctx, evt); err != nil {
+		l.logger.Printf("[%s] publish risk control event: %v", l.id, err)
+		if l.pools != nil {
+			l.pools.ReturnEventInst(evt)
+		}
+	}
 }

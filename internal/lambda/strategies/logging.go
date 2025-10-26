@@ -20,7 +20,9 @@ var loggingSubscribedEvents = []schema.EventType{
 	schema.EventTypeTicker,
 	schema.EventTypeBookSnapshot,
 	schema.EventTypeExecReport,
+	schema.EventTypeKlineSummary,
 	schema.EventTypeBalanceUpdate,
+	schema.EventTypeRiskControl,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -122,4 +124,11 @@ func (s *Logging) OnInstrumentUpdate(_ context.Context, evt *schema.Event, paylo
 func (s *Logging) OnBalanceUpdate(_ context.Context, evt *schema.Event, payload schema.BalanceUpdatePayload) {
 	s.logger().Printf("Balance update: provider=%s currency=%s total=%s available=%s",
 		evt.Provider, payload.Currency, payload.Total, payload.Available)
+}
+
+// OnRiskControl logs risk control notifications.
+func (s *Logging) OnRiskControl(_ context.Context, _ *schema.Event, payload schema.RiskControlPayload) {
+	logger := s.logger()
+	logger.Printf("Risk control: strategy=%s status=%s breach=%s reason=%s metrics=%v killSwitch=%t circuitBreaker=%t",
+		payload.StrategyID, payload.Status, payload.BreachType, payload.Reason, payload.Metrics, payload.KillSwitchEngaged, payload.CircuitBreakerOpen)
 }

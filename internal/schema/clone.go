@@ -48,6 +48,14 @@ func clonePayload(payload any) any {
 		}
 		cloned := *v
 		return &cloned
+	case RiskControlPayload:
+		return cloneRiskControlPayload(v)
+	case *RiskControlPayload:
+		if v == nil {
+			return nil
+		}
+		cloned := cloneRiskControlPayload(*v)
+		return &cloned
 	case InstrumentUpdatePayload:
 		return cloneInstrumentUpdatePayload(v)
 	case *InstrumentUpdatePayload:
@@ -79,6 +87,18 @@ func cloneBookSnapshotPayload(payload BookSnapshotPayload) BookSnapshotPayload {
 func cloneInstrumentUpdatePayload(payload InstrumentUpdatePayload) InstrumentUpdatePayload {
 	cloned := payload
 	cloned.Instrument = CloneInstrument(payload.Instrument)
+	return cloned
+}
+
+func cloneRiskControlPayload(payload RiskControlPayload) RiskControlPayload {
+	cloned := payload
+	if len(payload.Metrics) > 0 {
+		metrics := make(map[string]string, len(payload.Metrics))
+		for k, v := range payload.Metrics {
+			metrics[k] = v
+		}
+		cloned.Metrics = metrics
+	}
 	return cloned
 }
 
@@ -127,6 +147,14 @@ func cloneInterface(value any) any {
 			return nil
 		}
 		cloned := cloneInstrumentUpdatePayload(*v)
+		return &cloned
+	case RiskControlPayload:
+		return cloneRiskControlPayload(v)
+	case *RiskControlPayload:
+		if v == nil {
+			return nil
+		}
+		cloned := cloneRiskControlPayload(*v)
 		return &cloned
 	default:
 		return v

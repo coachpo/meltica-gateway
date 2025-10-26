@@ -27,6 +27,8 @@ const (
 	RouteTypeKlineSummary RouteType = "KLINE.SUMMARY"
 	// RouteTypeInstrumentUpdate designates instrument catalogue refresh notifications.
 	RouteTypeInstrumentUpdate RouteType = "INSTRUMENT.UPDATE"
+	// RouteTypeRiskControl designates risk control notifications emitted from runtime safeguards.
+	RouteTypeRiskControl RouteType = "RISK.CONTROL"
 )
 
 var (
@@ -38,6 +40,7 @@ var (
 		RouteTypeExecutionReport:   EventTypeExecReport,
 		RouteTypeKlineSummary:      EventTypeKlineSummary,
 		RouteTypeInstrumentUpdate:  EventTypeInstrumentUpdate,
+		RouteTypeRiskControl:       EventTypeRiskControl,
 	}
 	eventTypeToRoutes = map[EventType]RouteType{
 		EventTypeBalanceUpdate:    RouteTypeAccountBalance,
@@ -47,6 +50,7 @@ var (
 		EventTypeExecReport:       RouteTypeExecutionReport,
 		EventTypeKlineSummary:     RouteTypeKlineSummary,
 		EventTypeInstrumentUpdate: RouteTypeInstrumentUpdate,
+		EventTypeRiskControl:      RouteTypeRiskControl,
 	}
 )
 
@@ -217,6 +221,8 @@ const (
 	EventTypeInstrumentUpdate EventType = "InstrumentUpdate"
 	// EventTypeBalanceUpdate identifies account balance updates emitted by providers.
 	EventTypeBalanceUpdate EventType = "BalanceUpdate"
+	// EventTypeRiskControl identifies risk control notifications emitted by runtime safeguards.
+	EventTypeRiskControl EventType = "RiskControl"
 )
 
 // PriceLevel describes an order book price level using decimal strings.
@@ -333,4 +339,28 @@ type BalanceUpdatePayload struct {
 	Total     string    `json:"total"`
 	Available string    `json:"available"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+// RiskControlStatus enumerates state transitions for risk notifications.
+type RiskControlStatus string
+
+const (
+	// RiskControlStatusTriggered indicates a risk breach preventing order submission.
+	RiskControlStatusTriggered RiskControlStatus = "TRIGGERED"
+	// RiskControlStatusCleared indicates risk controls have been reset or cleared.
+	RiskControlStatusCleared RiskControlStatus = "CLEARED"
+)
+
+// RiskControlPayload conveys details about runtime risk control actions.
+type RiskControlPayload struct {
+	StrategyID         string            `json:"strategy_id"`
+	Provider           string            `json:"provider"`
+	Symbol             string            `json:"symbol"`
+	Status             RiskControlStatus `json:"status"`
+	Reason             string            `json:"reason"`
+	BreachType         string            `json:"breach_type"`
+	Metrics            map[string]string `json:"metrics,omitempty"`
+	KillSwitchEngaged  bool              `json:"kill_switch_engaged"`
+	CircuitBreakerOpen bool              `json:"circuit_breaker_open"`
+	Timestamp          time.Time         `json:"timestamp"`
 }

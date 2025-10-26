@@ -112,4 +112,11 @@ lambdaManifest:
 	if manifest.AutoStart {
 		t.Fatalf("expected test-lambda autostart disabled")
 	}
+
+	if cfg.Risk.OrderBurst != 1 {
+		t.Fatalf("expected default order burst 1, got %d", cfg.Risk.OrderBurst)
+	}
+	if cfg.Risk.MaxConcurrentOrders != 0 {
+		t.Fatalf("expected default max concurrent orders 0, got %d", cfg.Risk.MaxConcurrentOrders)
+	}
 }

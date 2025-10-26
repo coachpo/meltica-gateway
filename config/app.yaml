@@ -371,6 +371,18 @@ risk:
   maxNotionalValue: "100000"
   notionalCurrency: "USDT"
   orderThrottle: 10
+  orderBurst: 5
+  maxConcurrentOrders: 10
+  priceBandPercent: 1.25
+  allowedOrderTypes:
+    - Limit
+    - Market
+  killSwitchEnabled: true
+  maxRiskBreaches: 3
+  circuitBreaker:
+    enabled: true
+    threshold: 5
+    cooldown: 2m
 
 # apiServer: control API bind address (host:port or :port)
 apiServer:

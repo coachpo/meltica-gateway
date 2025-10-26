@@ -73,5 +73,9 @@ func main() {
 		log.Fatalf("backtest failed: %v", err)
 	}
 
-	fmt.Println("Backtest finished successfully")
+	analytics := engine.Analytics()
+	fmt.Printf("Backtest finished successfully\n")
+	fmt.Printf("Orders: %d, Filled: %d, Volume: %s\n", analytics.TotalOrders, analytics.FilledOrders, analytics.TotalVolume.String())
+	fmt.Printf("Gross PnL: %s, Fees: %s, Net PnL: %s, Max Drawdown: %s\n",
+		analytics.GrossPnL.String(), analytics.Fees.String(), analytics.NetPnL.String(), analytics.MaxDrawdown.String())
 }

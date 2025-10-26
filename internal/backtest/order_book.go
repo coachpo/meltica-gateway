@@ -92,3 +92,21 @@ func (ob *OrderBook) Match(order *schema.OrderRequest) []*schema.TradePayload {
 	ob.AddOrder(order)
 	return trades
 }
+
+// BestPrice returns the best opposing price for the provided side.
+func (ob *OrderBook) BestPrice(side schema.TradeSide) *string {
+	switch side {
+	case schema.TradeSideBuy:
+		if len(ob.asks) == 0 {
+			return nil
+		}
+		return ob.asks[0].Price
+	case schema.TradeSideSell:
+		if len(ob.bids) == 0 {
+			return nil
+		}
+		return ob.bids[0].Price
+	default:
+		return nil
+	}
+}

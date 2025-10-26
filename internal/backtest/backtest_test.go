@@ -16,11 +16,16 @@ func TestEngine_Run(t *testing.T) {
 
 	// Run the backtest for a short duration.
 	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
 	go func() {
-		if err := engine.Run(ctx); err != nil {
-			// Backtest finished.
-		}
+		errCh <- engine.Run(ctx)
 	}()
 
 	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if analytics := engine.Analytics(); analytics.TotalOrders != 0 {
+		t.Fatalf("expected no orders recorded, got %d", analytics.TotalOrders)
+	}
 }

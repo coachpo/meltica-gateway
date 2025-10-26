@@ -14,6 +14,7 @@ var noopSubscribedEvents = []schema.EventType{
 	schema.EventTypeTicker,
 	schema.EventTypeBookSnapshot,
 	schema.EventTypeBalanceUpdate,
+	schema.EventTypeRiskControl,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -58,3 +59,6 @@ func (s *NoOp) OnOrderExpired(_ context.Context, _ *schema.Event, _ schema.ExecR
 
 // OnKlineSummary does nothing.
 func (s *NoOp) OnKlineSummary(_ context.Context, _ *schema.Event, _ schema.KlineSummaryPayload) {}
+
+// OnRiskControl does nothing.
+func (s *NoOp) OnRiskControl(_ context.Context, _ *schema.Event, _ schema.RiskControlPayload) {}

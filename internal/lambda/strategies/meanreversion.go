@@ -34,6 +34,7 @@ var meanReversionSubscribedEvents = []schema.EventType{
 	schema.EventTypeTrade,
 	schema.EventTypeExecReport,
 	schema.EventTypeBalanceUpdate,
+	schema.EventTypeRiskControl,
 }
 
 // SubscribedEvents returns the list of event types this strategy subscribes to.
@@ -157,4 +158,12 @@ func (s *MeanReversion) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _
 func (s *MeanReversion) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
 	s.Lambda.Logger().Printf("[MEAN_REV] Balance update: currency=%s total=%s available=%s",
 		payload.Currency, payload.Total, payload.Available)
+}
+
+// OnRiskControl responds to risk control notifications by resetting internal state.
+func (s *MeanReversion) OnRiskControl(_ context.Context, _ *schema.Event, payload schema.RiskControlPayload) {
+	s.mu.Lock()
+	s.hasPosition = false
+	s.mu.Unlock()
+	s.Lambda.Logger().Printf("[MEAN_REV] Risk control notification: status=%s breach=%s reason=%s", payload.Status, payload.BreachType, payload.Reason)
 }

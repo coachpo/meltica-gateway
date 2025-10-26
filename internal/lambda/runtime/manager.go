@@ -36,6 +36,53 @@ var (
 	ErrInstanceNotRunning = errors.New("strategy instance not running")
 )
 
+func buildRiskLimits(cfg config.RiskConfig, logger *log.Logger) risk.Limits {
+	maxPosSize, _ := decimal.NewFromString(cfg.MaxPositionSize)
+	maxNotional, _ := decimal.NewFromString(cfg.MaxNotionalValue)
+
+	var allowedOrderTypes []schema.OrderType
+	if len(cfg.AllowedOrderTypes) > 0 {
+		allowedOrderTypes = make([]schema.OrderType, 0, len(cfg.AllowedOrderTypes))
+		for _, raw := range cfg.AllowedOrderTypes {
+			trimmed := strings.TrimSpace(raw)
+			if trimmed == "" {
+				continue
+			}
+			allowedOrderTypes = append(allowedOrderTypes, schema.OrderType(trimmed))
+		}
+	}
+
+	var breakerCooldown time.Duration
+	if cfg.CircuitBreaker.Cooldown != "" {
+		parsed, err := time.ParseDuration(strings.TrimSpace(cfg.CircuitBreaker.Cooldown))
+		if err != nil {
+			if logger != nil {
+				logger.Printf("risk: invalid circuit breaker cooldown %q: %v", cfg.CircuitBreaker.Cooldown, err)
+			}
+		} else {
+			breakerCooldown = parsed
+		}
+	}
+
+	return risk.Limits{
+		MaxPositionSize:     maxPosSize,
+		MaxNotionalValue:    maxNotional,
+		NotionalCurrency:    cfg.NotionalCurrency,
+		OrderThrottle:       cfg.OrderThrottle,
+		OrderBurst:          cfg.OrderBurst,
+		MaxConcurrentOrders: cfg.MaxConcurrentOrders,
+		PriceBandPercent:    cfg.PriceBandPercent,
+		AllowedOrderTypes:   allowedOrderTypes,
+		KillSwitchEnabled:   cfg.KillSwitchEnabled,
+		MaxRiskBreaches:     cfg.MaxRiskBreaches,
+		CircuitBreaker: risk.CircuitBreaker{
+			Enabled:   cfg.CircuitBreaker.Enabled,
+			Threshold: cfg.CircuitBreaker.Threshold,
+			Cooldown:  breakerCooldown,
+		},
+	}
+}
+
 // StrategyFactory creates trading strategy instances from configuration.
 type StrategyFactory func(config map[string]any) (lambda.TradingStrategy, error)
 
@@ -114,15 +161,7 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 		logger = log.New(os.Stdout, "lambda-manager ", log.LstdFlags|log.Lmicroseconds)
 	}
 
-	maxPosSize, _ := decimal.NewFromString(cfg.Risk.MaxPositionSize)
-	maxNotional, _ := decimal.NewFromString(cfg.Risk.MaxNotionalValue)
-
-	rm := risk.NewManager(risk.Limits{
-		MaxPositionSize:  maxPosSize,
-		MaxNotionalValue: maxNotional,
-		NotionalCurrency: cfg.Risk.NotionalCurrency,
-		OrderThrottle:    cfg.Risk.OrderThrottle,
-	})
+	rm := risk.NewManager(buildRiskLimits(cfg.Risk, logger))
 
 	mgr := &Manager{
 		mu:          sync.RWMutex{},
@@ -321,6 +360,19 @@ func (m *Manager) registerDefaults() {
 			return strat, nil
 		},
 	})
+}
+
+// RiskLimits returns the currently applied risk limits.
+func (m *Manager) RiskLimits() risk.Limits {
+	return m.riskManager.Limits()
+}
+
+// UpdateRiskLimits applies new risk limits across strategy instances.
+func (m *Manager) UpdateRiskLimits(limits risk.Limits) {
+	m.riskManager.UpdateLimits(limits)
+	if m.logger != nil {
+		m.logger.Printf("risk limits updated: throttle=%.2f, burst=%d", limits.OrderThrottle, limits.OrderBurst)
+	}
 }
 
 func (m *Manager) registerStrategy(def StrategyDefinition) {
