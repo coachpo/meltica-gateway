@@ -30,6 +30,11 @@ func (s *Logging) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), loggingSubscribedEvents...)
 }
 
+// WantsCrossProviderEvents indicates logging strategy accepts multi-provider feeds.
+func (s *Logging) WantsCrossProviderEvents() bool {
+	return true
+}
+
 func (s *Logging) logger() *log.Logger {
 	if s.Logger != nil {
 		return s.Logger

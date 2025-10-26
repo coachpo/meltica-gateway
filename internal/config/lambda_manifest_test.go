@@ -6,7 +6,7 @@ func TestLambdaManifestValidate(t *testing.T) {
 	manifest := LambdaManifest{
 		Lambdas: []LambdaSpec{{
 			ID:        "test-lambda",
-			Provider:  "fake",
+			Providers: []string{"fake"},
 			Symbol:    "BTC-USDT",
 			Strategy:  "delay",
 			Config:    map[string]any{"min_delay": "100ms"},
@@ -28,10 +28,10 @@ func TestLambdaManifestValidateMissingEntries(t *testing.T) {
 func TestLambdaManifestValidateMissingFields(t *testing.T) {
 	manifest := LambdaManifest{
 		Lambdas: []LambdaSpec{{
-			ID:       "",
-			Provider: "fake",
-			Symbol:   "BTC-USDT",
-			Strategy: "delay",
+			ID:        "",
+			Providers: []string{"fake"},
+			Symbol:    "BTC-USDT",
+			Strategy:  "delay",
 		}},
 	}
 	if err := manifest.Validate(); err == nil {

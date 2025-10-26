@@ -41,6 +41,11 @@ func (s *Delay) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), delaySubscribedEvents...)
 }
 
+// WantsCrossProviderEvents indicates delay strategy accepts cross-provider feeds.
+func (s *Delay) WantsCrossProviderEvents() bool {
+	return true
+}
+
 func (s *Delay) sleep() {
 	minDelay := s.MinDelay
 	maxDelay := s.MaxDelay

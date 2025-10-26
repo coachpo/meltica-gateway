@@ -2,8 +2,11 @@ package strategies
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/coachpo/meltica/internal/schema"
 )
@@ -15,7 +18,9 @@ type Grid struct {
 		Logger() *log.Logger
 		GetLastPrice() float64
 		IsTradingActive() bool
-		SubmitOrder(ctx context.Context, side schema.TradeSide, quantity string, price *float64) error
+		Providers() []string
+		SelectProvider(seed uint64) (string, error)
+		SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error
 	}
 
 	// Configuration
@@ -40,6 +45,11 @@ var gridSubscribedEvents = []schema.EventType{
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *Grid) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), gridSubscribedEvents...)
+}
+
+// WantsCrossProviderEvents indicates grid strategies expect multi-provider feeds.
+func (s *Grid) WantsCrossProviderEvents() bool {
+	return true
 }
 
 // OnTrade initializes grid if needed.
@@ -72,7 +82,7 @@ func (s *Grid) OnTicker(_ context.Context, _ *schema.Event, _ schema.TickerPaylo
 func (s *Grid) OnBookSnapshot(_ context.Context, _ *schema.Event, _ schema.BookSnapshotPayload) {}
 
 // OnOrderFilled replaces the filled order with a new one on the opposite side.
-func (s *Grid) OnOrderFilled(ctx context.Context, _ *schema.Event, payload schema.ExecReportPayload) {
+func (s *Grid) OnOrderFilled(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -91,12 +101,25 @@ func (s *Grid) OnOrderFilled(ctx context.Context, _ *schema.Event, payload schem
 		oppositeSide = schema.TradeSideBuy
 	}
 
-	if err := s.Lambda.SubmitOrder(ctx, oppositeSide, s.OrderSize, &fillPrice); err != nil {
+	provider := ""
+	if evt != nil {
+		provider = strings.TrimSpace(evt.Provider)
+	}
+	if provider == "" {
+		var selErr error
+		provider, selErr = s.randomProvider()
+		if selErr != nil {
+			s.Lambda.Logger().Printf("[GRID] Failed to select provider for opposite order: %v", selErr)
+			return
+		}
+	}
+
+	if err := s.Lambda.SubmitOrder(ctx, provider, oppositeSide, s.OrderSize, &fillPrice); err != nil {
 		s.Lambda.Logger().Printf("[GRID] Failed to place opposite order: %v", err)
 	} else {
 		s.activeGrids[fillPrice] = true
-		s.Lambda.Logger().Printf("[GRID] Filled %s at %.2f, placed %s order",
-			payload.Side, fillPrice, oppositeSide)
+		s.Lambda.Logger().Printf("[GRID] Filled %s at %.2f on %s, placed %s order",
+			payload.Side, fillPrice, provider, oppositeSide)
 	}
 }
 
@@ -121,22 +144,32 @@ func (s *Grid) placeGridOrders(ctx context.Context) {
 	// Place buy orders below base price
 	for i := 1; i <= s.GridLevels; i++ {
 		buyPrice := s.BasePrice * (1 - spacingMultiplier*float64(i))
-		if err := s.Lambda.SubmitOrder(ctx, schema.TradeSideBuy, s.OrderSize, &buyPrice); err != nil {
+		provider, err := s.randomProvider()
+		if err != nil {
+			s.Lambda.Logger().Printf("[GRID] Unable to select provider for buy order: %v", err)
+			continue
+		}
+		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize, &buyPrice); err != nil {
 			s.Lambda.Logger().Printf("[GRID] Failed to place buy order at %.2f: %v", buyPrice, err)
 		} else {
 			s.activeGrids[buyPrice] = true
-			s.Lambda.Logger().Printf("[GRID] Placed buy order at %.2f", buyPrice)
+			s.Lambda.Logger().Printf("[GRID] Placed buy order at %.2f on %s", buyPrice, provider)
 		}
 	}
 
 	// Place sell orders above base price
 	for i := 1; i <= s.GridLevels; i++ {
 		sellPrice := s.BasePrice * (1 + spacingMultiplier*float64(i))
-		if err := s.Lambda.SubmitOrder(ctx, schema.TradeSideSell, s.OrderSize, &sellPrice); err != nil {
+		provider, err := s.randomProvider()
+		if err != nil {
+			s.Lambda.Logger().Printf("[GRID] Unable to select provider for sell order: %v", err)
+			continue
+		}
+		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideSell, s.OrderSize, &sellPrice); err != nil {
 			s.Lambda.Logger().Printf("[GRID] Failed to place sell order at %.2f: %v", sellPrice, err)
 		} else {
 			s.activeGrids[sellPrice] = true
-			s.Lambda.Logger().Printf("[GRID] Placed sell order at %.2f", sellPrice)
+			s.Lambda.Logger().Printf("[GRID] Placed sell order at %.2f on %s", sellPrice, provider)
 		}
 	}
 }
@@ -162,4 +195,17 @@ func (s *Grid) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schem
 // OnRiskControl logs risk control notifications.
 func (s *Grid) OnRiskControl(_ context.Context, _ *schema.Event, payload schema.RiskControlPayload) {
 	s.Lambda.Logger().Printf("[GRID] Risk control trigger: status=%s breach=%s reason=%s", payload.Status, payload.BreachType, payload.Reason)
+}
+
+func (s *Grid) randomProvider() (string, error) {
+	providers := s.Lambda.Providers()
+	if len(providers) == 0 {
+		return "", fmt.Errorf("no providers configured")
+	}
+	// #nosec G115 -- UnixNano used as non-cryptographic seed for provider selection
+	provider, err := s.Lambda.SelectProvider(uint64(time.Now().UnixNano()))
+	if err == nil && strings.TrimSpace(provider) != "" {
+		return provider, nil
+	}
+	return providers[0], nil
 }

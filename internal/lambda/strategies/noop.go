@@ -22,6 +22,11 @@ func (s *NoOp) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), noopSubscribedEvents...)
 }
 
+// WantsCrossProviderEvents indicates noop strategy accepts multi-provider feeds.
+func (s *NoOp) WantsCrossProviderEvents() bool {
+	return true
+}
+
 // OnTrade does nothing.
 func (s *NoOp) OnTrade(_ context.Context, _ *schema.Event, _ schema.TradePayload, _ float64) {}
 

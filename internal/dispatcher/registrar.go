@@ -25,8 +25,8 @@ type RouteDeclaration struct {
 }
 
 type lambdaRegistration struct {
-	Provider string
-	Routes   []RouteDeclaration
+	Providers []string
+	Routes    []RouteDeclaration
 }
 
 // Registrar coordinates dynamic routing updates based on active lambdas.
@@ -51,14 +51,14 @@ func NewRegistrar(table *Table, router ProviderRouter) *Registrar {
 }
 
 // RegisterLambda declares or updates the routing requirements for a lambda instance.
-func (r *Registrar) RegisterLambda(ctx context.Context, lambdaID string, provider string, routes []RouteDeclaration) error {
+func (r *Registrar) RegisterLambda(ctx context.Context, lambdaID string, providers []string, routes []RouteDeclaration) error {
 	lambdaID = strings.TrimSpace(lambdaID)
 	if lambdaID == "" {
 		return fmt.Errorf("lambda id required")
 	}
-	provider = strings.TrimSpace(provider)
-	if provider == "" {
-		return fmt.Errorf("provider required")
+	normalizedProviders := normalizeProviders(providers)
+	if len(normalizedProviders) == 0 {
+		return fmt.Errorf("providers required")
 	}
 
 	copied := make([]RouteDeclaration, len(routes))
@@ -75,8 +75,8 @@ func (r *Registrar) RegisterLambda(ctx context.Context, lambdaID string, provide
 
 	r.mu.Lock()
 	r.lambdas[lambdaID] = lambdaRegistration{
-		Provider: provider,
-		Routes:   copied,
+		Providers: normalizedProviders,
+		Routes:    copied,
 	}
 	err := r.rebuild(ctx)
 	r.mu.Unlock()
@@ -100,24 +100,29 @@ func (r *Registrar) rebuild(ctx context.Context) error {
 	desired := make(map[RouteKey]Route)
 
 	for _, reg := range r.lambdas {
-		for _, decl := range reg.Routes {
-			if err := decl.Type.Validate(); err != nil {
-				return fmt.Errorf("lambda route type: %w", err)
-			}
-			key := RouteKey{Provider: reg.Provider, Type: decl.Type}.normalize()
-			route, ok := desired[key]
-			if !ok {
-				route = Route{
-					Provider: reg.Provider,
-					Type:     decl.Type,
-					WSTopics: []string{},
-					RestFns:  []RestFn{},
-					Filters:  []FilterRule{},
+		if len(reg.Providers) == 0 {
+			continue
+		}
+		for _, provider := range reg.Providers {
+			for _, decl := range reg.Routes {
+				if err := decl.Type.Validate(); err != nil {
+					return fmt.Errorf("lambda route type: %w", err)
 				}
+				key := RouteKey{Provider: provider, Type: decl.Type}.normalize()
+				route, ok := desired[key]
+				if !ok {
+					route = Route{
+						Provider: provider,
+						Type:     decl.Type,
+						WSTopics: []string{},
+						RestFns:  []RestFn{},
+						Filters:  []FilterRule{},
+					}
+				}
+				merged := mergeFilters(route.Filters, decl.Filters)
+				route.Filters = merged
+				desired[key] = route
 			}
-			merged := mergeFilters(route.Filters, decl.Filters)
-			route.Filters = merged
-			desired[key] = route
 		}
 	}
 
@@ -177,6 +182,26 @@ func (r *Registrar) rebuild(ctx context.Context) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func normalizeProviders(providers []string) []string {
+	if len(providers) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(providers))
+	out := make([]string, 0, len(providers))
+	for _, raw := range providers {
+		candidate := strings.TrimSpace(raw)
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
 }
 
 func cloneFilterMap(filters map[string]any) map[string]any {

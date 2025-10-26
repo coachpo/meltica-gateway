@@ -46,7 +46,7 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: test-lambda
-      provider: fake
+      providers: [fake]
       symbol: BTC-USDT
       strategy: delay
       auto_start: false
@@ -111,6 +111,9 @@ lambdaManifest:
 	}
 	if manifest.AutoStart {
 		t.Fatalf("expected test-lambda autostart disabled")
+	}
+	if len(manifest.Providers) != 1 || manifest.Providers[0] != "fake" {
+		t.Fatalf("unexpected providers: %+v", manifest.Providers)
 	}
 
 	if cfg.Risk.OrderBurst != 1 {

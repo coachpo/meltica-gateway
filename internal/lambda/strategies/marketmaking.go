@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/coachpo/meltica/internal/schema"
 )
@@ -20,7 +21,9 @@ type MarketMaking struct {
 		GetBidPrice() float64
 		GetAskPrice() float64
 		IsTradingActive() bool
-		SubmitOrder(ctx context.Context, side schema.TradeSide, quantity string, price *float64) error
+		Providers() []string
+		SelectProvider(seed uint64) (string, error)
+		SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error
 	}
 
 	// Configuration
@@ -45,6 +48,11 @@ var marketMakingSubscribedEvents = []schema.EventType{
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *MarketMaking) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), marketMakingSubscribedEvents...)
+}
+
+// WantsCrossProviderEvents indicates market making operates on single-provider feeds.
+func (s *MarketMaking) WantsCrossProviderEvents() bool {
+	return false
 }
 
 // MarketState represents the current market snapshot.
@@ -126,6 +134,12 @@ func (s *MarketMaking) OnOrderCancelled(_ context.Context, _ *schema.Event, payl
 }
 
 func (s *MarketMaking) placeQuotes(ctx context.Context, market MarketState) {
+	provider, err := s.selectProvider()
+	if err != nil {
+		s.Lambda.Logger().Printf("[MM] Unable to select provider: %v", err)
+		return
+	}
+
 	midPrice := (market.BidPrice + market.AskPrice) / 2
 	if midPrice <= 0 {
 		return
@@ -138,21 +152,21 @@ func (s *MarketMaking) placeQuotes(ctx context.Context, market MarketState) {
 
 	// Place buy order if we have capacity
 	if s.activeBuyOrders.Load() < s.MaxOpenOrders {
-		if err := s.Lambda.SubmitOrder(ctx, schema.TradeSideBuy, s.OrderSize, &buyPrice); err != nil {
+		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize, &buyPrice); err != nil {
 			s.Lambda.Logger().Printf("[MM] Failed to submit buy order: %v", err)
 		} else {
 			s.activeBuyOrders.Add(1)
-			s.Lambda.Logger().Printf("[MM] Placed buy order: price=%.2f size=%s", buyPrice, s.OrderSize)
+			s.Lambda.Logger().Printf("[MM] Placed buy order on %s: price=%.2f size=%s", provider, buyPrice, s.OrderSize)
 		}
 	}
 
 	// Place sell order if we have capacity
 	if s.activeSellOrders.Load() < s.MaxOpenOrders {
-		if err := s.Lambda.SubmitOrder(ctx, schema.TradeSideSell, s.OrderSize, &sellPrice); err != nil {
+		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideSell, s.OrderSize, &sellPrice); err != nil {
 			s.Lambda.Logger().Printf("[MM] Failed to submit sell order: %v", err)
 		} else {
 			s.activeSellOrders.Add(1)
-			s.Lambda.Logger().Printf("[MM] Placed sell order: price=%.2f size=%s", sellPrice, s.OrderSize)
+			s.Lambda.Logger().Printf("[MM] Placed sell order on %s: price=%.2f size=%s", provider, sellPrice, s.OrderSize)
 		}
 	}
 
@@ -199,6 +213,19 @@ func (s *MarketMaking) OnInstrumentUpdate(_ context.Context, _ *schema.Event, _ 
 func (s *MarketMaking) OnBalanceUpdate(_ context.Context, _ *schema.Event, payload schema.BalanceUpdatePayload) {
 	s.Lambda.Logger().Printf("[MM] Balance update: currency=%s total=%s available=%s",
 		payload.Currency, payload.Total, payload.Available)
+}
+
+func (s *MarketMaking) selectProvider() (string, error) {
+	providers := s.Lambda.Providers()
+	if len(providers) == 0 {
+		return "", fmt.Errorf("no providers configured")
+	}
+	// #nosec G115 -- UnixNano used as non-cryptographic seed for provider selection
+	provider, err := s.Lambda.SelectProvider(uint64(time.Now().UnixNano()))
+	if err == nil && provider != "" {
+		return provider, nil
+	}
+	return providers[0], nil
 }
 
 // OnRiskControl resets state when risk controls trigger.

@@ -46,6 +46,10 @@ type TradingStrategy interface {
 
 	// SubscribedEvents declares the event types the strategy consumes.
 	SubscribedEvents() []schema.EventType
+
+	// WantsCrossProviderEvents indicates whether the strategy expects to receive events from
+	// multiple providers concurrently.
+	WantsCrossProviderEvents() bool
 }
 
 // MarketState represents the current market state for a symbol.
@@ -71,6 +75,7 @@ type BaseLambda struct {
 	riskManager    *risk.Manager
 	baseCurrency   string
 	quoteCurrency  string
+	providerSet    map[string]struct{}
 
 	// Market state (thread-safe via atomic)
 	lastPrice atomic.Value // float64
@@ -84,8 +89,8 @@ type BaseLambda struct {
 
 // Config defines configuration for a lambda trading bot instance.
 type Config struct {
-	Symbol   string
-	Provider string
+	Symbol    string
+	Providers []string
 }
 
 // OrderSubmitter defines the interface for submitting orders to a provider.
@@ -95,8 +100,14 @@ type OrderSubmitter interface {
 
 // NewBaseLambda creates a new base lambda with the provided strategy.
 func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter OrderSubmitter, pools *pool.PoolManager, strategy TradingStrategy, riskManager *risk.Manager) *BaseLambda {
+	config.Providers = normalizeProviders(config.Providers)
+	providerSet := make(map[string]struct{}, len(config.Providers))
+	for _, provider := range config.Providers {
+		providerSet[provider] = struct{}{}
+	}
+
 	if id == "" {
-		id = fmt.Sprintf("lambda-%s-%s", config.Symbol, config.Provider)
+		id = buildLambdaID(config.Symbol, config.Providers)
 	}
 
 	lambda := &BaseLambda{
@@ -110,6 +121,7 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 		riskManager:    riskManager,
 		baseCurrency:   "",
 		quoteCurrency:  "",
+		providerSet:    providerSet,
 		lastPrice:      atomic.Value{},
 		bidPrice:       atomic.Value{},
 		askPrice:       atomic.Value{},
@@ -130,6 +142,41 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 	lambda.tradingActive.Store(false)
 
 	return lambda
+}
+
+func buildLambdaID(symbol string, providers []string) string {
+	symbol = strings.TrimSpace(symbol)
+	if len(providers) == 0 {
+		if symbol == "" {
+			return "lambda-unassigned"
+		}
+		return fmt.Sprintf("lambda-%s", symbol)
+	}
+	joined := strings.Join(providers, "-")
+	if symbol == "" {
+		return fmt.Sprintf("lambda-%s", joined)
+	}
+	return fmt.Sprintf("lambda-%s-%s", symbol, joined)
+}
+
+func normalizeProviders(providers []string) []string {
+	if len(providers) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(providers))
+	out := make([]string, 0, len(providers))
+	for _, raw := range providers {
+		candidate := strings.TrimSpace(raw)
+		if candidate == "" {
+			continue
+		}
+		if _, seen := set[candidate]; seen {
+			continue
+		}
+		set[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
 }
 
 // Start begins consuming market data and executing trading logic.
@@ -169,7 +216,7 @@ func (l *BaseLambda) Start(ctx context.Context) (<-chan error, error) {
 
 	go l.consume(ctx, subs, errs)
 
-	l.logger.Printf("[%s] started for symbol=%s provider=%s", l.id, l.config.Symbol, l.config.Provider)
+	l.logger.Printf("[%s] started for symbol=%s providers=%v", l.id, l.config.Symbol, l.config.Providers)
 	return errs, nil
 }
 
@@ -431,13 +478,22 @@ func (l *BaseLambda) handleRiskControl(ctx context.Context, evt *schema.Event) {
 	l.strategy.OnRiskControl(ctx, evt, payload)
 }
 
-// SubmitOrder submits an order request to the provider.
-func (l *BaseLambda) SubmitOrder(ctx context.Context, side schema.TradeSide, quantity string, price *string) error {
+// SubmitOrder submits an order request to the specified provider.
+func (l *BaseLambda) SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *string) error {
 	if l.orderSubmitter == nil {
 		return fmt.Errorf("order submitter not configured")
 	}
 	if l.pools == nil {
 		return fmt.Errorf("pool manager not configured")
+	}
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return fmt.Errorf("order provider required")
+	}
+	if len(l.config.Providers) > 0 {
+		if _, ok := l.providerSet[provider]; !ok {
+			return fmt.Errorf("order provider %q not configured for lambda %s", provider, l.id)
+		}
 	}
 
 	orderID := fmt.Sprintf("%s-%d-%d", l.id, time.Now().UnixNano(), l.orderCount.Load())
@@ -450,7 +506,7 @@ func (l *BaseLambda) SubmitOrder(ctx context.Context, side schema.TradeSide, qua
 
 	orderReq.ClientOrderID = orderID
 	orderReq.ConsumerID = l.id
-	orderReq.Provider = l.config.Provider
+	orderReq.Provider = provider
 	orderReq.Symbol = l.config.Symbol
 	orderReq.Side = side
 	orderReq.OrderType = schema.OrderTypeLimit
@@ -461,7 +517,7 @@ func (l *BaseLambda) SubmitOrder(ctx context.Context, side schema.TradeSide, qua
 
 	if l.riskManager != nil {
 		if err := l.riskManager.CheckOrder(ctx, orderReq); err != nil {
-			l.emitRiskControlEvent(ctx, l.buildRiskControlPayload(err))
+			l.emitRiskControlEvent(ctx, l.buildRiskControlPayload(provider, err))
 			return fmt.Errorf("risk check failed: %w", err)
 		}
 	}
@@ -475,15 +531,24 @@ func (l *BaseLambda) SubmitOrder(ctx context.Context, side schema.TradeSide, qua
 }
 
 // SubmitMarketOrder submits a market order.
-func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, side schema.TradeSide, quantity string) error {
+func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string) error {
 	if l.orderSubmitter == nil {
 		return fmt.Errorf("order submitter not configured")
 	}
 	if l.pools == nil {
 		return fmt.Errorf("pool manager not configured")
 	}
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return fmt.Errorf("order provider required")
+	}
+	if len(l.config.Providers) > 0 {
+		if _, ok := l.providerSet[provider]; !ok {
+			return fmt.Errorf("order provider %q not configured for lambda %s", provider, l.id)
+		}
+	}
 
-	orderID := fmt.Sprintf("%s-%d-%d", l.id, time.Now().UnixNano(), l.orderCount.Add(1))
+	orderID := fmt.Sprintf("%s-%d-%d", l.id, time.Now().UnixNano(), l.orderCount.Load())
 
 	orderReq, release, err := pool.AcquireOrderRequest(ctx, l.pools)
 	if err != nil {
@@ -493,7 +558,7 @@ func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, side schema.TradeSid
 
 	orderReq.ClientOrderID = orderID
 	orderReq.ConsumerID = l.id
-	orderReq.Provider = l.config.Provider
+	orderReq.Provider = provider
 	orderReq.Symbol = l.config.Symbol
 	orderReq.Side = side
 	orderReq.OrderType = schema.OrderTypeMarket
@@ -503,7 +568,7 @@ func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, side schema.TradeSid
 
 	if l.riskManager != nil {
 		if err := l.riskManager.CheckOrder(ctx, orderReq); err != nil {
-			l.emitRiskControlEvent(ctx, l.buildRiskControlPayload(err))
+			l.emitRiskControlEvent(ctx, l.buildRiskControlPayload(provider, err))
 			return fmt.Errorf("risk check failed: %w", err)
 		}
 	}
@@ -512,6 +577,7 @@ func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, side schema.TradeSid
 		return fmt.Errorf("submit market order: %w", err)
 	}
 
+	l.orderCount.Add(1)
 	return nil
 }
 
@@ -524,7 +590,12 @@ func (l *BaseLambda) ID() string {
 
 // Config returns the lambda configuration.
 func (l *BaseLambda) Config() Config {
-	return l.config
+	copyCfg := Config{
+		Symbol:    l.config.Symbol,
+		Providers: make([]string, len(l.config.Providers)),
+	}
+	copy(copyCfg.Providers, l.config.Providers)
+	return copyCfg
 }
 
 // Logger returns the logger instance.
@@ -591,6 +662,22 @@ func (l *BaseLambda) GetOrderCount() int64 {
 	return l.orderCount.Load()
 }
 
+// Providers returns the configured provider list.
+func (l *BaseLambda) Providers() []string {
+	providers := make([]string, len(l.config.Providers))
+	copy(providers, l.config.Providers)
+	return providers
+}
+
+// SelectProvider chooses a provider based on the supplied seed.
+func (l *BaseLambda) SelectProvider(seed uint64) (string, error) {
+	if len(l.config.Providers) == 0 {
+		return "", fmt.Errorf("no providers configured")
+	}
+	idx := int(seed % uint64(len(l.config.Providers))) // #nosec G115 -- modulo result is always within int range for provider slice length
+	return l.config.Providers[idx], nil
+}
+
 // IsTradingActive returns whether trading is currently enabled.
 func (l *BaseLambda) IsTradingActive() bool {
 	return l.tradingActive.Load()
@@ -623,10 +710,14 @@ func (l *BaseLambda) matchesSymbol(evt *schema.Event) bool {
 }
 
 func (l *BaseLambda) matchesProvider(evt *schema.Event) bool {
-	if l.config.Provider == "" {
+	if len(l.config.Providers) == 0 {
 		return true
 	}
-	return evt.Provider == l.config.Provider
+	if evt == nil {
+		return false
+	}
+	_, ok := l.providerSet[evt.Provider]
+	return ok
 }
 
 func (l *BaseLambda) recycleEvent(evt *schema.Event) {
@@ -652,10 +743,14 @@ func (l *BaseLambda) matchesBalanceCurrency(symbol string) bool {
 	return false
 }
 
-func (l *BaseLambda) buildRiskControlPayload(err error) schema.RiskControlPayload {
+func (l *BaseLambda) buildRiskControlPayload(provider string, err error) schema.RiskControlPayload {
+	provider = strings.TrimSpace(provider)
+	if provider == "" && len(l.config.Providers) == 1 {
+		provider = l.config.Providers[0]
+	}
 	payload := schema.RiskControlPayload{
 		StrategyID:         l.id,
-		Provider:           l.config.Provider,
+		Provider:           provider,
 		Symbol:             l.config.Symbol,
 		Status:             schema.RiskControlStatusTriggered,
 		Reason:             err.Error(),
@@ -712,7 +807,11 @@ func (l *BaseLambda) emitRiskControlEvent(ctx context.Context, payload schema.Ri
 		return
 	}
 	evt.EventID = fmt.Sprintf("risk:%s:%d", l.id, payload.Timestamp.UnixNano())
-	evt.Provider = l.config.Provider
+	if payload.Provider != "" {
+		evt.Provider = payload.Provider
+	} else if len(l.config.Providers) == 1 {
+		evt.Provider = l.config.Providers[0]
+	}
 	evt.Symbol = l.config.Symbol
 	evt.Type = schema.EventTypeRiskControl
 	evt.IngestTS = payload.Timestamp

@@ -2,8 +2,10 @@ package strategies
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/coachpo/meltica/internal/schema"
 )
@@ -15,7 +17,9 @@ type MeanReversion struct {
 		Logger() *log.Logger
 		GetLastPrice() float64
 		IsTradingActive() bool
-		SubmitOrder(ctx context.Context, side schema.TradeSide, quantity string, price *float64) error
+		Providers() []string
+		SelectProvider(seed uint64) (string, error)
+		SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error
 	}
 
 	// Configuration
@@ -40,6 +44,11 @@ var meanReversionSubscribedEvents = []schema.EventType{
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *MeanReversion) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), meanReversionSubscribedEvents...)
+}
+
+// WantsCrossProviderEvents indicates mean reversion operates on single-provider feeds.
+func (s *MeanReversion) WantsCrossProviderEvents() bool {
+	return false
 }
 
 // OnTrade analyzes price deviation from moving average.
@@ -77,22 +86,32 @@ func (s *MeanReversion) OnTrade(ctx context.Context, _ *schema.Event, _ schema.T
 
 	// Price below MA by threshold - buy (expect reversion up)
 	if deviation < -s.DeviationThreshold && !s.hasPosition {
-		if err := s.Lambda.SubmitOrder(ctx, schema.TradeSideBuy, s.OrderSize, &price); err != nil {
+		provider, err := s.selectProvider()
+		if err != nil {
+			s.Lambda.Logger().Printf("[MEAN_REV] No provider available for buy: %v", err)
+			return
+		}
+		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize, &price); err != nil {
 			s.Lambda.Logger().Printf("[MEAN_REV] Failed to buy: %v", err)
 		} else {
-			s.Lambda.Logger().Printf("[MEAN_REV] BUY: price %.2f below MA %.2f (%.2f%%)",
-				price, s.movingAvg, deviation)
+			s.Lambda.Logger().Printf("[MEAN_REV] BUY on %s: price %.2f below MA %.2f (%.2f%%)",
+				provider, price, s.movingAvg, deviation)
 			s.hasPosition = true
 		}
 	}
 
 	// Price above MA by threshold - sell (expect reversion down)
 	if deviation > s.DeviationThreshold && !s.hasPosition {
-		if err := s.Lambda.SubmitOrder(ctx, schema.TradeSideSell, s.OrderSize, &price); err != nil {
+		provider, err := s.selectProvider()
+		if err != nil {
+			s.Lambda.Logger().Printf("[MEAN_REV] No provider available for sell: %v", err)
+			return
+		}
+		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideSell, s.OrderSize, &price); err != nil {
 			s.Lambda.Logger().Printf("[MEAN_REV] Failed to sell: %v", err)
 		} else {
-			s.Lambda.Logger().Printf("[MEAN_REV] SELL: price %.2f above MA %.2f (%.2f%%)",
-				price, s.movingAvg, deviation)
+			s.Lambda.Logger().Printf("[MEAN_REV] SELL on %s: price %.2f above MA %.2f (%.2f%%)",
+				provider, price, s.movingAvg, deviation)
 			s.hasPosition = true
 		}
 	}
@@ -166,4 +185,17 @@ func (s *MeanReversion) OnRiskControl(_ context.Context, _ *schema.Event, payloa
 	s.hasPosition = false
 	s.mu.Unlock()
 	s.Lambda.Logger().Printf("[MEAN_REV] Risk control notification: status=%s breach=%s reason=%s", payload.Status, payload.BreachType, payload.Reason)
+}
+
+func (s *MeanReversion) selectProvider() (string, error) {
+	providers := s.Lambda.Providers()
+	if len(providers) == 0 {
+		return "", fmt.Errorf("no providers configured")
+	}
+	// #nosec G115 -- UnixNano used as non-cryptographic seed for provider selection
+	provider, err := s.Lambda.SelectProvider(uint64(time.Now().UnixNano()))
+	if err == nil && provider != "" {
+		return provider, nil
+	}
+	return providers[0], nil
 }

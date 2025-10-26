@@ -20,13 +20,21 @@ type orderStrategyAdapter struct {
 func (a *orderStrategyAdapter) Logger() *log.Logger   { return a.base.Logger() }
 func (a *orderStrategyAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
 func (a *orderStrategyAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
-func (a *orderStrategyAdapter) SubmitOrder(ctx context.Context, side schema.TradeSide, quantity string, price *float64) error {
+func (a *orderStrategyAdapter) Providers() []string   { return a.base.Providers() }
+func (a *orderStrategyAdapter) SelectProvider(seed uint64) (string, error) {
+	provider, err := a.base.SelectProvider(seed)
+	if err != nil {
+		return "", fmt.Errorf("select provider: %w", err)
+	}
+	return provider, nil
+}
+func (a *orderStrategyAdapter) SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error {
 	var priceStr *string
 	if price != nil {
 		formatted := fmt.Sprintf("%f", *price)
 		priceStr = &formatted
 	}
-	if err := a.base.SubmitOrder(ctx, side, quantity, priceStr); err != nil {
+	if err := a.base.SubmitOrder(ctx, provider, side, quantity, priceStr); err != nil {
 		return fmt.Errorf("submit order: %w", err)
 	}
 	return nil
@@ -64,7 +72,7 @@ func main() {
 			OrderSize:   *gridOrderSize,
 			BasePrice:   0,
 		}
-		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{Symbol: "", Provider: ""}, nil, nil, nil, gridStrategy, nil)
+		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{Symbol: "", Providers: []string{"backtest"}}, nil, nil, nil, gridStrategy, nil)
 		gridStrategy.Lambda = &orderStrategyAdapter{base: baseLambda}
 		strategy = gridStrategy
 	default:

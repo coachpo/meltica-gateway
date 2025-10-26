@@ -199,17 +199,25 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 		return spec, fmt.Errorf("decode payload: %w", err)
 	}
 	spec.ID = strings.TrimSpace(spec.ID)
-	spec.Provider = strings.TrimSpace(spec.Provider)
 	spec.Symbol = strings.TrimSpace(spec.Symbol)
 	spec.Strategy = strings.TrimSpace(spec.Strategy)
+	normalizedProviders := make([]string, 0, len(spec.Providers))
+	for _, provider := range spec.Providers {
+		trimmed := strings.TrimSpace(provider)
+		if trimmed == "" {
+			continue
+		}
+		normalizedProviders = append(normalizedProviders, trimmed)
+	}
+	spec.Providers = normalizedProviders
 	if spec.Config == nil {
 		spec.Config = make(map[string]any)
 	}
 	if spec.ID == "" {
 		return spec, fmt.Errorf("id required")
 	}
-	if spec.Provider == "" {
-		return spec, fmt.Errorf("provider required")
+	if len(spec.Providers) == 0 {
+		return spec, fmt.Errorf("providers required")
 	}
 	if spec.Symbol == "" {
 		return spec, fmt.Errorf("symbol required")

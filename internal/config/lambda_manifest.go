@@ -13,7 +13,7 @@ type LambdaManifest struct {
 // LambdaSpec defines a lambda instance configuration.
 type LambdaSpec struct {
 	ID        string         `yaml:"id"`
-	Provider  string         `yaml:"provider"`
+	Providers []string       `yaml:"providers"`
 	Symbol    string         `yaml:"symbol"`
 	Strategy  string         `yaml:"strategy"`
 	Config    map[string]any `yaml:"config"`
@@ -29,8 +29,13 @@ func (m LambdaManifest) Validate() error {
 		if strings.TrimSpace(spec.ID) == "" {
 			return fmt.Errorf("lambdas[%d]: id required", i)
 		}
-		if strings.TrimSpace(spec.Provider) == "" {
-			return fmt.Errorf("lambdas[%d]: provider required", i)
+		if len(spec.Providers) == 0 {
+			return fmt.Errorf("lambdas[%d]: providers required", i)
+		}
+		for j, provider := range spec.Providers {
+			if strings.TrimSpace(provider) == "" {
+				return fmt.Errorf("lambdas[%d].providers[%d]: provider name required", i, j)
+			}
 		}
 		if strings.TrimSpace(spec.Symbol) == "" {
 			return fmt.Errorf("lambdas[%d]: symbol required", i)

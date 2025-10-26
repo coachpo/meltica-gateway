@@ -129,7 +129,7 @@ type ProviderCatalog interface {
 
 // RouteRegistrar manages dynamic route registration for providers.
 type RouteRegistrar interface {
-	RegisterLambda(ctx context.Context, lambdaID string, provider string, routes []dispatcher.RouteDeclaration) error
+	RegisterLambda(ctx context.Context, lambdaID string, providers []string, routes []dispatcher.RouteDeclaration) error
 	UnregisterLambda(ctx context.Context, lambdaID string) error
 }
 
@@ -449,8 +449,8 @@ func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaM
 // Create creates a new lambda instance from the specification.
 func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*lambda.BaseLambda, error) {
 	spec = sanitizeSpec(spec)
-	if spec.ID == "" || spec.Provider == "" || spec.Symbol == "" || spec.Strategy == "" {
-		return nil, fmt.Errorf("strategy instance requires id, provider, symbol, and strategy")
+	if spec.ID == "" || len(spec.Providers) == 0 || spec.Symbol == "" || spec.Strategy == "" {
+		return nil, fmt.Errorf("strategy instance requires id, providers, symbol, and strategy")
 	}
 	if err := m.ensureSpec(spec, false); err != nil {
 		return nil, err
@@ -502,28 +502,46 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 }
 
 func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec) (*lambda.BaseLambda, error) {
-	providerInst, ok := m.providers.Provider(spec.Provider)
-	if !ok {
-		return nil, fmt.Errorf("provider %q unavailable", spec.Provider)
+	providers := spec.Providers
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("strategy %s: providers required", spec.ID)
+	}
+	resolvedProviders := make([]string, 0, len(providers))
+	for _, name := range providers {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := m.providers.Provider(name); !ok {
+			return nil, fmt.Errorf("provider %q unavailable", name)
+		}
+		resolvedProviders = append(resolvedProviders, name)
+	}
+	if len(resolvedProviders) == 0 {
+		return nil, fmt.Errorf("strategy %s: no valid providers resolved", spec.ID)
 	}
 
 	strategy, err := m.buildStrategy(spec.Strategy, spec.Config)
 	if err != nil {
 		return nil, fmt.Errorf("strategy %s: %w", spec.ID, err)
 	}
+	if strategy != nil && len(resolvedProviders) > 1 && !strategy.WantsCrossProviderEvents() {
+		return nil, fmt.Errorf("strategy %s does not support cross-provider feeds", spec.Strategy)
+	}
 
 	var registered bool
 	if m.registrar != nil {
 		routes := buildRouteDeclarations(strategy, spec)
 		if len(routes) > 0 {
-			if err := m.registrar.RegisterLambda(ctx, spec.ID, spec.Provider, routes); err != nil {
+			if err := m.registrar.RegisterLambda(ctx, spec.ID, resolvedProviders, routes); err != nil {
 				return nil, fmt.Errorf("strategy %s: register routes: %w", spec.ID, err)
 			}
 			registered = true
 		}
 	}
 
-	base := lambda.NewBaseLambda(spec.ID, lambda.Config{Symbol: spec.Symbol, Provider: spec.Provider}, m.bus, providerInst, m.pools, strategy, m.riskManager)
+	orderRouter := &providerOrderRouter{catalog: m.providers}
+	base := lambda.NewBaseLambda(spec.ID, lambda.Config{Symbol: spec.Symbol, Providers: resolvedProviders}, m.bus, orderRouter, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -610,8 +628,8 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	if !ok {
 		return ErrInstanceNotFound
 	}
-	if current.Provider != spec.Provider {
-		return fmt.Errorf("provider is immutable for %s", spec.ID)
+	if !equalStringSlices(current.Providers, spec.Providers) {
+		return fmt.Errorf("providers are immutable for %s", spec.ID)
 	}
 	if current.Symbol != spec.Symbol {
 		return fmt.Errorf("symbol is immutable for %s", spec.ID)
@@ -638,7 +656,7 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 type InstanceSnapshot struct {
 	ID        string         `json:"id"`
 	Strategy  string         `json:"strategy"`
-	Provider  string         `json:"provider"`
+	Providers []string       `json:"providers"`
 	Symbol    string         `json:"symbol"`
 	Config    map[string]any `json:"config"`
 	AutoStart bool           `json:"autoStart"`
@@ -665,7 +683,7 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 		return InstanceSnapshot{
 			ID:        "",
 			Strategy:  "",
-			Provider:  "",
+			Providers: []string{},
 			Symbol:    "",
 			Config:    map[string]any{},
 			AutoStart: false,
@@ -680,10 +698,11 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 
 func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
 	cfg := copyMap(spec.Config)
+	providers := append([]string(nil), spec.Providers...)
 	return InstanceSnapshot{
 		ID:        spec.ID,
 		Strategy:  spec.Strategy,
-		Provider:  spec.Provider,
+		Providers: providers,
 		Symbol:    spec.Symbol,
 		Config:    cfg,
 		AutoStart: spec.AutoStart,
@@ -707,6 +726,28 @@ func (m *Manager) observe(ctx context.Context, id string, errs <-chan error) {
 	}
 }
 
+type providerOrderRouter struct {
+	catalog ProviderCatalog
+}
+
+func (r *providerOrderRouter) SubmitOrder(ctx context.Context, req schema.OrderRequest) error {
+	if r == nil || r.catalog == nil {
+		return fmt.Errorf("order router not configured")
+	}
+	providerName := strings.TrimSpace(req.Provider)
+	if providerName == "" {
+		return fmt.Errorf("order provider required")
+	}
+	inst, ok := r.catalog.Provider(providerName)
+	if !ok {
+		return fmt.Errorf("provider %q unavailable", providerName)
+	}
+	if err := inst.SubmitOrder(ctx, req); err != nil {
+		return fmt.Errorf("submit order to provider %q: %w", providerName, err)
+	}
+	return nil
+}
+
 func (m *Manager) buildStrategy(name string, cfg map[string]any) (lambda.TradingStrategy, error) {
 	def, ok := m.strategies[strings.ToLower(strings.TrimSpace(name))]
 	if !ok {
@@ -717,9 +758,9 @@ func (m *Manager) buildStrategy(name string, cfg map[string]any) (lambda.Trading
 
 func sanitizeSpec(spec config.LambdaSpec) config.LambdaSpec {
 	spec.ID = strings.TrimSpace(spec.ID)
-	spec.Provider = strings.TrimSpace(spec.Provider)
 	spec.Symbol = strings.TrimSpace(spec.Symbol)
 	spec.Strategy = strings.TrimSpace(spec.Strategy)
+	spec.Providers = normalizeProviderList(spec.Providers)
 	if spec.Config == nil {
 		spec.Config = make(map[string]any)
 	}
@@ -729,6 +770,7 @@ func sanitizeSpec(spec config.LambdaSpec) config.LambdaSpec {
 func cloneSpec(spec config.LambdaSpec) config.LambdaSpec {
 	clone := spec
 	clone.Config = copyMap(spec.Config)
+	clone.Providers = append([]string(nil), spec.Providers...)
 	return clone
 }
 
@@ -741,6 +783,38 @@ func copyMap(src map[string]any) map[string]any {
 		dst[k] = v
 	}
 	return dst
+}
+
+func normalizeProviderList(providers []string) []string {
+	if len(providers) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(providers))
+	out := make([]string, 0, len(providers))
+	for _, raw := range providers {
+		candidate := strings.TrimSpace(raw)
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaSpec) []dispatcher.RouteDeclaration {
@@ -890,13 +964,13 @@ func durationValue(cfg map[string]any, key string, def time.Duration) time.Durat
 	return def
 }
 
-func submitOrderWithFloat(ctx context.Context, base *lambda.BaseLambda, side schema.TradeSide, quantity string, price *float64) error {
+func submitOrderWithFloat(ctx context.Context, base *lambda.BaseLambda, provider string, side schema.TradeSide, quantity string, price *float64) error {
 	var priceStr *string
 	if price != nil {
 		formatted := strconv.FormatFloat(*price, 'f', -1, 64)
 		priceStr = &formatted
 	}
-	if err := base.SubmitOrder(ctx, side, quantity, priceStr); err != nil {
+	if err := base.SubmitOrder(ctx, provider, side, quantity, priceStr); err != nil {
 		return fmt.Errorf("submit order: %w", err)
 	}
 	return nil
@@ -909,8 +983,16 @@ type momentumAdapter struct {
 func (a *momentumAdapter) Logger() *log.Logger   { return a.base.Logger() }
 func (a *momentumAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
 func (a *momentumAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
-func (a *momentumAdapter) SubmitMarketOrder(ctx context.Context, side schema.TradeSide, quantity string) error {
-	if err := a.base.SubmitMarketOrder(ctx, side, quantity); err != nil {
+func (a *momentumAdapter) Providers() []string   { return a.base.Providers() }
+func (a *momentumAdapter) SelectProvider(seed uint64) (string, error) {
+	provider, err := a.base.SelectProvider(seed)
+	if err != nil {
+		return "", fmt.Errorf("select provider: %w", err)
+	}
+	return provider, nil
+}
+func (a *momentumAdapter) SubmitMarketOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string) error {
+	if err := a.base.SubmitMarketOrder(ctx, provider, side, quantity); err != nil {
 		return fmt.Errorf("submit market order: %w", err)
 	}
 	return nil
@@ -923,8 +1005,16 @@ type orderStrategyAdapter struct {
 func (a *orderStrategyAdapter) Logger() *log.Logger   { return a.base.Logger() }
 func (a *orderStrategyAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
 func (a *orderStrategyAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
-func (a *orderStrategyAdapter) SubmitOrder(ctx context.Context, side schema.TradeSide, quantity string, price *float64) error {
-	return submitOrderWithFloat(ctx, a.base, side, quantity, price)
+func (a *orderStrategyAdapter) Providers() []string   { return a.base.Providers() }
+func (a *orderStrategyAdapter) SelectProvider(seed uint64) (string, error) {
+	provider, err := a.base.SelectProvider(seed)
+	if err != nil {
+		return "", fmt.Errorf("select provider: %w", err)
+	}
+	return provider, nil
+}
+func (a *orderStrategyAdapter) SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error {
+	return submitOrderWithFloat(ctx, a.base, provider, side, quantity, price)
 }
 
 type marketMakingAdapter struct {
@@ -946,6 +1036,14 @@ func (a *marketMakingAdapter) GetLastPrice() float64 { return a.base.GetLastPric
 func (a *marketMakingAdapter) GetBidPrice() float64  { return a.base.GetBidPrice() }
 func (a *marketMakingAdapter) GetAskPrice() float64  { return a.base.GetAskPrice() }
 func (a *marketMakingAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
-func (a *marketMakingAdapter) SubmitOrder(ctx context.Context, side schema.TradeSide, quantity string, price *float64) error {
-	return submitOrderWithFloat(ctx, a.base, side, quantity, price)
+func (a *marketMakingAdapter) Providers() []string   { return a.base.Providers() }
+func (a *marketMakingAdapter) SelectProvider(seed uint64) (string, error) {
+	provider, err := a.base.SelectProvider(seed)
+	if err != nil {
+		return "", fmt.Errorf("select provider: %w", err)
+	}
+	return provider, nil
+}
+func (a *marketMakingAdapter) SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error {
+	return submitOrderWithFloat(ctx, a.base, provider, side, quantity, price)
 }

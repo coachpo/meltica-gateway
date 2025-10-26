@@ -2,6 +2,7 @@ package strategies
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -16,7 +17,9 @@ type Momentum struct {
 		Logger() *log.Logger
 		GetLastPrice() float64
 		IsTradingActive() bool
-		SubmitMarketOrder(ctx context.Context, side schema.TradeSide, quantity string) error
+		Providers() []string
+		SelectProvider(seed uint64) (string, error)
+		SubmitMarketOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string) error
 	}
 
 	// Configuration
@@ -42,6 +45,11 @@ var momentumSubscribedEvents = []schema.EventType{
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *Momentum) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), momentumSubscribedEvents...)
+}
+
+// WantsCrossProviderEvents indicates momentum strategies operate on single-provider feeds.
+func (s *Momentum) WantsCrossProviderEvents() bool {
+	return false
 }
 
 type pricePoint struct {
@@ -87,10 +95,15 @@ func (s *Momentum) OnTrade(ctx context.Context, _ *schema.Event, _ schema.TradeP
 
 	// Strong upward momentum - go long
 	if momentumPct > s.MomentumThreshold && s.position <= 0 {
-		if err := s.Lambda.SubmitMarketOrder(ctx, schema.TradeSideBuy, s.OrderSize); err != nil {
+		provider, err := s.selectProvider()
+		if err != nil {
+			s.Lambda.Logger().Printf("[MOMENTUM] No provider available for buy: %v", err)
+			return
+		}
+		if err := s.Lambda.SubmitMarketOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize); err != nil {
 			s.Lambda.Logger().Printf("[MOMENTUM] Failed to buy: %v", err)
 		} else {
-			s.Lambda.Logger().Printf("[MOMENTUM] BUY signal: momentum=%.3f%%", momentumPct)
+			s.Lambda.Logger().Printf("[MOMENTUM] BUY signal on %s: momentum=%.3f%%", provider, momentumPct)
 			s.position = 1
 			s.lastTradeTime = time.Now()
 		}
@@ -98,10 +111,15 @@ func (s *Momentum) OnTrade(ctx context.Context, _ *schema.Event, _ schema.TradeP
 
 	// Strong downward momentum - go short
 	if momentumPct < -s.MomentumThreshold && s.position >= 0 {
-		if err := s.Lambda.SubmitMarketOrder(ctx, schema.TradeSideSell, s.OrderSize); err != nil {
+		provider, err := s.selectProvider()
+		if err != nil {
+			s.Lambda.Logger().Printf("[MOMENTUM] No provider available for sell: %v", err)
+			return
+		}
+		if err := s.Lambda.SubmitMarketOrder(ctx, provider, schema.TradeSideSell, s.OrderSize); err != nil {
 			s.Lambda.Logger().Printf("[MOMENTUM] Failed to sell: %v", err)
 		} else {
-			s.Lambda.Logger().Printf("[MOMENTUM] SELL signal: momentum=%.3f%%", momentumPct)
+			s.Lambda.Logger().Printf("[MOMENTUM] SELL signal on %s: momentum=%.3f%%", provider, momentumPct)
 			s.position = -1
 			s.lastTradeTime = time.Now()
 		}
@@ -181,4 +199,17 @@ func (s *Momentum) calculateMomentum() float64 {
 	}
 
 	return (lastPrice - firstPrice) / firstPrice
+}
+
+func (s *Momentum) selectProvider() (string, error) {
+	providers := s.Lambda.Providers()
+	if len(providers) == 0 {
+		return "", fmt.Errorf("no providers configured")
+	}
+	// #nosec G115 -- UnixNano used as non-cryptographic seed for provider selection
+	provider, err := s.Lambda.SelectProvider(uint64(time.Now().UnixNano()))
+	if err == nil && provider != "" {
+		return provider, nil
+	}
+	return providers[0], nil
 }
