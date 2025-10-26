@@ -1,9 +1,11 @@
 package fake
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/schema"
 )
 
@@ -78,4 +80,143 @@ func TestKlineFinalizeProducesBucket(t *testing.T) {
 	if bucket.open != 50 || bucket.close != 52 {
 		t.Fatalf("unexpected bucket values: %+v", bucket)
 	}
+}
+
+func TestProviderPublishTradeEvent(t *testing.T) {
+	pm := pool.NewPoolManager()
+	err := pm.RegisterPool("Event", 32, func() any { return &schema.Event{} })
+	if err != nil {
+		t.Fatalf("register event pool: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = pm.Shutdown(context.Background())
+	})
+
+	prov := NewProvider(Options{Pools: pm})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if startErr := prov.Start(ctx); startErr != nil {
+		t.Fatalf("start provider: %v", startErr)
+	}
+
+	symbol := "BTC-USDT"
+	evt := publishAndWait(t, prov, pm, func() error { return prov.PublishTradeEvent(symbol) }, schema.EventTypeTrade)
+	defer pm.ReturnEventInst(evt)
+
+	if evt.Symbol != symbol {
+		t.Fatalf("expected symbol %s, got %s", symbol, evt.Symbol)
+	}
+	payload, ok := evt.Payload.(schema.TradePayload)
+	if !ok {
+		t.Fatalf("unexpected payload type %T", evt.Payload)
+	}
+	if payload.TradeID == "" {
+		t.Fatal("expected non-empty trade id")
+	}
+}
+
+func TestProviderPublishTickerEvent(t *testing.T) {
+	pm := pool.NewPoolManager()
+	err := pm.RegisterPool("Event", 32, func() any { return &schema.Event{} })
+	if err != nil {
+		t.Fatalf("register event pool: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = pm.Shutdown(context.Background())
+	})
+
+	prov := NewProvider(Options{Pools: pm})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if startErr := prov.Start(ctx); startErr != nil {
+		t.Fatalf("start provider: %v", startErr)
+	}
+
+	symbol := "ETH-USDT"
+	evt := publishAndWait(t, prov, pm, func() error { return prov.PublishTickerEvent(symbol) }, schema.EventTypeTicker)
+	defer pm.ReturnEventInst(evt)
+
+	if evt.Symbol != symbol {
+		t.Fatalf("expected symbol %s, got %s", symbol, evt.Symbol)
+	}
+	if _, ok := evt.Payload.(schema.TickerPayload); !ok {
+		t.Fatalf("unexpected payload type %T", evt.Payload)
+	}
+}
+
+func TestProviderPublishExecReport(t *testing.T) {
+	pm := pool.NewPoolManager()
+	err := pm.RegisterPool("Event", 32, func() any { return &schema.Event{} })
+	if err != nil {
+		t.Fatalf("register event pool: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = pm.Shutdown(context.Background())
+	})
+
+	prov := NewProvider(Options{Pools: pm})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if startErr := prov.Start(ctx); startErr != nil {
+		t.Fatalf("start provider: %v", startErr)
+	}
+
+	symbol := "SOL-USDT"
+	payload := schema.ExecReportPayload{
+		ClientOrderID:  "client-1",
+		State:          schema.ExecReportStateACK,
+		Side:           schema.TradeSideBuy,
+		OrderType:      schema.OrderTypeLimit,
+		Price:          "100.0",
+		Quantity:       "1.0",
+		FilledQuantity: "0",
+		RemainingQty:   "1.0",
+		AvgFillPrice:   "0",
+	}
+
+	evt := publishAndWait(t, prov, pm, func() error { return prov.PublishExecReport(symbol, payload) }, schema.EventTypeExecReport)
+	defer pm.ReturnEventInst(evt)
+
+	if evt.Symbol != symbol {
+		t.Fatalf("expected symbol %s, got %s", symbol, evt.Symbol)
+	}
+	report, ok := evt.Payload.(schema.ExecReportPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type %T", evt.Payload)
+	}
+	if report.ExchangeOrderID == "" {
+		t.Fatal("expected generated exchange order id")
+	}
+	if report.Timestamp.IsZero() {
+		t.Fatal("expected populated timestamp")
+	}
+}
+
+func publishAndWait(t *testing.T, prov *Provider, pm *pool.PoolManager, publish func() error, expected schema.EventType) *schema.Event {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := publish(); err != nil {
+			t.Fatalf("publish error: %v", err)
+		}
+		end := time.Now().Add(200 * time.Millisecond)
+		for time.Now().Before(end) {
+			select {
+			case evt, ok := <-prov.Events():
+				if !ok {
+					t.Fatal("events channel closed unexpectedly")
+				}
+				if evt == nil {
+					continue
+				}
+				if evt.Type == expected {
+					return evt
+				}
+				pm.ReturnEventInst(evt)
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
+	t.Fatalf("timeout waiting for %s event", expected)
+	return nil
 }

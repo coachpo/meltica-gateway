@@ -1094,6 +1094,83 @@ func (p *Provider) Instruments() []schema.Instrument {
 	return out
 }
 
+// PublishTradeEvent emits a synthetic trade event for the provided instrument symbol.
+func (p *Provider) PublishTradeEvent(symbol string) error {
+	if err := p.ensureOperational(); err != nil {
+		return err
+	}
+	inst, err := p.resolveInstrumentForPublish(symbol)
+	if err != nil {
+		return err
+	}
+	p.emitTrade(inst)
+	return nil
+}
+
+// PublishTickerEvent emits a synthetic ticker event for the provided instrument symbol.
+func (p *Provider) PublishTickerEvent(symbol string) error {
+	if err := p.ensureOperational(); err != nil {
+		return err
+	}
+	inst, err := p.resolveInstrumentForPublish(symbol)
+	if err != nil {
+		return err
+	}
+	p.emitTicker(inst)
+	return nil
+}
+
+// PublishExecReport emits an execution report event using the supplied payload.
+// When exchange order id or timestamp are omitted, sensible defaults are generated.
+func (p *Provider) PublishExecReport(symbol string, payload schema.ExecReportPayload) error {
+	if err := p.ensureOperational(); err != nil {
+		return err
+	}
+	inst, err := p.resolveInstrumentForPublish(symbol)
+	if err != nil {
+		return err
+	}
+	ts := payload.Timestamp
+	if ts.IsZero() {
+		ts = p.clock().UTC()
+		payload.Timestamp = ts
+	}
+	if strings.TrimSpace(payload.ExchangeOrderID) == "" {
+		payload.ExchangeOrderID = p.nextExchangeOrderID(inst.Symbol())
+	}
+	p.emitExecReportEvents([]execReportEvent{{instrument: inst, payload: payload, ts: ts}})
+	return nil
+}
+
+func (p *Provider) ensureOperational() error {
+	if p == nil {
+		return errors.New("fake provider unavailable")
+	}
+	if !p.started.Load() || p.ctx == nil {
+		return fmt.Errorf("fake provider %s: not started", p.name)
+	}
+	return nil
+}
+
+func (p *Provider) resolveInstrumentForPublish(symbol string) (nativeInstrument, error) {
+	requested := symbol
+	normalized := normalizeInstrument(symbol)
+	if normalized == "" {
+		normalized = p.defaultInstrumentSymbol()
+	}
+	if normalized == "" {
+		return nativeInstrument{}, fmt.Errorf("fake provider %s: no instruments configured", p.name)
+	}
+	inst, ok := p.nativeInstrumentForSymbol(normalized)
+	if !ok {
+		if strings.TrimSpace(requested) == "" {
+			requested = normalized
+		}
+		return nativeInstrument{}, fmt.Errorf("fake provider %s: unsupported instrument %q", p.name, requested)
+	}
+	return inst, nil
+}
+
 // SubmitOrder enqueues a synthetic order acknowledgement.
 func (p *Provider) SubmitOrder(ctx context.Context, req schema.OrderRequest) error {
 	if !p.started.Load() {
