@@ -1,3 +1,4 @@
+// Package main provides a CLI for running strategy backtests against historical data.
 package main
 
 import (
@@ -25,7 +26,10 @@ func (a *orderStrategyAdapter) SubmitOrder(ctx context.Context, side schema.Trad
 		formatted := fmt.Sprintf("%f", *price)
 		priceStr = &formatted
 	}
-	return a.base.SubmitOrder(ctx, side, quantity, priceStr)
+	if err := a.base.SubmitOrder(ctx, side, quantity, priceStr); err != nil {
+		return fmt.Errorf("submit order: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -54,11 +58,13 @@ func main() {
 		strategy = &strategies.NoOp{}
 	case "grid":
 		gridStrategy := &strategies.Grid{
+			Lambda:      nil,
 			GridLevels:  *gridLevels,
 			GridSpacing: *gridSpacing,
 			OrderSize:   *gridOrderSize,
+			BasePrice:   0,
 		}
-		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{}, nil, nil, nil, gridStrategy, nil)
+		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{Symbol: "", Provider: ""}, nil, nil, nil, gridStrategy, nil)
 		gridStrategy.Lambda = &orderStrategyAdapter{base: baseLambda}
 		strategy = gridStrategy
 	default:

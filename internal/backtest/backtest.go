@@ -3,6 +3,8 @@ package backtest
 import (
 	"container/heap"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -62,13 +64,15 @@ func NewEngine(feeder DataFeeder, exchange SimulatedExchange, strategy lambda.Tr
 	}
 
 	eng := &Engine{
-		feeder:    feeder,
-		exchange:  exchange,
-		strategy:  strategy,
-		clock:     cfg.Clock,
-		latency:   cfg.LatencyModel,
-		queue:     eventQueue{},
-		analytics: newAnalytics(),
+		feeder:        feeder,
+		exchange:      exchange,
+		strategy:      strategy,
+		clock:         cfg.Clock,
+		latency:       cfg.LatencyModel,
+		queue:         eventQueue{},
+		feederExhaust: false,
+		analytics:     newAnalytics(),
+		analyticsMu:   sync.Mutex{},
 	}
 	heap.Init(&eng.queue)
 
@@ -86,7 +90,10 @@ func NewEngine(feeder DataFeeder, exchange SimulatedExchange, strategy lambda.Tr
 func (e *Engine) Run(ctx context.Context) error {
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return fmt.Errorf("backtest context: %w", err)
 		}
 
 		if !e.feederExhaust {
@@ -95,7 +102,7 @@ func (e *Engine) Run(ctx context.Context) error {
 				if err == io.EOF {
 					e.feederExhaust = true
 				} else {
-					return err
+					return fmt.Errorf("feeder next: %w", err)
 				}
 			} else if evt != nil {
 				e.pushEvent(evt)
@@ -151,7 +158,7 @@ func (e *Engine) pushEvent(evt *schema.Event) {
 	if evt == nil {
 		return
 	}
-	item := &eventItem{event: evt, timestamp: deriveTimestamp(evt)}
+	item := &eventItem{event: evt, timestamp: deriveTimestamp(evt), index: -1}
 	heap.Push(&e.queue, item)
 }
 

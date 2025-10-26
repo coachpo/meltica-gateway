@@ -20,7 +20,7 @@ type VirtualClock struct {
 
 // NewVirtualClock initialises a clock starting at the provided timestamp.
 func NewVirtualClock(start time.Time) *VirtualClock {
-	return &VirtualClock{current: start}
+	return &VirtualClock{mu: sync.Mutex{}, current: start}
 }
 
 // Now returns the current simulated time.

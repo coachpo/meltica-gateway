@@ -1,3 +1,4 @@
+// Package risk provides runtime enforcement of trading risk limits and controls.
 package risk
 
 import (
@@ -24,14 +25,22 @@ var (
 type BreachType string
 
 const (
-	BreachTypeRateLimit       BreachType = "RATE_LIMIT"
-	BreachTypeOrderType       BreachType = "ORDER_TYPE"
+	// BreachTypeRateLimit indicates rate limiting was exceeded.
+	BreachTypeRateLimit BreachType = "RATE_LIMIT"
+	// BreachTypeOrderType denotes an unsupported order type was requested.
+	BreachTypeOrderType BreachType = "ORDER_TYPE"
+	// BreachTypeOrderValidation captures general validation failures.
 	BreachTypeOrderValidation BreachType = "ORDER_VALIDATION"
-	BreachTypePriceBand       BreachType = "PRICE_BAND"
-	BreachTypePositionLimit   BreachType = "POSITION_LIMIT"
-	BreachTypeNotionalLimit   BreachType = "NOTIONAL_LIMIT"
-	BreachTypeConcurrency     BreachType = "CONCURRENCY"
-	BreachTypeKillSwitch      BreachType = "KILL_SWITCH"
+	// BreachTypePriceBand signals that price bands were violated.
+	BreachTypePriceBand BreachType = "PRICE_BAND"
+	// BreachTypePositionLimit represents breaches of position limits.
+	BreachTypePositionLimit BreachType = "POSITION_LIMIT"
+	// BreachTypeNotionalLimit indicates notional exposure exceeded limits.
+	BreachTypeNotionalLimit BreachType = "NOTIONAL_LIMIT"
+	// BreachTypeConcurrency denotes concurrency limits were breached.
+	BreachTypeConcurrency BreachType = "CONCURRENCY"
+	// BreachTypeKillSwitch indicates a manual or automatic kill switch activation.
+	BreachTypeKillSwitch BreachType = "KILL_SWITCH"
 )
 
 // BreachError captures structured metadata about a risk breach.
@@ -72,10 +81,12 @@ func newBreachError(t BreachType, reason string, err error, details map[string]s
 		}
 	}
 	return &BreachError{
-		Type:    t,
-		Reason:  reason,
-		Details: copied,
-		Err:     err,
+		Type:               t,
+		Reason:             reason,
+		Details:            copied,
+		KillSwitchEngaged:  false,
+		CircuitBreakerOpen: false,
+		Err:                err,
 	}
 }
 
@@ -144,6 +155,7 @@ func NewManager(limits Limits) *Manager {
 	}
 	return &Manager{
 		limits:        limitCopy,
+		mu:            sync.RWMutex{},
 		limiter:       rate.NewLimiter(rate.Limit(limitCopy.OrderThrottle), burst),
 		symbolLimiter: make(map[string]*rate.Limiter),
 		positions:     make(map[string]decimal.Decimal),
@@ -152,6 +164,10 @@ func NewManager(limits Limits) *Manager {
 		orders:        make(map[string]*orderState),
 		inflight:      make(map[string]int),
 		allowedTypes:  allowed,
+		failureCount:  0,
+		killSwitch:    false,
+		killReason:    "",
+		cooldownUntil: time.Time{},
 	}
 }
 
@@ -545,6 +561,8 @@ func signedQuantity(side schema.TradeSide, qty decimal.Decimal) decimal.Decimal 
 	switch side {
 	case schema.TradeSideSell:
 		return qty.Neg()
+	case schema.TradeSideBuy:
+		return qty
 	default:
 		return qty
 	}
@@ -552,8 +570,14 @@ func signedQuantity(side schema.TradeSide, qty decimal.Decimal) decimal.Decimal 
 
 func isTerminalState(state schema.ExecReportState) bool {
 	switch state {
-	case schema.ExecReportStateFILLED, schema.ExecReportStateCANCELLED, schema.ExecReportStateREJECTED, schema.ExecReportStateEXPIRED:
+	case schema.ExecReportStateFILLED,
+		schema.ExecReportStateCANCELLED,
+		schema.ExecReportStateREJECTED,
+		schema.ExecReportStateEXPIRED:
 		return true
+	case schema.ExecReportStateACK,
+		schema.ExecReportStatePARTIAL:
+		return false
 	default:
 		return false
 	}

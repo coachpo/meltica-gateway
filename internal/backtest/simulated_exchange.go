@@ -28,7 +28,8 @@ type SimulatedExchange interface {
 	SubmitOrder(ctx context.Context, req schema.OrderRequest) (ExecutionResult, error)
 }
 
-type exchangeOption func(*simulatedExchange)
+// ExchangeOption configures optional behaviour for a simulated exchange instance.
+type ExchangeOption func(*simulatedExchange)
 
 type simulatedExchange struct {
 	mu            sync.RWMutex
@@ -41,40 +42,43 @@ type simulatedExchange struct {
 }
 
 // WithFeeModel overrides the default fee model used by the simulated exchange.
-func WithFeeModel(model FeeModel) exchangeOption {
+func WithFeeModel(model FeeModel) ExchangeOption {
 	return func(se *simulatedExchange) {
 		se.feeModel = model
 	}
 }
 
 // WithSlippageModel sets the slippage model for simulated executions.
-func WithSlippageModel(model SlippageModel) exchangeOption {
+func WithSlippageModel(model SlippageModel) ExchangeOption {
 	return func(se *simulatedExchange) {
 		se.slippageModel = model
 	}
 }
 
 // WithFillObserver subscribes an observer to execution notifications.
-func WithFillObserver(observer FillObserver) exchangeOption {
+func WithFillObserver(observer FillObserver) ExchangeOption {
 	return func(se *simulatedExchange) {
 		se.observer = observer
 	}
 }
 
 // WithExchangeClock injects a custom clock for timestamping simulated executions.
-func WithExchangeClock(clock Clock) exchangeOption {
+func WithExchangeClock(clock Clock) ExchangeOption {
 	return func(se *simulatedExchange) {
 		se.clock = clock
 	}
 }
 
 // NewSimulatedExchange creates a new simulated exchange instance.
-func NewSimulatedExchange(strategy lambda.TradingStrategy, opts ...exchangeOption) SimulatedExchange {
+func NewSimulatedExchange(strategy lambda.TradingStrategy, opts ...ExchangeOption) SimulatedExchange {
 	se := &simulatedExchange{
-		orderBooks: make(map[string]*OrderBook),
-		lambda:     strategy,
-		feeModel:   ProportionalFee{Rate: decimal.Zero},
-		clock:      NewVirtualClock(time.Unix(0, 0)),
+		mu:            sync.RWMutex{},
+		orderBooks:    make(map[string]*OrderBook),
+		lambda:        strategy,
+		feeModel:      ProportionalFee{Rate: decimal.Zero},
+		slippageModel: nil,
+		observer:      nil,
+		clock:         NewVirtualClock(time.Unix(0, 0)),
 	}
 	for _, opt := range opts {
 		opt(se)
@@ -103,7 +107,8 @@ func (se *simulatedExchange) SubmitOrder(ctx context.Context, req schema.OrderRe
 
 	trades := ob.Match(&req)
 	if len(trades) == 0 {
-		return ExecutionResult{}, nil
+		var empty schema.ExecReportPayload
+		return ExecutionResult{Report: empty, Fee: decimal.Zero}, nil
 	}
 
 	totalQty := decimal.Zero
@@ -121,7 +126,8 @@ func (se *simulatedExchange) SubmitOrder(ctx context.Context, req schema.OrderRe
 		totalNotional = totalNotional.Add(qty.Mul(price))
 	}
 	if totalQty.Equal(decimal.Zero) {
-		return ExecutionResult{}, nil
+		var empty schema.ExecReportPayload
+		return ExecutionResult{Report: empty, Fee: decimal.Zero}, nil
 	}
 	avgPrice := totalNotional.Div(totalQty)
 	fee := decimal.Zero
@@ -129,20 +135,34 @@ func (se *simulatedExchange) SubmitOrder(ctx context.Context, req schema.OrderRe
 		fee = se.feeModel.Fee(req, totalQty, avgPrice)
 	}
 	report := schema.ExecReportPayload{
-		ClientOrderID:  req.ClientOrderID,
-		State:          schema.ExecReportStateFILLED,
-		Side:           req.Side,
-		OrderType:      req.OrderType,
-		Price:          avgPrice.String(),
-		Quantity:       req.Quantity,
-		FilledQuantity: totalQty.String(),
-		RemainingQty:   decimal.Zero.String(),
-		AvgFillPrice:   avgPrice.String(),
-		Timestamp:      se.clock.Now(),
+		ClientOrderID:   req.ClientOrderID,
+		ExchangeOrderID: "",
+		State:           schema.ExecReportStateFILLED,
+		Side:            req.Side,
+		OrderType:       req.OrderType,
+		Price:           avgPrice.String(),
+		Quantity:        req.Quantity,
+		FilledQuantity:  totalQty.String(),
+		RemainingQty:    decimal.Zero.String(),
+		AvgFillPrice:    avgPrice.String(),
+		Timestamp:       se.clock.Now(),
+		RejectReason:    nil,
 	}
 
 	if se.lambda != nil {
-		se.lambda.OnOrderFilled(ctx, &schema.Event{Symbol: req.Symbol}, report)
+		now := se.clock.Now()
+		evt := &schema.Event{
+			EventID:        "",
+			RoutingVersion: 0,
+			Provider:       req.Provider,
+			Symbol:         req.Symbol,
+			Type:           schema.EventTypeExecReport,
+			SeqProvider:    0,
+			IngestTS:       now,
+			EmitTS:         now,
+			Payload:        report,
+		}
+		se.lambda.OnOrderFilled(ctx, evt, report)
 	}
 	if se.observer != nil {
 		se.observer.OnFill(req.Symbol, report, fee)

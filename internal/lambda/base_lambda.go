@@ -654,13 +654,16 @@ func (l *BaseLambda) matchesBalanceCurrency(symbol string) bool {
 
 func (l *BaseLambda) buildRiskControlPayload(err error) schema.RiskControlPayload {
 	payload := schema.RiskControlPayload{
-		StrategyID: l.id,
-		Provider:   l.config.Provider,
-		Symbol:     l.config.Symbol,
-		Status:     schema.RiskControlStatusTriggered,
-		Reason:     err.Error(),
-		BreachType: "UNKNOWN",
-		Timestamp:  time.Now().UTC(),
+		StrategyID:         l.id,
+		Provider:           l.config.Provider,
+		Symbol:             l.config.Symbol,
+		Status:             schema.RiskControlStatusTriggered,
+		Reason:             err.Error(),
+		BreachType:         "UNKNOWN",
+		Metrics:            nil,
+		KillSwitchEngaged:  false,
+		CircuitBreakerOpen: false,
+		Timestamp:          time.Now().UTC(),
 	}
 
 	var breach *risk.BreachError

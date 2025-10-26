@@ -31,6 +31,7 @@ type APIServerConfig struct {
 
 // RiskConfig defines risk parameters for a single strategy.
 
+// CircuitBreakerConfig describes cascading halt behaviour for repeated risk breaches.
 type CircuitBreakerConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	Threshold int    `yaml:"threshold"`

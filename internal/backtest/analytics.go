@@ -1,3 +1,4 @@
+// Package backtest implements historical simulation utilities for Meltica strategies.
 package backtest
 
 import (
@@ -24,20 +25,22 @@ type Analytics struct {
 
 func newAnalytics() *Analytics {
 	return &Analytics{
-		TotalVolume: decimal.Zero,
-		GrossPnL:    decimal.Zero,
-		Fees:        decimal.Zero,
-		NetPnL:      decimal.Zero,
-		MaxDrawdown: decimal.Zero,
-		cash:        decimal.Zero,
-		positions:   make(map[string]decimal.Decimal),
-		lastPrices:  make(map[string]decimal.Decimal),
-		peakEquity:  decimal.Zero,
+		TotalOrders:  0,
+		FilledOrders: 0,
+		TotalVolume:  decimal.Zero,
+		GrossPnL:     decimal.Zero,
+		Fees:         decimal.Zero,
+		NetPnL:       decimal.Zero,
+		MaxDrawdown:  decimal.Zero,
+		cash:         decimal.Zero,
+		positions:    make(map[string]decimal.Decimal),
+		lastPrices:   make(map[string]decimal.Decimal),
+		peakEquity:   decimal.Zero,
 	}
 }
 
 func (a *Analytics) clone() Analytics {
-	copy := Analytics{
+	snapshot := Analytics{
 		TotalOrders:  a.TotalOrders,
 		FilledOrders: a.FilledOrders,
 		TotalVolume:  a.TotalVolume,
@@ -51,12 +54,12 @@ func (a *Analytics) clone() Analytics {
 		lastPrices:   make(map[string]decimal.Decimal, len(a.lastPrices)),
 	}
 	for key, val := range a.positions {
-		copy.positions[key] = val
+		snapshot.positions[key] = val
 	}
 	for key, val := range a.lastPrices {
-		copy.lastPrices[key] = val
+		snapshot.lastPrices[key] = val
 	}
-	return copy
+	return snapshot
 }
 
 func (a *Analytics) recordOrder() {
@@ -80,9 +83,11 @@ func (a *Analytics) recordFill(symbol string, side schema.TradeSide, quantity, p
 	case schema.TradeSideSell:
 		a.cash = a.cash.Add(notional)
 		a.positions[symbol] = a.positions[symbol].Sub(quantity)
-	default:
+	case schema.TradeSideBuy:
 		a.cash = a.cash.Sub(notional)
 		a.positions[symbol] = a.positions[symbol].Add(quantity)
+	default:
+		return
 	}
 	if a.positions[symbol].Equal(decimal.Zero) {
 		delete(a.positions, symbol)

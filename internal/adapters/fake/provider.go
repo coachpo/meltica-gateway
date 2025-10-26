@@ -1175,7 +1175,8 @@ func (p *Provider) startRouteLocked(route dispatcher.Route, evtType schema.Event
 		schema.EventTypeBookSnapshot,
 		schema.EventTypeInstrumentUpdate,
 		schema.EventTypeKlineSummary,
-		schema.EventTypeExecReport:
+		schema.EventTypeExecReport,
+		schema.EventTypeRiskControl:
 		supplier := p.instrumentSupplier(route)
 		handle.wg.Go(func() {
 			p.runGenerator(routeCtx, evtType, supplier)
@@ -1204,6 +1205,8 @@ func (p *Provider) runGenerator(ctx context.Context, evtType schema.EventType, s
 	case schema.EventTypeExecReport:
 		<-ctx.Done()
 	case schema.EventTypeBalanceUpdate:
+		<-ctx.Done()
+	case schema.EventTypeRiskControl:
 		<-ctx.Done()
 	default:
 		<-ctx.Done()

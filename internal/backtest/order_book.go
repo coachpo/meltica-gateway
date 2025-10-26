@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"sort"
+	"time"
 
 	"github.com/coachpo/meltica/internal/schema"
 	"github.com/shopspring/decimal"
@@ -55,8 +56,11 @@ func (ob *OrderBook) Match(order *schema.OrderRequest) []*schema.TradePayload {
 			if buyPrice.GreaterThanOrEqual(askPrice) {
 				// Match found.
 				trade := &schema.TradePayload{
-					Price:    *ask.Price,
-					Quantity: order.Quantity, // This is a simplified matching logic.
+					TradeID:   "",
+					Side:      schema.TradeSideBuy,
+					Price:     *ask.Price,
+					Quantity:  order.Quantity, // This is a simplified matching logic.
+					Timestamp: time.Now().UTC(),
 				}
 				trades = append(trades, trade)
 
@@ -75,8 +79,11 @@ func (ob *OrderBook) Match(order *schema.OrderRequest) []*schema.TradePayload {
 			if sellPrice.LessThanOrEqual(bidPrice) {
 				// Match found.
 				trade := &schema.TradePayload{
-					Price:    *bid.Price,
-					Quantity: order.Quantity, // This is a simplified matching logic.
+					TradeID:   "",
+					Side:      schema.TradeSideSell,
+					Price:     *bid.Price,
+					Quantity:  order.Quantity, // This is a simplified matching logic.
+					Timestamp: time.Now().UTC(),
 				}
 				trades = append(trades, trade)
 

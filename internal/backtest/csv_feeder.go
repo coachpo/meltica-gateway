@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,7 @@ type CSVFeeder struct {
 
 // NewCSVFeeder creates a new CSV data feeder.
 func NewCSVFeeder(filePath string) (*CSVFeeder, error) {
+	// #nosec G304 -- file path is operator provided via CLI flags.
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("open csv file: %w", err)
@@ -39,8 +41,8 @@ func NewCSVFeeder(filePath string) (*CSVFeeder, error) {
 func (f *CSVFeeder) Next() (*schema.Event, error) {
 	record, err := f.reader.Read()
 	if err != nil {
-		if err == io.EOF {
-			return nil, err
+		if errors.Is(err, io.EOF) {
+			return nil, io.EOF
 		}
 		return nil, fmt.Errorf("read csv record: %w", err)
 	}
@@ -50,11 +52,26 @@ func (f *CSVFeeder) Next() (*schema.Event, error) {
 		return nil, fmt.Errorf("parse timestamp: %w", err)
 	}
 
+	symbol := ""
+	if len(record) > 3 {
+		symbol = record[3]
+	}
+
 	return &schema.Event{
+		EventID:        "",
+		RoutingVersion: 0,
+		Provider:       "",
+		Symbol:         symbol,
+		Type:           schema.EventTypeTrade,
+		SeqProvider:    0,
+		IngestTS:       time.Unix(0, timestamp),
+		EmitTS:         time.Unix(0, timestamp),
 		Payload: schema.TradePayload{
-			Timestamp: time.Unix(0, timestamp),
+			TradeID:   "",
+			Side:      schema.TradeSideBuy,
 			Price:     record[1],
 			Quantity:  record[2],
+			Timestamp: time.Unix(0, timestamp),
 		},
 	}, nil
 }
