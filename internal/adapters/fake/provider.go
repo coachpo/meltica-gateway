@@ -1762,18 +1762,12 @@ func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 		levelsBids := formatLevels(state.snapshotLevels(state.bids, p.bookOptions.Levels, true), state.constraints)
 		levelsAsks := formatLevels(state.snapshotLevels(state.asks, p.bookOptions.Levels, false), state.constraints)
 		snapshotPayload := schema.BookSnapshotPayload{
-<<<<<<< HEAD
 			Bids:          levelsBids,
 			Asks:          levelsAsks,
 			Checksum:      "",
 			LastUpdate:    ts,
 			FirstUpdateID: seq,
 			FinalUpdateID: seq,
-=======
-			Bids:       levelsBids,
-			Asks:       levelsAsks,
-			LastUpdate: ts,
->>>>>>> 047f19088b4a0dee0fb716659a459683d8bc01cf
 		}
 		state.hasSnapshot = true
 		state.mu.Unlock()
