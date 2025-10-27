@@ -2,6 +2,7 @@
 package adapters
 
 import (
+	"github.com/coachpo/meltica/internal/adapters/binance"
 	"github.com/coachpo/meltica/internal/adapters/fake"
 	"github.com/coachpo/meltica/internal/provider"
 )
@@ -12,4 +13,5 @@ func RegisterAll(reg *provider.Registry) {
 		return
 	}
 	fake.RegisterFactory(reg)
+	binance.RegisterFactory(reg)
 }
