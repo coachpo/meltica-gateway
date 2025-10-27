@@ -16,6 +16,7 @@ const (
 	defaultHTTPTimeout             = 10 * time.Second
 	defaultInstrumentRefreshPeriod = 30 * time.Minute
 	defaultRecvWindow              = 5 * time.Second
+	defaultUserStreamKeepAlive     = 15 * time.Minute
 )
 
 // Options configure the Binance adapter.
@@ -32,6 +33,7 @@ type Options struct {
 	APIKey                    string
 	APISecret                 string
 	RecvWindow                time.Duration
+	UserStreamKeepAlive       time.Duration
 }
 
 func withDefaults(in Options) Options {
@@ -58,6 +60,9 @@ func withDefaults(in Options) Options {
 	}
 	if in.RecvWindow <= 0 {
 		in.RecvWindow = defaultRecvWindow
+	}
+	if in.UserStreamKeepAlive <= 0 {
+		in.UserStreamKeepAlive = defaultUserStreamKeepAlive
 	}
 	normalized := make([]string, 0, len(in.Symbols))
 	seen := make(map[string]struct{}, len(in.Symbols))

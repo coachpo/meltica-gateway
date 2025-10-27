@@ -2,10 +2,12 @@ package binance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	json "github.com/goccy/go-json"
@@ -49,6 +51,20 @@ type depthSnapshotResponse struct {
 	LastUpdateID int64      `json:"lastUpdateId"`
 	Bids         [][]string `json:"bids"`
 	Asks         [][]string `json:"asks"`
+}
+
+type listenKeyResponse struct {
+	ListenKey string `json:"listenKey"`
+}
+
+type accountInfoResponse struct {
+	Balances []accountBalance `json:"balances"`
+}
+
+type accountBalance struct {
+	Asset  string `json:"asset"`
+	Free   string `json:"free"`
+	Locked string `json:"locked"`
 }
 
 func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, map[string]symbolMeta, error) {
@@ -190,6 +206,104 @@ func (p *Provider) fetchDepthSnapshot(ctx context.Context, symbol string) (depth
 		return depthSnapshotResponse{}, fmt.Errorf("decode depth snapshot: %w", err)
 	}
 	return snapshot, nil
+}
+
+func (p *Provider) createListenKey(ctx context.Context) (string, error) {
+	if !p.hasTradingCredentials() {
+		return "", errors.New("binance: missing api credentials for listen key")
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
+	defer cancel()
+	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/userDataStream"
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return "", fmt.Errorf("create listen key request: %w", err)
+	}
+	req.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
+	resp, err := p.httpClient().Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request listen key: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return "", fmt.Errorf("listen key status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload listenKeyResponse
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode listen key: %w", err)
+	}
+	if strings.TrimSpace(payload.ListenKey) == "" {
+		return "", errors.New("binance: empty listen key")
+	}
+	return payload.ListenKey, nil
+}
+
+func (p *Provider) keepAliveListenKey(ctx context.Context, listenKey string) error {
+	if strings.TrimSpace(listenKey) == "" {
+		return errors.New("binance: empty listen key for keepalive")
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
+	defer cancel()
+	params := url.Values{}
+	params.Set("listenKey", strings.TrimSpace(listenKey))
+	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/userDataStream?" + params.Encode()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPut, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("create keepalive request: %w", err)
+	}
+	req.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
+	resp, err := p.httpClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("keepalive listen key: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return fmt.Errorf("listen key keepalive status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (p *Provider) fetchAccountBalances(ctx context.Context) ([]accountBalance, error) {
+	if !p.hasTradingCredentials() {
+		return nil, errors.New("binance: missing api credentials for account balances")
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
+	defer cancel()
+	params := url.Values{}
+	if p.opts.RecvWindow > 0 {
+		params.Set("recvWindow", strconv.FormatInt(p.opts.RecvWindow.Milliseconds(), 10))
+	}
+	params.Set("timestamp", strconv.FormatInt(p.clock().UTC().UnixMilli(), 10))
+	query := params.Encode()
+	signature := signPayload(query, p.opts.APISecret)
+	if query != "" {
+		query += "&"
+	}
+	query += "signature=" + signature
+	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/account?" + query
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create account request: %w", err)
+	}
+	req.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
+	resp, err := p.httpClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request account: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return nil, fmt.Errorf("account status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload accountInfoResponse
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode account: %w", err)
+	}
+	return payload.Balances, nil
 }
 
 func ptr[T any](v T) *T {

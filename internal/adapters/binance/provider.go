@@ -58,6 +58,13 @@ type Provider struct {
 
 	bookMu   sync.Mutex
 	bookSubs map[string]*bookHandle
+
+	userStreamMu     sync.Mutex
+	userStreamCancel context.CancelFunc
+	userStreamWG     sync.WaitGroup
+
+	balanceMu sync.Mutex
+	balances  map[string]balanceSnapshot
 }
 
 type streamHandle struct {
@@ -96,6 +103,7 @@ func NewProvider(opts Options) *Provider {
 		p.pools = pm
 	}
 	p.publisher = shared.NewPublisher(p.name, p.events, p.pools, p.clock)
+	p.balances = make(map[string]balanceSnapshot)
 	return p
 }
 
@@ -127,6 +135,10 @@ func (p *Provider) Start(ctx context.Context) error {
 	}
 
 	go p.instrumentRefreshLoop()
+
+	if p.hasTradingCredentials() {
+		p.startUserDataStream()
+	}
 
 	go func() {
 		<-runCtx.Done()
@@ -411,6 +423,291 @@ func (p *Provider) stopAllStreams() {
 	p.stopTradeStreams()
 	p.stopTickerStreams()
 	p.stopOrderBookStreams()
+	p.stopUserDataStream()
+}
+
+func (p *Provider) hasTradingCredentials() bool {
+	return strings.TrimSpace(p.opts.APIKey) != "" && strings.TrimSpace(p.opts.APISecret) != ""
+}
+
+func (p *Provider) startUserDataStream() {
+	p.userStreamMu.Lock()
+	defer p.userStreamMu.Unlock()
+	if p.userStreamCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(p.ctx)
+	p.userStreamCancel = cancel
+	p.userStreamWG.Add(1)
+	go func() {
+		defer p.userStreamWG.Done()
+		p.runUserDataStream(ctx)
+	}()
+}
+
+func (p *Provider) stopUserDataStream() {
+	p.userStreamMu.Lock()
+	cancel := p.userStreamCancel
+	p.userStreamCancel = nil
+	p.userStreamMu.Unlock()
+	if cancel != nil {
+		cancel()
+		p.userStreamWG.Wait()
+	}
+}
+
+func (p *Provider) runUserDataStream(ctx context.Context) {
+	backoffCfg := backoff.NewExponentialBackOff()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		listenKey, err := p.createListenKey(ctx)
+		if err != nil {
+			p.reportError(fmt.Errorf("binance listen key: %w", err))
+			sleep := backoffCfg.NextBackOff()
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(sleep):
+			}
+			continue
+		}
+		backoffCfg.Reset()
+		if err := p.publishBalanceSnapshot(ctx); err != nil {
+			p.reportError(fmt.Errorf("binance balance snapshot: %w", err))
+		}
+		err = p.consumeUserDataStream(ctx, listenKey)
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		if err != nil {
+			p.reportError(fmt.Errorf("binance user stream: %w", err))
+		}
+		sleep := backoffCfg.NextBackOff()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(sleep):
+		}
+	}
+}
+
+func (p *Provider) consumeUserDataStream(ctx context.Context, listenKey string) error {
+	base := strings.TrimSuffix(p.opts.WebsocketBaseURL, "/")
+	url := base + "/" + strings.TrimSpace(listenKey)
+	conn, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", url, err)
+	}
+	defer func() {
+		_ = conn.Close(websocket.StatusNormalClosure, "shutdown")
+	}()
+	keepCtx, keepCancel := context.WithCancel(ctx)
+	defer keepCancel()
+	interval := p.opts.UserStreamKeepAlive
+	if interval <= 0 {
+		interval = 15 * time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	go func() {
+		for {
+			select {
+			case <-keepCtx.Done():
+				return
+			case <-ticker.C:
+				if err := p.keepAliveListenKey(keepCtx, listenKey); err != nil {
+					p.reportError(fmt.Errorf("binance listen key keepalive: %w", err))
+				}
+			}
+		}
+	}()
+	for {
+		msgType, data, err := conn.Read(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return context.Canceled
+			}
+			return fmt.Errorf("read %s: %w", url, err)
+		}
+		if msgType != websocket.MessageText {
+			continue
+		}
+		p.handleUserDataMessage(data)
+	}
+}
+
+func (p *Provider) handleUserDataMessage(data []byte) {
+	var header userDataEvent
+	if err := json.Unmarshal(data, &header); err != nil {
+		p.reportError(fmt.Errorf("decode user data header: %w", err))
+		return
+	}
+	switch strings.ToLower(header.EventType) {
+	case "outboundaccountposition":
+		var event accountPositionEvent
+		if err := json.Unmarshal(data, &event); err != nil {
+			p.reportError(fmt.Errorf("decode account position: %w", err))
+			return
+		}
+		p.handleAccountPosition(event)
+	case "balanceupdate":
+		var event balanceDeltaEvent
+		if err := json.Unmarshal(data, &event); err != nil {
+			p.reportError(fmt.Errorf("decode balance update: %w", err))
+			return
+		}
+		p.handleBalanceDelta(event)
+	case "executionreport":
+		var event executionReportEvent
+		if err := json.Unmarshal(data, &event); err != nil {
+			p.reportError(fmt.Errorf("decode execution report: %w", err))
+			return
+		}
+		p.handleExecutionReport(event)
+	default:
+		// ignore other user data events for now
+	}
+}
+
+func (p *Provider) handleAccountPosition(event accountPositionEvent) {
+	timestamp := time.UnixMilli(event.EventTime).UTC()
+	for _, bal := range event.Balances {
+		asset := strings.ToUpper(strings.TrimSpace(bal.Asset))
+		if asset == "" {
+			continue
+		}
+		free, _ := parseDecimal(bal.Free)
+		locked, _ := parseDecimal(bal.Locked)
+		p.publishBalance(asset, free, locked, timestamp)
+	}
+}
+
+func (p *Provider) handleBalanceDelta(event balanceDeltaEvent) {
+	asset := strings.ToUpper(strings.TrimSpace(event.Asset))
+	if asset == "" {
+		return
+	}
+	delta, ok := parseDecimal(event.Delta)
+	if !ok {
+		return
+	}
+	if delta.IsZero() {
+		return
+	}
+	timestamp := time.UnixMilli(event.EventTime).UTC()
+	p.balanceMu.Lock()
+	snapshot := p.balances[asset]
+	snapshot.free = snapshot.free.Add(delta)
+	p.balances[asset] = snapshot
+	free := snapshot.free
+	locked := snapshot.locked
+	p.balanceMu.Unlock()
+	p.publishBalance(asset, free, locked, timestamp)
+}
+
+func (p *Provider) handleExecutionReport(event executionReportEvent) {
+	meta, ok := p.metaForRESTSymbol(event.Symbol)
+	if !ok {
+		return
+	}
+	side, err := binanceSideFromString(event.Side)
+	if err != nil {
+		p.reportError(fmt.Errorf("binance exec side: %w", err))
+		return
+	}
+	orderType, err := binanceOrderTypeFromString(event.OrderType)
+	if err != nil {
+		p.reportError(fmt.Errorf("binance exec order type: %w", err))
+		return
+	}
+	timestamp := time.UnixMilli(event.TransactionTime).UTC()
+	if timestamp.IsZero() {
+		timestamp = time.UnixMilli(event.EventTime).UTC()
+	}
+	clientOrderID := strings.TrimSpace(event.ClientOrderID)
+	price := strings.TrimSpace(event.Price)
+	if price == "" {
+		price = strings.TrimSpace(event.LastExecutedPrice)
+	}
+	quantity := strings.TrimSpace(event.OriginalQuantity)
+	filled := strings.TrimSpace(event.CumulativeQuantity)
+	remaining := calculateRemaining(event.OriginalQuantity, event.CumulativeQuantity)
+	avgFill := calculateAveragePrice(event.CumulativeQuoteQty, event.CumulativeQuantity)
+	commissionAsset := ""
+	if event.CommissionAsset != nil {
+		commissionAsset = strings.TrimSpace(*event.CommissionAsset)
+	}
+	payload := schema.ExecReportPayload{
+		ClientOrderID:    clientOrderID,
+		ExchangeOrderID:  strconv.FormatInt(event.OrderID, 10),
+		State:            binanceStatusToExecState(event.OrderStatus),
+		Side:             side,
+		OrderType:        orderType,
+		Price:            price,
+		Quantity:         quantity,
+		FilledQuantity:   filled,
+		RemainingQty:     remaining,
+		AvgFillPrice:     avgFill,
+		Timestamp:        timestamp,
+		CommissionAmount: strings.TrimSpace(event.Commission),
+		CommissionAsset:  commissionAsset,
+	}
+	p.publisher.PublishExecReport(p.ctx, meta.canonical, payload)
+}
+
+func (p *Provider) publishBalance(asset string, free, locked decimal.Decimal, timestamp time.Time) {
+	total := free.Add(locked)
+	snapshot := balanceSnapshot{free: free, locked: locked}
+	p.balanceMu.Lock()
+	p.balances[asset] = snapshot
+	p.balanceMu.Unlock()
+	payload := schema.BalanceUpdatePayload{
+		Currency:  asset,
+		Total:     total.String(),
+		Available: free.String(),
+		Timestamp: timestamp,
+	}
+	p.publisher.PublishBalanceUpdate(p.ctx, asset, payload)
+}
+
+func (p *Provider) metaForRESTSymbol(symbol string) (symbolMeta, bool) {
+	key := strings.ToUpper(strings.TrimSpace(symbol))
+	if key == "" {
+		return symbolMeta{}, false
+	}
+	p.instrumentsMu.RLock()
+	defer p.instrumentsMu.RUnlock()
+	canonical, ok := p.restToCanon[key]
+	if !ok {
+		return symbolMeta{}, false
+	}
+	meta, ok := p.symbols[canonical]
+	return meta, ok
+}
+
+func (p *Provider) publishBalanceSnapshot(ctx context.Context) error {
+	if !p.hasTradingCredentials() {
+		return nil
+	}
+	balances, err := p.fetchAccountBalances(ctx)
+	if err != nil {
+		return err
+	}
+	timestamp := p.clock().UTC()
+	for _, bal := range balances {
+		asset := strings.ToUpper(strings.TrimSpace(bal.Asset))
+		if asset == "" {
+			continue
+		}
+		free, _ := parseDecimal(bal.Free)
+		locked, _ := parseDecimal(bal.Locked)
+		p.publishBalance(asset, free, locked, timestamp)
+	}
+	return nil
 }
 
 func (p *Provider) runTradeStream(ctx context.Context, meta symbolMeta) {
@@ -822,6 +1119,53 @@ type depthDiffMessage struct {
 	Asks          [][]string `json:"a"`
 }
 
+type userDataEvent struct {
+	EventType string `json:"e"`
+	EventTime int64  `json:"E"`
+}
+
+type accountPositionEvent struct {
+	EventType string                   `json:"e"`
+	EventTime int64                    `json:"E"`
+	Balances  []accountPositionBalance `json:"B"`
+}
+
+type accountPositionBalance struct {
+	Asset  string `json:"a"`
+	Free   string `json:"f"`
+	Locked string `json:"l"`
+}
+
+type balanceDeltaEvent struct {
+	EventType string `json:"e"`
+	EventTime int64  `json:"E"`
+	Asset     string `json:"a"`
+	Delta     string `json:"d"`
+}
+
+type executionReportEvent struct {
+	EventType          string  `json:"e"`
+	EventTime          int64   `json:"E"`
+	Symbol             string  `json:"s"`
+	ClientOrderID      string  `json:"c"`
+	Side               string  `json:"S"`
+	OrderType          string  `json:"o"`
+	TimeInForce        string  `json:"f"`
+	OriginalQuantity   string  `json:"q"`
+	Price              string  `json:"p"`
+	StopPrice          string  `json:"P"`
+	TrailingDelta      string  `json:"d"`
+	OrderStatus        string  `json:"X"`
+	OrderID            int64   `json:"i"`
+	LastExecutedQty    string  `json:"l"`
+	CumulativeQuantity string  `json:"z"`
+	LastExecutedPrice  string  `json:"L"`
+	Commission         string  `json:"n"`
+	CommissionAsset    *string `json:"N"`
+	TransactionTime    int64   `json:"T"`
+	CumulativeQuoteQty string  `json:"Z"`
+}
+
 func levelsToPriceLevels(levels [][]string) []schema.PriceLevel {
 	if len(levels) == 0 {
 		return nil
@@ -890,6 +1234,17 @@ func binanceSide(side schema.TradeSide) (string, error) {
 	}
 }
 
+func binanceSideFromString(input string) (schema.TradeSide, error) {
+	switch strings.ToUpper(strings.TrimSpace(input)) {
+	case "BUY":
+		return schema.TradeSideBuy, nil
+	case "SELL":
+		return schema.TradeSideSell, nil
+	default:
+		return schema.TradeSide(""), fmt.Errorf("binance: unsupported trade side %q", input)
+	}
+}
+
 func binanceOrderType(orderType schema.OrderType) (string, error) {
 	switch orderType {
 	case schema.OrderTypeLimit:
@@ -898,6 +1253,17 @@ func binanceOrderType(orderType schema.OrderType) (string, error) {
 		return "MARKET", nil
 	default:
 		return "", fmt.Errorf("binance: unsupported order type %q", orderType)
+	}
+}
+
+func binanceOrderTypeFromString(input string) (schema.OrderType, error) {
+	switch strings.ToUpper(strings.TrimSpace(input)) {
+	case "LIMIT":
+		return schema.OrderTypeLimit, nil
+	case "MARKET":
+		return schema.OrderTypeMarket, nil
+	default:
+		return schema.OrderType(""), fmt.Errorf("binance: unsupported order type %q", input)
 	}
 }
 
@@ -970,4 +1336,9 @@ func parseDecimal(value string) (decimal.Decimal, bool) {
 		return decimal.Zero, false
 	}
 	return dec, true
+}
+
+type balanceSnapshot struct {
+	free   decimal.Decimal
+	locked decimal.Decimal
 }

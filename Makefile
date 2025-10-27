@@ -1,6 +1,6 @@
 GO111MODULE=on
 
-.PHONY: test bench lint vet tidy build build-linux-arm64 standards ci clean binance-ws-test coverage-architecture coverage-full coverage contract-ws-routing run
+.PHONY: test bench lint vet tidy build build-linux-arm64 clean coverage run
 
 lint:
 	golangci-lint run --config .golangci.yml
@@ -26,9 +26,6 @@ coverage:
 bench:
 	go test -bench . -benchmem ./...
 
-contract-ws-routing:
-	go test ./tests/contract/ws-routing -race -count=1
-
 build:
 	go build -o bin/ ./...
 
@@ -38,11 +35,7 @@ build-linux-arm64:
 tidy:
 	go mod tidy
 
-coverage-architecture:
-	mkdir -p coverage
-	go test ./tests/architecture -covermode=atomic -count=1 -coverprofile=coverage/architecture.out
-
-coverage-full:
+coverage:
 	mkdir -p coverage
 	go test ./... -covermode=atomic -coverprofile=coverage/full.out
 

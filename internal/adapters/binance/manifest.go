@@ -54,6 +54,9 @@ func RegisterFactory(reg *provider.Registry) {
 		if recvWindow, ok := durationFromConfig(cfg, "recv_window"); ok {
 			opts.RecvWindow = recvWindow
 		}
+		if keepAlive, ok := durationFromConfig(cfg, "user_stream_keepalive"); ok {
+			opts.UserStreamKeepAlive = keepAlive
+		}
 
 		provider := NewProvider(opts)
 		if err := provider.Start(ctx); err != nil {
