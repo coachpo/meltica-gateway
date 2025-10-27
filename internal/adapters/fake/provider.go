@@ -374,6 +374,7 @@ type Provider struct {
 	defaultNativeInstruments  []nativeInstrument
 	instrumentRefreshInterval time.Duration
 	instrumentRefresh         func(context.Context) ([]schema.Instrument, error)
+	initialCatalogue          []schema.Instrument
 
 	priceModel   marketModelOptions
 	tradeModel   tradeModelOptions
@@ -1013,7 +1014,7 @@ func NewProvider(opts Options) *Provider {
 	if len(catalogue) == 0 {
 		catalogue = append(catalogue, DefaultInstruments...)
 	}
-	p.setSupportedInstruments(catalogue)
+	p.initialCatalogue = schema.CloneInstruments(catalogue)
 
 	refreshInterval := opts.InstrumentRefreshInterval
 	if refreshInterval <= 0 {
@@ -1045,6 +1046,8 @@ func (p *Provider) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	p.ctx = ctx
 	p.cancel = cancel
+
+	p.seedInitialInstruments()
 
 	go func() {
 		<-ctx.Done()
@@ -2226,6 +2229,14 @@ func snapshotCurrencies(src []string) []string {
 	out := make([]string, len(src))
 	copy(out, src)
 	return out
+}
+
+func (p *Provider) seedInitialInstruments() {
+	if len(p.initialCatalogue) == 0 {
+		return
+	}
+	p.setSupportedInstruments(p.initialCatalogue)
+	p.initialCatalogue = nil
 }
 
 func (p *Provider) setSupportedInstruments(list []schema.Instrument) {
