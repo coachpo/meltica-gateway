@@ -303,18 +303,20 @@ const (
 
 // ExecReportPayload represents state transitions for submitted orders.
 type ExecReportPayload struct {
-	ClientOrderID   string          `json:"client_order_id"`
-	ExchangeOrderID string          `json:"exchange_order_id"`
-	State           ExecReportState `json:"state"`
-	Side            TradeSide       `json:"side"`
-	OrderType       OrderType       `json:"order_type"`
-	Price           string          `json:"price"`
-	Quantity        string          `json:"quantity"`
-	FilledQuantity  string          `json:"filled_quantity"`
-	RemainingQty    string          `json:"remaining_qty"`
-	AvgFillPrice    string          `json:"avg_fill_price"`
-	Timestamp       time.Time       `json:"timestamp"`
-	RejectReason    *string         `json:"reject_reason,omitempty"`
+	ClientOrderID    string          `json:"client_order_id"`
+	ExchangeOrderID  string          `json:"exchange_order_id"`
+	State            ExecReportState `json:"state"`
+	Side             TradeSide       `json:"side"`
+	OrderType        OrderType       `json:"order_type"`
+	Price            string          `json:"price"`
+	Quantity         string          `json:"quantity"`
+	FilledQuantity   string          `json:"filled_quantity"`
+	RemainingQty     string          `json:"remaining_qty"`
+	AvgFillPrice     string          `json:"avg_fill_price"`
+	CommissionAmount string          `json:"commission_amount,omitempty"`
+	CommissionAsset  string          `json:"commission_asset,omitempty"`
+	Timestamp        time.Time       `json:"timestamp"`
+	RejectReason     *string         `json:"reject_reason,omitempty"`
 }
 
 // KlineSummaryPayload represents aggregated candlestick data.

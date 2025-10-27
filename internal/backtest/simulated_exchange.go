@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,8 @@ type SimulatedExchange interface {
 
 // ExchangeOption configures optional behaviour for a simulated exchange instance.
 type ExchangeOption func(*simulatedExchange)
+
+var defaultFeeRate = decimal.RequireFromString("0.002")
 
 type simulatedExchange struct {
 	mu            sync.RWMutex
@@ -75,7 +78,7 @@ func NewSimulatedExchange(strategy lambda.TradingStrategy, opts ...ExchangeOptio
 		mu:            sync.RWMutex{},
 		orderBooks:    make(map[string]*OrderBook),
 		lambda:        strategy,
-		feeModel:      ProportionalFee{Rate: decimal.Zero},
+		feeModel:      ProportionalFee{Rate: defaultFeeRate},
 		slippageModel: nil,
 		observer:      nil,
 		clock:         NewVirtualClock(time.Unix(0, 0)),
@@ -135,18 +138,29 @@ func (se *simulatedExchange) SubmitOrder(ctx context.Context, req schema.OrderRe
 		fee = se.feeModel.Fee(req, totalQty, avgPrice)
 	}
 	report := schema.ExecReportPayload{
-		ClientOrderID:   req.ClientOrderID,
-		ExchangeOrderID: "",
-		State:           schema.ExecReportStateFILLED,
-		Side:            req.Side,
-		OrderType:       req.OrderType,
-		Price:           avgPrice.String(),
-		Quantity:        req.Quantity,
-		FilledQuantity:  totalQty.String(),
-		RemainingQty:    decimal.Zero.String(),
-		AvgFillPrice:    avgPrice.String(),
-		Timestamp:       se.clock.Now(),
-		RejectReason:    nil,
+		ClientOrderID:    req.ClientOrderID,
+		ExchangeOrderID:  "",
+		State:            schema.ExecReportStateFILLED,
+		Side:             req.Side,
+		OrderType:        req.OrderType,
+		Price:            avgPrice.String(),
+		Quantity:         req.Quantity,
+		FilledQuantity:   totalQty.String(),
+		RemainingQty:     decimal.Zero.String(),
+		AvgFillPrice:     avgPrice.String(),
+		CommissionAmount: "",
+		CommissionAsset:  "",
+		Timestamp:        se.clock.Now(),
+		RejectReason:     nil,
+	}
+
+	if fee.GreaterThan(decimal.Zero) {
+		if amount := commissionAmountBase(fee, avgPrice); amount != "" {
+			report.CommissionAmount = amount
+			if asset := extractBaseAsset(req.Symbol); asset != "" {
+				report.CommissionAsset = asset
+			}
+		}
 	}
 
 	if se.lambda != nil {
@@ -206,4 +220,32 @@ func (se *simulatedExchange) setClock(clock Clock) {
 	se.mu.Lock()
 	se.clock = clock
 	se.mu.Unlock()
+}
+
+func commissionAmountBase(fee, price decimal.Decimal) string {
+	if fee.LessThanOrEqual(decimal.Zero) {
+		return ""
+	}
+	if price.LessThanOrEqual(decimal.Zero) {
+		return ""
+	}
+	amount := fee.DivRound(price, 8)
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return ""
+	}
+	return amount.String()
+}
+
+func extractBaseAsset(symbol string) string {
+	trimmed := strings.TrimSpace(symbol)
+	if trimmed == "" {
+		return ""
+	}
+	upper := strings.ToUpper(trimmed)
+	for _, sep := range []string{"-", "/", "_", ":"} {
+		if idx := strings.Index(upper, sep); idx > 0 {
+			return strings.TrimSpace(upper[:idx])
+		}
+	}
+	return ""
 }

@@ -59,6 +59,7 @@ const (
 	defaultVenueDisconnectDuration   = 5 * time.Second
 	defaultKlineInterval             = time.Minute
 	defaultBalanceUpdateInterval     = 3 * time.Second
+	defaultCommissionRate            = 0.002
 )
 
 type nativeInstrument struct {
@@ -1565,6 +1566,153 @@ func (p *Provider) emitBalanceSnapshots(currencies []string) {
 	}
 }
 
+func (p *Provider) emitBalanceSnapshot(currency string) {
+	normalized := schema.NormalizeCurrencyCode(currency)
+	if normalized == "" {
+		return
+	}
+	ts := p.clock().UTC()
+	p.balanceMu.Lock()
+	state, ok := p.balances[normalized]
+	p.balanceMu.Unlock()
+	if !ok {
+		return
+	}
+	p.emitBalanceEvent(normalized, state, ts)
+}
+
+func (p *Provider) ensureBalanceStateLocked(currency string) balanceState {
+	state, ok := p.balances[currency]
+	if !ok {
+		state = balanceState{total: 1000, available: 1000}
+	}
+	if state.available > state.total {
+		state.available = state.total
+	}
+	return state
+}
+
+func (p *Provider) emitBalanceEvent(currency string, state balanceState, ts time.Time) {
+	seq := p.nextSeq(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: currency})
+	payload := schema.BalanceUpdatePayload{
+		Currency:  currency,
+		Total:     formatBalance(state.total),
+		Available: formatBalance(state.available),
+		Timestamp: ts,
+	}
+	evt := p.newEvent(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: currency}, seq, payload, ts)
+	if evt == nil {
+		return
+	}
+	p.emitEvent(evt)
+	p.recordBalanceUpdate(currency)
+}
+
+func clampNonNegative(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func (p *Provider) instrumentBySymbol(symbol string) (schema.Instrument, bool) {
+	normalized := normalizeInstrument(symbol)
+	if normalized == "" {
+		var empty schema.Instrument
+		return empty, false
+	}
+	p.instrumentMu.RLock()
+	inst, ok := p.instruments[normalized]
+	p.instrumentMu.RUnlock()
+	if !ok {
+		var empty schema.Instrument
+		return empty, false
+	}
+	return schema.CloneInstrument(inst), true
+}
+
+func (p *Provider) baseCurrencyFor(symbol string) string {
+	inst, ok := p.instrumentBySymbol(symbol)
+	if !ok {
+		return ""
+	}
+	return schema.NormalizeCurrencyCode(inst.BaseCurrency)
+}
+
+func (p *Provider) adjustBalancesForFill(inst schema.Instrument, side schema.TradeSide, quantity, price float64) {
+	if quantity <= floatTolerance {
+		return
+	}
+	base := schema.NormalizeCurrencyCode(inst.BaseCurrency)
+	quote := schema.NormalizeCurrencyCode(inst.QuoteCurrency)
+	notional := clampNonNegative(quantity * price)
+	emitBase := false
+	emitQuote := false
+	p.balanceMu.Lock()
+	if base != "" {
+		state := p.ensureBalanceStateLocked(base)
+		switch side {
+		case schema.TradeSideBuy:
+			state.total += quantity
+			state.available += quantity
+		case schema.TradeSideSell:
+			state.total = clampNonNegative(state.total - quantity)
+			state.available = clampNonNegative(state.available - quantity)
+		}
+		if state.available > state.total {
+			state.available = state.total
+		}
+		p.balances[base] = state
+		emitBase = true
+	}
+	if quote != "" {
+		state := p.ensureBalanceStateLocked(quote)
+		switch side {
+		case schema.TradeSideBuy:
+			state.total = clampNonNegative(state.total - notional)
+			state.available = clampNonNegative(state.available - notional)
+		case schema.TradeSideSell:
+			state.total += notional
+			state.available += notional
+		}
+		if state.available > state.total {
+			state.available = state.total
+		}
+		p.balances[quote] = state
+		emitQuote = true
+	}
+	p.balanceMu.Unlock()
+	if emitBase {
+		p.emitBalanceSnapshot(base)
+	}
+	if emitQuote && !strings.EqualFold(base, quote) {
+		p.emitBalanceSnapshot(quote)
+	}
+}
+
+func (p *Provider) adjustBalancesForFillSymbol(symbol string, side schema.TradeSide, quantity, price float64) {
+	inst, ok := p.instrumentBySymbol(symbol)
+	if !ok {
+		return
+	}
+	p.adjustBalancesForFill(inst, side, quantity, price)
+}
+
+func (p *Provider) ensureInstrumentBalances(inst schema.Instrument) {
+	base := schema.NormalizeCurrencyCode(inst.BaseCurrency)
+	quote := schema.NormalizeCurrencyCode(inst.QuoteCurrency)
+	p.balanceMu.Lock()
+	if base != "" {
+		state := p.ensureBalanceStateLocked(base)
+		p.balances[base] = state
+	}
+	if quote != "" {
+		state := p.ensureBalanceStateLocked(quote)
+		p.balances[quote] = state
+	}
+	p.balanceMu.Unlock()
+}
+
 func (p *Provider) emitKline(instrument nativeInstrument) {
 	if p.klineInterval <= 0 {
 		return
@@ -1609,7 +1757,7 @@ func (p *Provider) emitBalanceUpdate(currency string) {
 	}
 	ts := p.clock().UTC()
 	p.balanceMu.Lock()
-	state := p.balances[normalized]
+	state := p.ensureBalanceStateLocked(normalized)
 	if state.total <= 0 {
 		state.total = 500 + 500*p.randomFloat()
 	}
@@ -1619,22 +1767,10 @@ func (p *Provider) emitBalanceUpdate(currency string) {
 		state.total = 0
 	}
 	reserve := 0.3 + 0.6*p.randomFloat()
-	state.available = state.total * reserve
+	state.available = clampNonNegative(state.total * reserve)
 	p.balances[normalized] = state
 	p.balanceMu.Unlock()
-	payload := schema.BalanceUpdatePayload{
-		Currency:  normalized,
-		Total:     formatBalance(state.total),
-		Available: formatBalance(state.available),
-		Timestamp: ts,
-	}
-	seq := p.nextSeq(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: normalized})
-	evt := p.newEvent(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: normalized}, seq, payload, ts)
-	if evt == nil {
-		return
-	}
-	p.emitEvent(evt)
-	p.recordBalanceUpdate(normalized)
+	p.emitBalanceEvent(normalized, state, ts)
 }
 
 func (p *Provider) emitTicker(instrument nativeInstrument) {
@@ -1714,10 +1850,21 @@ func (p *Provider) emitTrade(instrument nativeInstrument) {
 		if fill.order.remaining <= floatTolerance {
 			reportState = schema.ExecReportStateFILLED
 		}
-		payload := buildExecPayload(fill.order, reportState, nil, state.constraints, ts)
+		baseCurrency := p.baseCurrencyFor(fill.order.instrument)
+		payload := buildExecPayload(fill.order, reportState, nil, state.constraints, baseCurrency, ts)
 		execEvents = append(execEvents, execReportEvent{instrument: instrument, payload: payload, ts: ts})
 	}
 	state.mu.Unlock()
+	for _, fill := range fills {
+		if fill.order == nil || fill.quantity <= floatTolerance {
+			continue
+		}
+		priced := fill.price
+		if priced <= 0 {
+			priced = price
+		}
+		p.adjustBalancesForFillSymbol(fill.order.instrument, fill.order.side, fill.quantity, priced)
+	}
 	tradeID := fmt.Sprintf("%s-%d", strings.ReplaceAll(instrument.Symbol(), "-", ""), seq)
 	payload := schema.TradePayload{
 		TradeID:   tradeID,
@@ -2012,9 +2159,10 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 		createdAt:  now,
 		updatedAt:  now,
 	}
+	baseCurrency := p.baseCurrencyFor(order.Symbol)
 	events := []execReportEvent{{
 		instrument: nativeInst,
-		payload:    buildExecPayload(active, schema.ExecReportStateACK, nil, cons, now),
+		payload:    buildExecPayload(active, schema.ExecReportStateACK, nil, cons, baseCurrency, now),
 		ts:         now,
 	}}
 	avgPrice := 0.0
@@ -2030,7 +2178,7 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 			}
 			events = append(events, execReportEvent{
 				instrument: nativeInst,
-				payload:    buildExecPayload(active, fillState, nil, cons, now),
+				payload:    buildExecPayload(active, fillState, nil, cons, baseCurrency, now),
 				ts:         now,
 			})
 		}
@@ -2048,7 +2196,7 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 		}
 		events = append(events, execReportEvent{
 			instrument: nativeInst,
-			payload:    buildExecPayload(fill.order, stateCargo, nil, cons, now),
+			payload:    buildExecPayload(fill.order, stateCargo, nil, cons, p.baseCurrencyFor(fill.order.instrument), now),
 			ts:         now,
 		})
 	}
@@ -2061,7 +2209,7 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 			}
 			events = append(events, execReportEvent{
 				instrument: nativeInst,
-				payload:    buildExecPayload(active, schema.ExecReportStateCANCELLED, ptr(reason), cons, now),
+				payload:    buildExecPayload(active, schema.ExecReportStateCANCELLED, ptr(reason), cons, baseCurrency, now),
 				ts:         now,
 			})
 			active.remaining = 0
@@ -2077,6 +2225,23 @@ func (p *Provider) handleOrder(order schema.OrderRequest) {
 	}
 	state.recenterBook(p, state.lastPrice)
 	state.mu.Unlock()
+	if filled > floatTolerance {
+		fillPrice := avgPrice
+		if fillPrice <= 0 {
+			fillPrice = limitPrice
+		}
+		p.adjustBalancesForFillSymbol(order.Symbol, order.Side, filled, fillPrice)
+	}
+	for _, fill := range fills {
+		if fill.order == nil || fill.quantity <= floatTolerance {
+			continue
+		}
+		price := fill.price
+		if price <= 0 {
+			price = limitPrice
+		}
+		p.adjustBalancesForFillSymbol(fill.order.instrument, fill.order.side, fill.quantity, price)
+	}
 	p.emitExecReportEvents(events)
 	finalState := schema.ExecReportState("")
 	if len(events) > 0 {
@@ -2269,6 +2434,7 @@ func (p *Provider) setSupportedInstruments(list []schema.Instrument) {
 		}
 		catalog[native.symbol] = clone
 		constraints[native.symbol] = meta
+		p.ensureInstrumentBalances(clone)
 		if _, exists := seen[native.symbol]; !exists {
 			seen[native.symbol] = struct{}{}
 			natives = append(natives, native)
@@ -2332,7 +2498,7 @@ func (p *Provider) emitInstrumentDiff(previous map[string]schema.Instrument, cur
 	}
 }
 
-func buildExecPayload(order *activeOrder, state schema.ExecReportState, reason *string, cons instrumentConstraints, ts time.Time) schema.ExecReportPayload {
+func buildExecPayload(order *activeOrder, state schema.ExecReportState, reason *string, cons instrumentConstraints, baseCurrency string, ts time.Time) schema.ExecReportPayload {
 	if order == nil {
 		var empty schema.ExecReportPayload
 		return empty
@@ -2346,19 +2512,30 @@ func buildExecPayload(order *activeOrder, state schema.ExecReportState, reason *
 	remaining := formatWithPrecision(order.remaining, cons.quantityPrecision)
 	qtyStr := formatWithPrecision(order.quantity, cons.quantityPrecision)
 	avgFill := formatWithPrecision(order.avgFillPrice(), cons.pricePrecision)
+	commissionAmount := ""
+	commissionAsset := ""
+	if baseCurrency != "" && order.filled > floatTolerance {
+		commission := order.filled * defaultCommissionRate
+		if commission > floatTolerance {
+			commissionAmount = formatWithPrecision(commission, cons.quantityPrecision)
+			commissionAsset = baseCurrency
+		}
+	}
 	return schema.ExecReportPayload{
-		ClientOrderID:   order.clientID,
-		ExchangeOrderID: order.exchangeID,
-		State:           state,
-		Side:            order.side,
-		OrderType:       order.orderType,
-		Price:           priceStr,
-		Quantity:        qtyStr,
-		FilledQuantity:  filled,
-		RemainingQty:    remaining,
-		AvgFillPrice:    avgFill,
-		Timestamp:       ts,
-		RejectReason:    reason,
+		ClientOrderID:    order.clientID,
+		ExchangeOrderID:  order.exchangeID,
+		State:            state,
+		Side:             order.side,
+		OrderType:        order.orderType,
+		Price:            priceStr,
+		Quantity:         qtyStr,
+		FilledQuantity:   filled,
+		RemainingQty:     remaining,
+		AvgFillPrice:     avgFill,
+		CommissionAmount: commissionAmount,
+		CommissionAsset:  commissionAsset,
+		Timestamp:        ts,
+		RejectReason:     reason,
 	}
 }
 
@@ -2741,18 +2918,20 @@ func stringOrDefault(value *string) string {
 
 func (p *Provider) emitReject(nativeInst nativeInstrument, req schema.OrderRequest, reason string, ts time.Time) {
 	payload := schema.ExecReportPayload{
-		ClientOrderID:   req.ClientOrderID,
-		ExchangeOrderID: p.nextExchangeOrderID(req.Symbol),
-		State:           schema.ExecReportStateREJECTED,
-		Side:            req.Side,
-		OrderType:       req.OrderType,
-		Price:           stringOrDefault(req.Price),
-		Quantity:        req.Quantity,
-		FilledQuantity:  "0",
-		RemainingQty:    req.Quantity,
-		AvgFillPrice:    "0",
-		Timestamp:       ts,
-		RejectReason:    ptr(reason),
+		ClientOrderID:    req.ClientOrderID,
+		ExchangeOrderID:  p.nextExchangeOrderID(req.Symbol),
+		State:            schema.ExecReportStateREJECTED,
+		Side:             req.Side,
+		OrderType:        req.OrderType,
+		Price:            stringOrDefault(req.Price),
+		Quantity:         req.Quantity,
+		FilledQuantity:   "0",
+		RemainingQty:     req.Quantity,
+		AvgFillPrice:     "0",
+		CommissionAmount: "",
+		CommissionAsset:  "",
+		Timestamp:        ts,
+		RejectReason:     ptr(reason),
 	}
 	p.emitExecReportEvents([]execReportEvent{{instrument: nativeInst, payload: payload, ts: ts}})
 }
