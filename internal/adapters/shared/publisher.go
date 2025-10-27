@@ -32,6 +32,7 @@ func NewPublisher(providerName string, events chan<- *schema.Event, pools *pool.
 		events:       events,
 		pools:        pools,
 		clock:        clock,
+		seqMu:        sync.Mutex{},
 		seq:          make(map[string]uint64),
 	}
 }

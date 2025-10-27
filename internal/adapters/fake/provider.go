@@ -1574,18 +1574,13 @@ func (p *Provider) emitBalanceSnapshot(currency string) {
 }
 
 func (p *Provider) emitBalanceEvent(currency string, state shared.BalanceState, ts time.Time) {
-	seq := p.nextSeq(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: currency})
 	payload := schema.BalanceUpdatePayload{
 		Currency:  currency,
 		Total:     formatBalance(state.Total),
 		Available: formatBalance(state.Available),
 		Timestamp: ts,
 	}
-	evt := p.newEvent(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: currency}, seq, payload, ts)
-	if evt == nil {
-		return
-	}
-	p.emitEvent(evt)
+	p.publisher.PublishBalanceUpdate(p.ctx, currency, payload)
 	p.recordBalanceUpdate(currency)
 }
 
@@ -1851,8 +1846,6 @@ func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 	}
 	p.publisher.PublishBookSnapshot(p.ctx, instrument.Symbol(), eventPayload)
 }
-
-
 
 func (p *Provider) emitExecReportEvents(events []execReportEvent) {
 	for _, entry := range events {
@@ -2142,15 +2135,6 @@ func (p *Provider) stopAll() {
 		handle.cancel()
 		handle.wg.Wait()
 	}
-}
-
-func (p *Provider) nextSeq(evtType schema.EventType, instrument nativeInstrument) uint64 {
-	key := fmt.Sprintf("%s|%s", evtType, instrument.Symbol())
-	p.seqMu.Lock()
-	seq := p.seq[key] + 1
-	p.seq[key] = seq
-	p.seqMu.Unlock()
-	return seq
 }
 
 func (p *Provider) nextExchangeOrderID(symbol string) string {
@@ -2613,23 +2597,6 @@ func formatLevelChanges(changes []bookLevelChange, cons instrumentConstraints) [
 		})
 	}
 	return out
-}
-
-func checksum(instrument string, evtType schema.EventType, seq uint64) string {
-	base := fmt.Sprintf("%s|%s|%d", instrument, evtType, seq)
-	sum := uint32(0)
-	for _, r := range base {
-		sum = sum*33 + uint32(r)
-	}
-	return fmt.Sprintf("%08d", sum%100000000)
-}
-
-func (p *Provider) recordEventMetric(evtType schema.EventType, symbol string) {
-	if p.metrics.eventsEmitted == nil || p.ctx == nil {
-		return
-	}
-	attrs := telemetry.EventAttributes(telemetry.Environment(), string(evtType), p.name, symbol)
-	p.metrics.eventsEmitted.Add(p.ctx, 1, metric.WithAttributes(attrs...))
 }
 
 func (p *Provider) recordOrderReceived(order schema.OrderRequest) {
