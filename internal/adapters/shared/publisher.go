@@ -133,7 +133,7 @@ func (p *Publisher) emitEvent(ctx context.Context, evt *schema.Event) {
 	}
 	select {
 	case <-ctx.Done():
-		p.pools.ReturnEvent(evt)
+		p.pools.ReturnEventInst(evt)
 		return
 	case p.events <- evt:
 	}
