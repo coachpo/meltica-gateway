@@ -32,7 +32,7 @@ func TestInstrumentStateConsumeLiquidityFillsRestingOrders(t *testing.T) {
 		pricePrecision:    2,
 		quantityPrecision: 4,
 	}
-	state := newInstrumentState("TEST-USDT", 100, cons, 5)
+	state := newSymbolMarketState("TEST-USDT", 100, cons, 5)
 	state.asks = make(map[priceTick]*bookDepth)
 	state.bids = make(map[priceTick]*bookDepth)
 	now := time.Now()
@@ -67,7 +67,7 @@ func TestInstrumentStateConsumeLiquidityFillsRestingOrders(t *testing.T) {
 
 func TestKlineFinalizeProducesBucket(t *testing.T) {
 	cons := instrumentConstraints{priceIncrement: 0.1, quantityIncrement: 0.1, pricePrecision: 2, quantityPrecision: 2}
-	state := newInstrumentState("TEST-USDT", 50, cons, 3)
+	state := newSymbolMarketState("TEST-USDT", 50, cons, 3)
 	interval := 2 * time.Second
 	start := time.Unix(0, 0)
 	state.updateKline(start, 50, 1, interval)

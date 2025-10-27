@@ -2,9 +2,15 @@ package binance
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +19,7 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"github.com/coder/websocket"
 	json "github.com/goccy/go-json"
+	"github.com/shopspring/decimal"
 
 	"github.com/coachpo/meltica/internal/adapters/shared"
 	"github.com/coachpo/meltica/internal/dispatcher"
@@ -132,8 +139,26 @@ func (p *Provider) Start(ctx context.Context) error {
 }
 
 // SubmitOrder proxies order submissions; currently unsupported.
-func (p *Provider) SubmitOrder(_ context.Context, _ schema.OrderRequest) error {
-	return errors.New("binance provider does not support order submission")
+func (p *Provider) SubmitOrder(ctx context.Context, req schema.OrderRequest) error {
+	if err := p.ensureRunning(); err != nil {
+		return err
+	}
+	meta, ok := p.metaForInstrument(req.Symbol)
+	if !ok {
+		if err := p.refreshInstruments(p.ctx); err == nil {
+			meta, ok = p.metaForInstrument(req.Symbol)
+		}
+	}
+	if !ok {
+		return fmt.Errorf("binance: instrument %s not found", strings.TrimSpace(req.Symbol))
+	}
+	if strings.TrimSpace(p.opts.APIKey) == "" || strings.TrimSpace(p.opts.APISecret) == "" {
+		return fmt.Errorf("binance: trading disabled (api credentials missing)")
+	}
+	if ctx == nil {
+		ctx = p.ctx
+	}
+	return p.submitOrder(ctx, meta, req)
 }
 
 // Instruments returns the cached instrument catalogue.
@@ -273,9 +298,10 @@ func extractInstruments(filters []dispatcher.FilterRule) []string {
 }
 
 func (p *Provider) metaForInstrument(symbol string) (symbolMeta, bool) {
+	normalized := strings.ToUpper(strings.TrimSpace(symbol))
 	p.instrumentsMu.RLock()
 	defer p.instrumentsMu.RUnlock()
-	meta, ok := p.symbols[symbol]
+	meta, ok := p.symbols[normalized]
 	return meta, ok
 }
 
@@ -574,6 +600,114 @@ func (p *Provider) applyDepthDiff(meta symbolMeta, handle *bookHandle, diff dept
 	return nil
 }
 
+func (p *Provider) submitOrder(ctx context.Context, meta symbolMeta, req schema.OrderRequest) error {
+	params := url.Values{}
+	params.Set("symbol", meta.rest)
+	side, err := binanceSide(req.Side)
+	if err != nil {
+		return err
+	}
+	params.Set("side", side)
+	typeValue, err := binanceOrderType(req.OrderType)
+	if err != nil {
+		return err
+	}
+	params.Set("type", typeValue)
+	quantity := strings.TrimSpace(req.Quantity)
+	if quantity == "" {
+		return fmt.Errorf("binance: quantity required")
+	}
+	params.Set("quantity", quantity)
+	limitPrice := ""
+	if req.Price != nil {
+		limitPrice = strings.TrimSpace(*req.Price)
+	}
+	if req.OrderType == schema.OrderTypeLimit {
+		if limitPrice == "" {
+			return fmt.Errorf("binance: limit order requires price")
+		}
+		params.Set("price", limitPrice)
+		tifValue := strings.ToUpper(strings.TrimSpace(req.TIF))
+		if tifValue == "" {
+			tifValue = "GTC"
+		}
+		params.Set("timeInForce", tifValue)
+	} else {
+		if tif := strings.ToUpper(strings.TrimSpace(req.TIF)); tif != "" {
+			params.Set("timeInForce", tif)
+		}
+	}
+	if req.ClientOrderID != "" {
+		params.Set("newClientOrderId", req.ClientOrderID)
+	}
+	params.Set("newOrderRespType", "FULL")
+	if p.opts.RecvWindow > 0 {
+		params.Set("recvWindow", strconv.FormatInt(p.opts.RecvWindow.Milliseconds(), 10))
+	}
+	params.Set("timestamp", strconv.FormatInt(p.clock().UTC().UnixMilli(), 10))
+	basePayload := params.Encode()
+	signature := signPayload(basePayload, p.opts.APISecret)
+	params.Set("signature", signature)
+	body := params.Encode()
+	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/order"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create order request: %w", err)
+	}
+	httpReq.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
+	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := p.httpClient().Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("submit order: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read order response: %w", err)
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		return parseOrderError(resp.StatusCode, respBody)
+	}
+	var order orderResponse
+	if err := json.Unmarshal(respBody, &order); err != nil {
+		return fmt.Errorf("decode order response: %w", err)
+	}
+	p.publishOrderAcknowledgement(meta, req, order, quantity, limitPrice)
+	return nil
+}
+
+func (p *Provider) publishOrderAcknowledgement(meta symbolMeta, req schema.OrderRequest, order orderResponse, fallbackQty, fallbackPrice string) {
+	price := strings.TrimSpace(order.Price)
+	if price == "" {
+		price = strings.TrimSpace(fallbackPrice)
+	}
+	quantity := defaultIfEmpty(strings.TrimSpace(order.OrigQty), strings.TrimSpace(fallbackQty))
+	filled := strings.TrimSpace(order.ExecutedQty)
+	remaining := calculateRemaining(order.OrigQty, order.ExecutedQty)
+	avgPrice := calculateAveragePrice(order.CummulativeQuoteQty, order.ExecutedQty)
+	timestamp := resolveTimestamp(order.TransactTime, p.clock)
+	clientOrderID := strings.TrimSpace(req.ClientOrderID)
+	if clientOrderID == "" {
+		clientOrderID = strings.TrimSpace(order.ClientOrderID)
+	}
+	payload := schema.ExecReportPayload{
+		ClientOrderID:    clientOrderID,
+		ExchangeOrderID:  strconv.FormatInt(order.OrderID, 10),
+		State:            binanceStatusToExecState(order.Status),
+		Side:             req.Side,
+		OrderType:        req.OrderType,
+		Price:            price,
+		Quantity:         quantity,
+		FilledQuantity:   filled,
+		RemainingQty:     remaining,
+		AvgFillPrice:     avgPrice,
+		Timestamp:        timestamp,
+		CommissionAmount: "",
+		CommissionAsset:  "",
+	}
+	p.publisher.PublishExecReport(p.ctx, meta.canonical, payload)
+}
+
 func (p *Provider) consumeStream(ctx context.Context, stream string, handler func([]byte) error) error {
 	base := strings.TrimSuffix(p.opts.WebsocketBaseURL, "/")
 	url := base + "/" + stream
@@ -625,6 +759,21 @@ func (p *Provider) consumeStream(ctx context.Context, stream string, handler fun
 		case <-time.After(sleep):
 		}
 	}
+}
+
+func parseOrderError(status int, body []byte) error {
+	var apiErr binanceError
+	if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.Msg != "" {
+		if apiErr.Code != 0 {
+			return fmt.Errorf("binance order error (%d): %s", apiErr.Code, apiErr.Msg)
+		}
+		return fmt.Errorf("binance order error: %s", apiErr.Msg)
+	}
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return fmt.Errorf("binance order error status %d", status)
+	}
+	return fmt.Errorf("binance order error status %d: %s", status, trimmed)
 }
 
 func (p *Provider) reportError(err error) {
@@ -702,4 +851,123 @@ func toDiffLevels(levels [][]string) []shared.DiffLevel {
 		out = append(out, shared.DiffLevel{Price: level[0], Quantity: level[1]})
 	}
 	return out
+}
+
+type orderResponse struct {
+	Symbol              string `json:"symbol"`
+	OrderID             int64  `json:"orderId"`
+	ClientOrderID       string `json:"clientOrderId"`
+	TransactTime        int64  `json:"transactTime"`
+	Price               string `json:"price"`
+	OrigQty             string `json:"origQty"`
+	ExecutedQty         string `json:"executedQty"`
+	CummulativeQuoteQty string `json:"cummulativeQuoteQty"`
+	Status              string `json:"status"`
+	TimeInForce         string `json:"timeInForce"`
+	Type                string `json:"type"`
+	Side                string `json:"side"`
+}
+
+type binanceError struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+}
+
+func signPayload(payload, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(payload))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func binanceSide(side schema.TradeSide) (string, error) {
+	switch side {
+	case schema.TradeSideBuy:
+		return "BUY", nil
+	case schema.TradeSideSell:
+		return "SELL", nil
+	default:
+		return "", fmt.Errorf("binance: unsupported trade side %q", side)
+	}
+}
+
+func binanceOrderType(orderType schema.OrderType) (string, error) {
+	switch orderType {
+	case schema.OrderTypeLimit:
+		return "LIMIT", nil
+	case schema.OrderTypeMarket:
+		return "MARKET", nil
+	default:
+		return "", fmt.Errorf("binance: unsupported order type %q", orderType)
+	}
+}
+
+func binanceStatusToExecState(status string) schema.ExecReportState {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "NEW":
+		return schema.ExecReportStateACK
+	case "PARTIALLY_FILLED":
+		return schema.ExecReportStatePARTIAL
+	case "FILLED":
+		return schema.ExecReportStateFILLED
+	case "CANCELED":
+		return schema.ExecReportStateCANCELLED
+	case "REJECTED":
+		return schema.ExecReportStateREJECTED
+	case "EXPIRED":
+		return schema.ExecReportStateEXPIRED
+	default:
+		return schema.ExecReportStateACK
+	}
+}
+
+func calculateRemaining(orig, executed string) string {
+	origDec, okOrig := parseDecimal(orig)
+	execDec, okExec := parseDecimal(executed)
+	if !okOrig || !okExec {
+		return strings.TrimSpace(orig)
+	}
+	remaining := origDec.Sub(execDec)
+	if remaining.Sign() < 0 {
+		remaining = decimal.Zero
+	}
+	return remaining.String()
+}
+
+func calculateAveragePrice(quote, executed string) string {
+	quoteDec, okQuote := parseDecimal(quote)
+	execDec, okExec := parseDecimal(executed)
+	if !okQuote || !okExec || execDec.Sign() == 0 {
+		return ""
+	}
+	avg := quoteDec.Div(execDec)
+	return avg.String()
+}
+
+func resolveTimestamp(ms int64, clock func() time.Time) time.Time {
+	if ms > 0 {
+		return time.UnixMilli(ms).UTC()
+	}
+	if clock != nil {
+		return clock().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func defaultIfEmpty(primary, fallback string) string {
+	if strings.TrimSpace(primary) != "" {
+		return primary
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func parseDecimal(value string) (decimal.Decimal, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return decimal.Zero, false
+	}
+	dec, err := decimal.NewFromString(trimmed)
+	if err != nil {
+		return decimal.Zero, false
+	}
+	return dec, true
 }

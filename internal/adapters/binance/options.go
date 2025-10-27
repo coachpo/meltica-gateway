@@ -15,6 +15,7 @@ const (
 	defaultSnapshotDepth           = 1000
 	defaultHTTPTimeout             = 10 * time.Second
 	defaultInstrumentRefreshPeriod = 30 * time.Minute
+	defaultRecvWindow              = 5 * time.Second
 )
 
 // Options configure the Binance adapter.
@@ -28,6 +29,9 @@ type Options struct {
 	InstrumentRefreshInterval time.Duration
 	Pools                     *pool.PoolManager
 	HTTPTimeout               time.Duration
+	APIKey                    string
+	APISecret                 string
+	RecvWindow                time.Duration
 }
 
 func withDefaults(in Options) Options {
@@ -51,6 +55,9 @@ func withDefaults(in Options) Options {
 	}
 	if in.InstrumentRefreshInterval <= 0 {
 		in.InstrumentRefreshInterval = defaultInstrumentRefreshPeriod
+	}
+	if in.RecvWindow <= 0 {
+		in.RecvWindow = defaultRecvWindow
 	}
 	normalized := make([]string, 0, len(in.Symbols))
 	seen := make(map[string]struct{}, len(in.Symbols))

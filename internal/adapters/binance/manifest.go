@@ -36,6 +36,12 @@ func RegisterFactory(reg *provider.Registry) {
 		if raw, ok := stringSliceFromConfig(cfg, "symbols"); ok {
 			opts.Symbols = raw
 		}
+		if raw, ok := stringFromConfig(cfg, "api_key"); ok {
+			opts.APIKey = raw
+		}
+		if raw, ok := stringFromConfig(cfg, "api_secret"); ok {
+			opts.APISecret = raw
+		}
 		if depth, ok := intFromConfig(cfg, "snapshot_depth"); ok {
 			opts.SnapshotDepth = depth
 		}
@@ -44,6 +50,9 @@ func RegisterFactory(reg *provider.Registry) {
 		}
 		if refresh, ok := durationFromConfig(cfg, "instrument_refresh_interval"); ok {
 			opts.InstrumentRefreshInterval = refresh
+		}
+		if recvWindow, ok := durationFromConfig(cfg, "recv_window"); ok {
+			opts.RecvWindow = recvWindow
 		}
 
 		provider := NewProvider(opts)

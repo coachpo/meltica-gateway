@@ -35,7 +35,7 @@ type Provider struct {
 
 	instrumentsMu sync.RWMutex
 	instruments   map[string]schema.Instrument
-	states        map[string]*instrumentState
+	states        map[string]*symbolMarketState
 
 	orderSeq atomic.Uint64
 }
@@ -59,7 +59,7 @@ func NewProvider(opts Options) *Provider {
 		events:      events,
 		errs:        errs,
 		instruments: make(map[string]schema.Instrument),
-		states:      make(map[string]*instrumentState),
+		states:      make(map[string]*symbolMarketState),
 	}
 	if p.pools == nil {
 		pm := pool.NewPoolManager()
@@ -142,7 +142,7 @@ func (p *Provider) PublishTickerEvent(symbol string) error {
 		Volume24h: formatWithPrecision(state.volume24h, cons.quantityPrecision),
 		Timestamp: ts,
 	}
-	p.publisher.PublishTicker(p.ctx, state.instrument, payload)
+	p.publisher.PublishTicker(p.ctx, state.symbol, payload)
 	return nil
 }
 
@@ -160,13 +160,13 @@ func (p *Provider) PublishTradeEvent(symbol string) error {
 	qty := cons.normalizeQuantity(1.0)
 	state.volume24h += qty
 	payload := schema.TradePayload{
-		TradeID:   fmt.Sprintf("%s-%d", state.instrument, p.orderSeq.Add(1)),
+		TradeID:   fmt.Sprintf("%s-%d", state.symbol, p.orderSeq.Add(1)),
 		Side:      schema.TradeSideBuy,
 		Price:     formatWithPrecision(price, cons.pricePrecision),
 		Quantity:  formatWithPrecision(qty, cons.quantityPrecision),
 		Timestamp: ts,
 	}
-	p.publisher.PublishTrade(p.ctx, state.instrument, payload)
+	p.publisher.PublishTrade(p.ctx, state.symbol, payload)
 	return nil
 }
 
@@ -191,7 +191,7 @@ func (p *Provider) PublishExecReport(symbol string, payload schema.ExecReportPay
 	if payload.Timestamp.IsZero() {
 		payload.Timestamp = p.clock().UTC()
 	}
-	p.publisher.PublishExecReport(p.ctx, state.instrument, payload)
+	p.publisher.PublishExecReport(p.ctx, state.symbol, payload)
 	return nil
 }
 
@@ -202,7 +202,7 @@ func (p *Provider) ensureRunning() error {
 	return nil
 }
 
-func (p *Provider) instrumentStateFor(symbol string) (*instrumentState, instrumentConstraints, error) {
+func (p *Provider) instrumentStateFor(symbol string) (*symbolMarketState, instrumentConstraints, error) {
 	normalized := normalizeInstrument(symbol)
 	if normalized == "" {
 		normalized = p.defaultInstrumentSymbol()
@@ -216,7 +216,7 @@ func (p *Provider) instrumentStateFor(symbol string) (*instrumentState, instrume
 	state, ok := p.states[normalized]
 	if !ok {
 		cons := constraintsFromInstrument(inst)
-		state = newInstrumentState(inst.Symbol, defaultBasePrice(inst.Symbol), cons, p.opts.OrderBook.Levels)
+		state = newSymbolMarketState(inst.Symbol, defaultBasePrice(inst.Symbol), cons, p.opts.OrderBook.Levels)
 		p.states[normalized] = state
 	}
 	p.instrumentsMu.Unlock()
@@ -239,7 +239,7 @@ func (p *Provider) seedCatalogue(instruments []schema.Instrument) {
 		p.instruments[normalized] = cloned
 		if _, ok := p.states[normalized]; !ok {
 			cons := constraintsFromInstrument(cloned)
-			p.states[normalized] = newInstrumentState(cloned.Symbol, defaultBasePrice(cloned.Symbol), cons, p.opts.OrderBook.Levels)
+			p.states[normalized] = newSymbolMarketState(cloned.Symbol, defaultBasePrice(cloned.Symbol), cons, p.opts.OrderBook.Levels)
 		}
 	}
 }
@@ -253,7 +253,7 @@ func (p *Provider) defaultInstrumentSymbol() string {
 	return ""
 }
 
-func (p *Provider) nextPrice(state *instrumentState) float64 {
+func (p *Provider) nextPrice(state *symbolMarketState) float64 {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.lastPrice <= 0 {

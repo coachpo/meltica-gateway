@@ -9,9 +9,9 @@ import (
 	"github.com/coachpo/meltica/internal/schema"
 )
 
-type instrumentState struct {
+type symbolMarketState struct {
 	mu           sync.Mutex
-	instrument   string
+	symbol       string
 	basePrice    float64
 	lastPrice    float64
 	volume24h    float64
@@ -24,12 +24,12 @@ type instrumentState struct {
 	orderIndex   map[string]*activeOrder
 }
 
-func newInstrumentState(symbol string, basePrice float64, cons instrumentConstraints, levels int) *instrumentState {
+func newSymbolMarketState(symbol string, basePrice float64, cons instrumentConstraints, levels int) *symbolMarketState {
 	if levels <= 0 {
 		levels = defaultBookLevels
 	}
-	return &instrumentState{
-		instrument:  symbol,
+	return &symbolMarketState{
+		symbol:      symbol,
 		basePrice:   basePrice,
 		lastPrice:   basePrice,
 		constraints: cons,
@@ -40,7 +40,7 @@ func newInstrumentState(symbol string, basePrice float64, cons instrumentConstra
 	}
 }
 
-func (s *instrumentState) restOrder(order *activeOrder) {
+func (s *symbolMarketState) restOrder(order *activeOrder) {
 	if order == nil {
 		return
 	}
@@ -56,7 +56,7 @@ func (s *instrumentState) restOrder(order *activeOrder) {
 	depth.orders = append(depth.orders, order)
 }
 
-func (s *instrumentState) consumeLiquidity(side schema.TradeSide, quantity float64, limit float64, ts time.Time) (float64, []orderFill, float64) {
+func (s *symbolMarketState) consumeLiquidity(side schema.TradeSide, quantity float64, limit float64, ts time.Time) (float64, []orderFill, float64) {
 	if quantity <= floatTolerance {
 		return 0, nil, 0
 	}
@@ -120,11 +120,11 @@ func (s *instrumentState) consumeLiquidity(side schema.TradeSide, quantity float
 	return avg, fills, filled
 }
 
-func (s *instrumentState) bestBid() (float64, bool) {
+func (s *symbolMarketState) bestBid() (float64, bool) {
 	return bestPrice(s.bids, false, s.constraints)
 }
 
-func (s *instrumentState) bestAsk() (float64, bool) {
+func (s *symbolMarketState) bestAsk() (float64, bool) {
 	return bestPrice(s.asks, true, s.constraints)
 }
 
@@ -164,7 +164,7 @@ func orderedTicks(levels map[priceTick]*bookDepth, ascending bool) []priceTick {
 	return ticks
 }
 
-func (s *instrumentState) updateKline(ts time.Time, price, qty float64, interval time.Duration) {
+func (s *symbolMarketState) updateKline(ts time.Time, price, qty float64, interval time.Duration) {
 	if interval <= 0 {
 		return
 	}
@@ -180,7 +180,7 @@ func (s *instrumentState) updateKline(ts time.Time, price, qty float64, interval
 	s.currentKline.update(price, qty)
 }
 
-func (s *instrumentState) finalizeKlines(now time.Time, interval time.Duration) []klineWindow {
+func (s *symbolMarketState) finalizeKlines(now time.Time, interval time.Duration) []klineWindow {
 	if interval <= 0 {
 		return nil
 	}

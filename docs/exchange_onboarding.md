@@ -24,7 +24,7 @@ This guide distills the fake provider workflow into practical steps for integrat
 - Ensure execution and balance updates reflect venue-side identifiers, then convert back to canonical form before publishing.
 
 ### Order Book State
-- Maintain per-symbol `instrumentState` with synchronized bid/ask maps keyed by normalized price ticks.
+- Maintain per-symbol `symbolMarketState` with synchronized bid/ask maps keyed by normalized price ticks.
 - Support order resting, liquidity consumption, and price derivation using constraint helpers for consistent precision handling.
 
 ## Order Book Assembly From Snapshot + Diffs
@@ -49,7 +49,7 @@ This guide distills the fake provider workflow into practical steps for integrat
 
 ### State Management
 
-- **Instrument State:** The `instrumentState` struct (see `fake/state.go`) is central to managing all data related to a specific instrument, including its order book, last price, and Kline data. Your provider should maintain a map of these states.
+- **Instrument State:** The `symbolMarketState` struct (see `fake/state.go`) is central to managing all data related to a specific instrument, including its order book, last price, and Kline data. Your provider should maintain a map of these states.
 - **Kline/Candlestick Data:** Implement logic to handle Kline data. This typically involves:
     - A `klineWindow` struct to represent a single candlestick.
     - An `updateKline` function to update the current Kline window with new trades.
