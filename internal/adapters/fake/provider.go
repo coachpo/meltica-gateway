@@ -278,16 +278,17 @@ func (p *Provider) initMetrics() {
 }
 
 func (p *Provider) observeBalances(observer metric.Float64Observer, available bool) {
-	p.balanceMu.Lock()
-	defer p.balanceMu.Unlock()
-	for currency, state := range p.balances {
-		value := state.total
+	if p.balances == nil {
+		return
+	}
+	p.balances.Range(func(currency string, state shared.BalanceState) {
+		value := state.Total
 		if available {
-			value = state.available
+			value = state.Available
 		}
 		attrs := telemetry.BalanceAttributes(telemetry.Environment(), p.name, currency)
 		observer.Observe(value, metric.WithAttributes(attrs...))
-	}
+	})
 }
 
 func intPtr(v int) *int {
@@ -358,10 +359,8 @@ type Provider struct {
 	mu     sync.Mutex
 	routes map[schema.RouteType]*routeHandle
 
-	pools *pool.PoolManager
-
-	seqMu sync.Mutex
-	seq   map[string]uint64
+	pools     *pool.PoolManager
+	publisher *shared.Publisher
 
 	stateMu sync.Mutex
 	state   map[string]*instrumentState
@@ -385,8 +384,7 @@ type Provider struct {
 	venueState   venueState
 	orderCounter atomic.Uint64
 
-	balanceMu sync.Mutex
-	balances  map[string]balanceState
+	balances *shared.BalanceManager
 
 	metrics providerMetrics
 }
@@ -414,11 +412,6 @@ type instrumentState struct {
 	assembler    *shared.OrderBookAssembler
 	currentKline *klineWindow
 	completed    []klineWindow
-}
-
-type balanceState struct {
-	total     float64
-	available float64
 }
 
 type bookDepth struct {
@@ -988,6 +981,7 @@ func NewProvider(opts Options) *Provider {
 		balanceInterval = defaultBalanceUpdateInterval
 	}
 
+	events := make(chan *schema.Event, 128)
 	p := &Provider{ //nolint:exhaustruct // zero values for internal synchronization fields are acceptable
 		name:                  name,
 		tickerInterval:        tickerInterval,
@@ -996,17 +990,17 @@ func NewProvider(opts Options) *Provider {
 		bookDiffInterval:      defaultBookDiffInterval,
 		klineInterval:         opts.KlineInterval,
 		balanceUpdateInterval: balanceInterval,
-		events:                make(chan *schema.Event, 128),
+		events:                events,
 		errs:                  make(chan error, 8),
 		orders:                make(chan schema.OrderRequest, 64),
 		routes:                make(map[schema.RouteType]*routeHandle),
-		seq:                   make(map[string]uint64),
 		state:                 make(map[string]*instrumentState),
 		clock:                 time.Now,
 		pools:                 opts.Pools,
+		publisher:             shared.NewPublisher(name, events, opts.Pools, time.Now),
 		instrumentConstraints: make(map[string]instrumentConstraints),
 		rng:                   rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // pseudo-randomness is acceptable for simulations
-		balances:              make(map[string]balanceState),
+		balances:              shared.NewBalanceManager(1000, 1000),
 	}
 	if p.klineInterval <= 0 {
 		p.klineInterval = defaultKlineInterval
@@ -1568,36 +1562,23 @@ func (p *Provider) emitBalanceSnapshots(currencies []string) {
 
 func (p *Provider) emitBalanceSnapshot(currency string) {
 	normalized := schema.NormalizeCurrencyCode(currency)
-	if normalized == "" {
+	if normalized == "" || p.balances == nil {
 		return
 	}
 	ts := p.clock().UTC()
-	p.balanceMu.Lock()
-	state, ok := p.balances[normalized]
-	p.balanceMu.Unlock()
+	state, ok := p.balances.Snapshot(normalized)
 	if !ok {
 		return
 	}
 	p.emitBalanceEvent(normalized, state, ts)
 }
 
-func (p *Provider) ensureBalanceStateLocked(currency string) balanceState {
-	state, ok := p.balances[currency]
-	if !ok {
-		state = balanceState{total: 1000, available: 1000}
-	}
-	if state.available > state.total {
-		state.available = state.total
-	}
-	return state
-}
-
-func (p *Provider) emitBalanceEvent(currency string, state balanceState, ts time.Time) {
+func (p *Provider) emitBalanceEvent(currency string, state shared.BalanceState, ts time.Time) {
 	seq := p.nextSeq(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: currency})
 	payload := schema.BalanceUpdatePayload{
 		Currency:  currency,
-		Total:     formatBalance(state.total),
-		Available: formatBalance(state.available),
+		Total:     formatBalance(state.Total),
+		Available: formatBalance(state.Available),
 		Timestamp: ts,
 	}
 	evt := p.newEvent(schema.EventTypeBalanceUpdate, nativeInstrument{symbol: currency}, seq, payload, ts)
@@ -1606,13 +1587,6 @@ func (p *Provider) emitBalanceEvent(currency string, state balanceState, ts time
 	}
 	p.emitEvent(evt)
 	p.recordBalanceUpdate(currency)
-}
-
-func clampNonNegative(value float64) float64 {
-	if value < 0 {
-		return 0
-	}
-	return value
 }
 
 func (p *Provider) instrumentBySymbol(symbol string) (schema.Instrument, bool) {
@@ -1640,53 +1614,12 @@ func (p *Provider) baseCurrencyFor(symbol string) string {
 }
 
 func (p *Provider) adjustBalancesForFill(inst schema.Instrument, side schema.TradeSide, quantity, price float64) {
-	if quantity <= floatTolerance {
+	if quantity <= floatTolerance || p.balances == nil {
 		return
 	}
-	base := schema.NormalizeCurrencyCode(inst.BaseCurrency)
-	quote := schema.NormalizeCurrencyCode(inst.QuoteCurrency)
-	notional := clampNonNegative(quantity * price)
-	emitBase := false
-	emitQuote := false
-	p.balanceMu.Lock()
-	if base != "" {
-		state := p.ensureBalanceStateLocked(base)
-		switch side {
-		case schema.TradeSideBuy:
-			state.total += quantity
-			state.available += quantity
-		case schema.TradeSideSell:
-			state.total = clampNonNegative(state.total - quantity)
-			state.available = clampNonNegative(state.available - quantity)
-		}
-		if state.available > state.total {
-			state.available = state.total
-		}
-		p.balances[base] = state
-		emitBase = true
-	}
-	if quote != "" {
-		state := p.ensureBalanceStateLocked(quote)
-		switch side {
-		case schema.TradeSideBuy:
-			state.total = clampNonNegative(state.total - notional)
-			state.available = clampNonNegative(state.available - notional)
-		case schema.TradeSideSell:
-			state.total += notional
-			state.available += notional
-		}
-		if state.available > state.total {
-			state.available = state.total
-		}
-		p.balances[quote] = state
-		emitQuote = true
-	}
-	p.balanceMu.Unlock()
-	if emitBase {
-		p.emitBalanceSnapshot(base)
-	}
-	if emitQuote && !strings.EqualFold(base, quote) {
-		p.emitBalanceSnapshot(quote)
+	updated := p.balances.AdjustInstrumentFill(inst, side, quantity, price)
+	for _, currency := range updated {
+		p.emitBalanceSnapshot(currency)
 	}
 }
 
@@ -1699,18 +1632,10 @@ func (p *Provider) adjustBalancesForFillSymbol(symbol string, side schema.TradeS
 }
 
 func (p *Provider) ensureInstrumentBalances(inst schema.Instrument) {
-	base := schema.NormalizeCurrencyCode(inst.BaseCurrency)
-	quote := schema.NormalizeCurrencyCode(inst.QuoteCurrency)
-	p.balanceMu.Lock()
-	if base != "" {
-		state := p.ensureBalanceStateLocked(base)
-		p.balances[base] = state
+	if p.balances == nil {
+		return
 	}
-	if quote != "" {
-		state := p.ensureBalanceStateLocked(quote)
-		p.balances[quote] = state
-	}
-	p.balanceMu.Unlock()
+	p.balances.EnsureInstrument(inst)
 }
 
 func (p *Provider) emitKline(instrument nativeInstrument) {
@@ -1741,35 +1666,26 @@ func (p *Provider) emitKline(instrument nativeInstrument) {
 			OpenTime:   bucket.openTime,
 			CloseTime:  bucket.closeTime,
 		}
-		seq := p.nextSeq(schema.EventTypeKlineSummary, instrument)
-		evt := p.newEvent(schema.EventTypeKlineSummary, instrument, seq, payload, bucket.closeTime)
-		if evt == nil {
-			continue
-		}
-		p.emitEvent(evt)
+		p.publisher.PublishKlineSummary(p.ctx, instrument.Symbol(), payload)
 	}
 }
 
 func (p *Provider) emitBalanceUpdate(currency string) {
 	normalized := schema.NormalizeCurrencyCode(currency)
-	if normalized == "" {
+	if normalized == "" || p.balances == nil {
 		return
 	}
 	ts := p.clock().UTC()
-	p.balanceMu.Lock()
-	state := p.ensureBalanceStateLocked(normalized)
-	if state.total <= 0 {
-		state.total = 500 + 500*p.randomFloat()
-	}
-	delta := (p.randomFloat() - 0.5) * 25
-	state.total += delta
-	if state.total < 0 {
-		state.total = 0
-	}
-	reserve := 0.3 + 0.6*p.randomFloat()
-	state.available = clampNonNegative(state.total * reserve)
-	p.balances[normalized] = state
-	p.balanceMu.Unlock()
+	state := p.balances.Update(normalized, func(current shared.BalanceState) shared.BalanceState {
+		if current.Total <= 0 {
+			current.Total = 500 + 500*p.randomFloat()
+		}
+		delta := (p.randomFloat() - 0.5) * 25
+		current.Total = math.Max(0, current.Total+delta)
+		reserve := 0.3 + 0.6*p.randomFloat()
+		current.Available = math.Max(0, current.Total*reserve)
+		return current
+	})
 	p.emitBalanceEvent(normalized, state, ts)
 }
 
@@ -1783,7 +1699,6 @@ func (p *Provider) emitTicker(instrument nativeInstrument) {
 		p.emitError(fmt.Errorf("fake provider %s: ticker channel transient error", p.name))
 		return
 	}
-	seq := p.nextSeq(schema.EventTypeTicker, instrument)
 	state.mu.Lock()
 	price := p.nextModelPrice(state)
 	state.lastPrice = price
@@ -1805,11 +1720,7 @@ func (p *Provider) emitTicker(instrument nativeInstrument) {
 		Timestamp: ts,
 	}
 	state.mu.Unlock()
-	evt := p.newEvent(schema.EventTypeTicker, instrument, seq, payload, ts)
-	if evt == nil {
-		return
-	}
-	p.emitEvent(evt)
+	p.publisher.PublishTicker(p.ctx, instrument.Symbol(), payload)
 }
 
 func (p *Provider) emitTrade(instrument nativeInstrument) {
@@ -1822,7 +1733,6 @@ func (p *Provider) emitTrade(instrument nativeInstrument) {
 		p.emitError(fmt.Errorf("fake provider %s: trade channel transient error", p.name))
 		return
 	}
-	seq := p.nextSeq(schema.EventTypeTrade, instrument)
 	state.mu.Lock()
 	side := schema.TradeSideBuy
 	if p.randomFloat() < 0.5 {
@@ -1865,19 +1775,14 @@ func (p *Provider) emitTrade(instrument nativeInstrument) {
 		}
 		p.adjustBalancesForFillSymbol(fill.order.instrument, fill.order.side, fill.quantity, priced)
 	}
-	tradeID := fmt.Sprintf("%s-%d", strings.ReplaceAll(instrument.Symbol(), "-", ""), seq)
 	payload := schema.TradePayload{
-		TradeID:   tradeID,
+		TradeID:   p.nextExchangeOrderID(instrument.Symbol()),
 		Side:      side,
 		Price:     formatWithPrecision(price, state.constraints.pricePrecision),
 		Quantity:  formatWithPrecision(filled, state.constraints.quantityPrecision),
 		Timestamp: ts,
 	}
-	evt := p.newEvent(schema.EventTypeTrade, instrument, seq, payload, ts)
-	if evt == nil {
-		return
-	}
-	p.emitEvent(evt)
+	p.publisher.PublishTrade(p.ctx, instrument.Symbol(), payload)
 	if len(execEvents) > 0 {
 		p.emitExecReportEvents(execEvents)
 	}
@@ -1893,7 +1798,6 @@ func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 		p.emitError(fmt.Errorf("fake provider %s: orderbook snapshot error", p.name))
 		return
 	}
-	seq := p.nextSeq(schema.EventTypeBookSnapshot, instrument)
 	state.mu.Lock()
 	if state.assembler == nil {
 		state.assembler = shared.NewOrderBookAssembler(state.bookLevels)
@@ -1913,12 +1817,12 @@ func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 			Asks:          levelsAsks,
 			Checksum:      "",
 			LastUpdate:    ts,
-			FirstUpdateID: seq,
-			FinalUpdateID: seq,
+			FirstUpdateID: 0,
+			FinalUpdateID: 0,
 		}
 		state.hasSnapshot = true
 		state.mu.Unlock()
-		eventPayload, err = assembler.ApplySnapshot(seq, snapshotPayload)
+		eventPayload, err = assembler.ApplySnapshot(0, snapshotPayload)
 		applied = err == nil
 	} else {
 		diff := state.mutateBook(p, state.lastPrice)
@@ -1927,7 +1831,7 @@ func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 		bidLevels := formatLevelChanges(diff.bids, state.constraints)
 		askLevels := formatLevelChanges(diff.asks, state.constraints)
 		diffPayload := shared.OrderBookDiff{
-			SequenceID: seq,
+			SequenceID: 0,
 			Bids:       bidLevels,
 			Asks:       askLevels,
 			Timestamp:  ts,
@@ -1945,84 +1849,17 @@ func (p *Provider) emitBookSnapshot(instrument nativeInstrument) {
 	if eventPayload.LastUpdate.IsZero() {
 		eventPayload.LastUpdate = ts
 	}
-	eventPayload.Checksum = checksum(instrument.Symbol(), schema.EventTypeBookSnapshot, seq)
-	if eventPayload.FirstUpdateID == 0 {
-		eventPayload.FirstUpdateID = seq
-	}
-	if eventPayload.FinalUpdateID == 0 {
-		eventPayload.FinalUpdateID = seq
-	}
-	evt := p.newEvent(schema.EventTypeBookSnapshot, instrument, seq, eventPayload, ts)
-	if evt == nil {
-		return
-	}
-	p.emitEvent(evt)
+	p.publisher.PublishBookSnapshot(p.ctx, instrument.Symbol(), eventPayload)
 }
 
-func (p *Provider) newEvent(evtType schema.EventType, instrument nativeInstrument, seq uint64, payload any, ts time.Time) *schema.Event {
-	if ts.IsZero() {
-		ts = p.clock().UTC()
-	}
-	symbol := normalizeInstrument(instrument.Symbol())
-	eventID := fmt.Sprintf("%s:%s:%s:%d", p.name, strings.ReplaceAll(symbol, "-", ""), evtType, seq)
-	evt := p.borrowEvent(p.ctx)
-	if evt == nil {
-		return nil
-	}
-	evt.EventID = eventID
-	evt.Provider = p.name
-	evt.Symbol = symbol
-	evt.Type = evtType
-	evt.SeqProvider = seq
-	evt.IngestTS = ts
-	evt.EmitTS = ts
-	evt.Payload = payload
-	return evt
-}
 
-func (p *Provider) borrowEvent(ctx context.Context) *schema.Event {
-	requestCtx := ctx
-	if requestCtx == nil {
-		requestCtx = p.ctx
-	}
-	if requestCtx == nil {
-		requestCtx = context.Background()
-	}
-	evt, err := p.pools.BorrowEventInst(requestCtx)
-	if err != nil {
-		log.Printf("fake provider %s: borrow canonical event failed: %v", p.name, err)
-		p.emitError(fmt.Errorf("borrow canonical event: %w", err))
-		return nil
-	}
-	return evt
-}
-
-func (p *Provider) emitEvent(evt *schema.Event) {
-	if evt == nil {
-		return
-	}
-	if p.ctx == nil {
-		return
-	}
-	p.recordEventMetric(evt.Type, evt.Symbol)
-	select {
-	case <-p.ctx.Done():
-		return
-	case p.events <- evt:
-	}
-}
 
 func (p *Provider) emitExecReportEvents(events []execReportEvent) {
 	for _, entry := range events {
 		if entry.instrument.Symbol() == "" {
 			continue
 		}
-		seq := p.nextSeq(schema.EventTypeExecReport, entry.instrument)
-		evt := p.newEvent(schema.EventTypeExecReport, entry.instrument, seq, entry.payload, entry.ts)
-		if evt == nil {
-			continue
-		}
-		p.emitEvent(evt)
+		p.publisher.PublishExecReport(p.ctx, entry.instrument.Symbol(), entry.payload)
 	}
 }
 
@@ -2503,40 +2340,24 @@ func buildExecPayload(order *activeOrder, state schema.ExecReportState, reason *
 		var empty schema.ExecReportPayload
 		return empty
 	}
-	priceValue := order.price
-	if order.orderType == schema.OrderTypeMarket && order.avgFillPrice() > 0 {
-		priceValue = order.avgFillPrice()
-	}
-	priceStr := formatWithPrecision(priceValue, cons.pricePrecision)
-	filled := formatWithPrecision(order.filled, cons.quantityPrecision)
-	remaining := formatWithPrecision(order.remaining, cons.quantityPrecision)
-	qtyStr := formatWithPrecision(order.quantity, cons.quantityPrecision)
-	avgFill := formatWithPrecision(order.avgFillPrice(), cons.pricePrecision)
-	commissionAmount := ""
-	commissionAsset := ""
-	if baseCurrency != "" && order.filled > floatTolerance {
-		commission := order.filled * defaultCommissionRate
-		if commission > floatTolerance {
-			commissionAmount = formatWithPrecision(commission, cons.quantityPrecision)
-			commissionAsset = baseCurrency
-		}
-	}
-	return schema.ExecReportPayload{
-		ClientOrderID:    order.clientID,
-		ExchangeOrderID:  order.exchangeID,
-		State:            state,
-		Side:             order.side,
-		OrderType:        order.orderType,
-		Price:            priceStr,
-		Quantity:         qtyStr,
-		FilledQuantity:   filled,
-		RemainingQty:     remaining,
-		AvgFillPrice:     avgFill,
-		CommissionAmount: commissionAmount,
-		CommissionAsset:  commissionAsset,
-		Timestamp:        ts,
-		RejectReason:     reason,
-	}
+	return shared.BuildExecReportPayload(shared.ExecReportSnapshot{
+		ClientOrderID:     order.clientID,
+		ExchangeOrderID:   order.exchangeID,
+		State:             state,
+		Side:              order.side,
+		OrderType:         order.orderType,
+		Price:             order.price,
+		Quantity:          order.quantity,
+		Filled:            order.filled,
+		Remaining:         order.remaining,
+		AvgFillPrice:      order.avgFillPrice(),
+		PricePrecision:    cons.pricePrecision,
+		QuantityPrecision: cons.quantityPrecision,
+		BaseCurrency:      baseCurrency,
+		CommissionRate:    defaultCommissionRate,
+		Timestamp:         ts,
+		RejectReason:      reason,
+	})
 }
 
 func (p *Provider) randomFloat() float64 {
@@ -2564,23 +2385,8 @@ func (p *Provider) emitInstrumentUpdate(inst schema.Instrument) {
 	if strings.TrimSpace(inst.Symbol) == "" {
 		return
 	}
-	now := p.clock().UTC()
-	native := nativeInstrument{symbol: inst.Symbol}
-	seq := p.nextSeq(schema.EventTypeInstrumentUpdate, native)
 	payload := schema.InstrumentUpdatePayload{Instrument: schema.CloneInstrument(inst)}
-	evt := p.borrowEvent(p.ctx)
-	if evt == nil {
-		return
-	}
-	evt.EventID = fmt.Sprintf("%s:INST:%s:%d", p.name, strings.ReplaceAll(inst.Symbol, "-", ""), seq)
-	evt.Provider = p.name
-	evt.Symbol = inst.Symbol
-	evt.Type = schema.EventTypeInstrumentUpdate
-	evt.SeqProvider = seq
-	evt.IngestTS = now
-	evt.EmitTS = now
-	evt.Payload = payload
-	p.emitEvent(evt)
+	p.publisher.PublishInstrumentUpdate(p.ctx, inst.Symbol, payload)
 }
 
 func instrumentsEqual(a, b schema.Instrument) bool {
