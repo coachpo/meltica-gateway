@@ -13,6 +13,14 @@ import (
 	"github.com/goccy/go-json"
 )
 
+const (
+	// Binance limits control messages (SUBSCRIBE/UNSUBSCRIBE, PING/PONG) to 5 per second per connection.
+	// See: https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md
+	binanceControlMessageInterval = 250 * time.Millisecond
+	// Keep subscribe payloads modest so we can throttle between them if the stream count is large.
+	binanceMaxStreamsPerRequest = 100
+)
+
 // streamManager manages a single WebSocket connection with live subscribe/unsubscribe support.
 type streamManager struct {
 	baseURL string
@@ -31,6 +39,9 @@ type streamManager struct {
 
 	ready     chan struct{}
 	readyOnce sync.Once
+
+	controlMu       sync.Mutex
+	lastControlSend time.Time
 }
 
 type subscribeRequest struct {
@@ -119,13 +130,7 @@ func (sm *streamManager) subscribe(streams []string) error {
 		return nil // All streams already subscribed
 	}
 
-	req := subscribeRequest{
-		Method: "SUBSCRIBE",
-		Params: newStreams,
-		ID:     sm.msgIDGen.Add(1),
-	}
-
-	return sm.sendRequest(req)
+	return sm.sendBatchedControlRequests("SUBSCRIBE", newStreams)
 }
 
 // unsubscribe removes one or more stream subscriptions.
@@ -150,37 +155,7 @@ func (sm *streamManager) unsubscribe(streams []string) error {
 		return nil // No streams to unsubscribe
 	}
 
-	req := subscribeRequest{
-		Method: "UNSUBSCRIBE",
-		Params: existingStreams,
-		ID:     sm.msgIDGen.Add(1),
-	}
-
-	return sm.sendRequest(req)
-}
-
-func (sm *streamManager) sendRequest(req subscribeRequest) error {
-	data, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
-
-	sm.connMu.RLock()
-	conn := sm.conn
-	sm.connMu.RUnlock()
-
-	if conn == nil {
-		return errors.New("websocket not connected")
-	}
-
-	writeCtx, cancel := context.WithTimeout(sm.ctx, 5*time.Second)
-	defer cancel()
-
-	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
-		return fmt.Errorf("write request: %w", err)
-	}
-
-	return nil
+	return sm.sendBatchedControlRequests("UNSUBSCRIBE", existingStreams)
 }
 
 // connect maintains the WebSocket connection with automatic reconnection and exponential backoff.
@@ -258,33 +233,98 @@ func (sm *streamManager) subscribeAll() error {
 		return nil
 	}
 
-	req := subscribeRequest{
-		Method: "SUBSCRIBE",
-		Params: streams,
-		ID:     sm.msgIDGen.Add(1),
+	return sm.sendBatchedControlRequests("SUBSCRIBE", streams)
+}
+
+func (sm *streamManager) sendBatchedControlRequests(method string, streams []string) error {
+	if len(streams) == 0 {
+		return nil
 	}
 
-	data, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("marshal resubscribe: %w", err)
-	}
+	sm.controlMu.Lock()
+	defer sm.controlMu.Unlock()
 
 	sm.connMu.RLock()
 	conn := sm.conn
 	sm.connMu.RUnlock()
-
 	if conn == nil {
-		return errors.New("no connection for resubscribe")
+		return errors.New("websocket not connected")
 	}
 
-	writeCtx, cancel := context.WithTimeout(sm.ctx, 5*time.Second)
-	defer cancel()
+	chunks := chunkStreams(streams, binanceMaxStreamsPerRequest)
+	for _, chunk := range chunks {
+		if err := sm.waitForControlWindowLocked(method); err != nil {
+			return err
+		}
 
-	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
-		return fmt.Errorf("write resubscribe: %w", err)
+		req := subscribeRequest{
+			Method: method,
+			Params: chunk,
+			ID:     sm.msgIDGen.Add(1),
+		}
+
+		data, err := json.Marshal(req)
+		if err != nil {
+			return fmt.Errorf("marshal %s request: %w", method, err)
+		}
+
+		writeCtx, cancel := context.WithTimeout(sm.ctx, 5*time.Second)
+		err = conn.Write(writeCtx, websocket.MessageText, data)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("write %s request: %w", method, err)
+		}
+
+		sm.lastControlSend = time.Now()
 	}
 
 	return nil
+}
+
+func chunkStreams(streams []string, size int) [][]string {
+	if len(streams) == 0 {
+		return nil
+	}
+
+	if size <= 0 || len(streams) <= size {
+		snapshot := make([]string, len(streams))
+		copy(snapshot, streams)
+		return [][]string{snapshot}
+	}
+
+	chunks := make([][]string, 0, (len(streams)+size-1)/size)
+	for start := 0; start < len(streams); start += size {
+		end := start + size
+		if end > len(streams) {
+			end = len(streams)
+		}
+		chunk := make([]string, end-start)
+		copy(chunk, streams[start:end])
+		chunks = append(chunks, chunk)
+	}
+	return chunks
+}
+
+func (sm *streamManager) waitForControlWindowLocked(method string) error {
+	if sm.lastControlSend.IsZero() {
+		return nil
+	}
+
+	waitUntil := sm.lastControlSend.Add(binanceControlMessageInterval)
+	wait := time.Until(waitUntil)
+	if wait <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-sm.ctx.Done():
+		return fmt.Errorf("context done while pacing %s requests: %w", method, sm.ctx.Err())
+	}
 }
 
 // readLoop continuously reads messages from the WebSocket connection.

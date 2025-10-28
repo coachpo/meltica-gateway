@@ -6,11 +6,13 @@ exchanges:
       name: binance
       venue: spot
       enabled: true
+      snapshot_depth: 100
   binance-futures:
     exchange:
       name: binance
       venue: futures
       enabled: true
+      snapshot_depth: 100
 
 eventbus:
   bufferSize: 8192
@@ -148,6 +150,42 @@ lambdaManifest:
         dry_run: true
         logger_prefix: "[BINANCE-SPOT] "
       auto_start: true
+    - id: binance-log-avax
+      providers:
+        - binance
+      symbol: AVAX-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-dot
+      providers:
+        - binance
+      symbol: DOT-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-atom
+      providers:
+        - binance
+      symbol: ATOM-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-fil
+      providers:
+        - binance
+      symbol: FIL-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
     - id: binance-cross-log
       providers:
         - binance
@@ -203,6 +241,46 @@ lambdaManifest:
         - binance
         - binance-futures
       symbol: XRP-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-cross-log-near
+      providers:
+        - binance
+        - binance-futures
+      symbol: NEAR-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-cross-log-ftm
+      providers:
+        - binance
+        - binance-futures
+      symbol: FTM-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-cross-log-sand
+      providers:
+        - binance
+        - binance-futures
+      symbol: SAND-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-cross-log-axs
+      providers:
+        - binance
+        - binance-futures
+      symbol: AXS-USDT
       strategy: logging
       config:
         dry_run: true
@@ -275,6 +353,60 @@ lambdaManifest:
       providers:
         - binance-futures
       symbol: MATIC-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-op
+      providers:
+        - binance-futures
+      symbol: OP-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-arb
+      providers:
+        - binance-futures
+      symbol: ARB-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-inj
+      providers:
+        - binance-futures
+      symbol: INJ-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-gmx
+      providers:
+        - binance-futures
+      symbol: GMX-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-rndr
+      providers:
+        - binance-futures
+      symbol: RNDR-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-ldo
+      providers:
+        - binance-futures
+      symbol: LDO-USDT
       strategy: logging
       config:
         dry_run: true
