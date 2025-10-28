@@ -55,360 +55,492 @@ lambdaManifest:
       providers:
         - binance
       symbol: BTC-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-eth
       providers:
         - binance
       symbol: ETH-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-bnb
       providers:
         - binance
       symbol: BNB-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-xrp
       providers:
         - binance
       symbol: XRP-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-sol
       providers:
         - binance
       symbol: SOL-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-ada
       providers:
         - binance
       symbol: ADA-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-doge
       providers:
         - binance
       symbol: DOGE-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-ltc
       providers:
         - binance
       symbol: LTC-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-link
       providers:
         - binance
       symbol: LINK-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-trx
       providers:
         - binance
       symbol: TRX-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-matic
       providers:
         - binance
       symbol: MATIC-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-avax
       providers:
         - binance
       symbol: AVAX-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-dot
       providers:
         - binance
       symbol: DOT-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-atom
       providers:
         - binance
       symbol: ATOM-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-log-fil
       providers:
         - binance
       symbol: FIL-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-SPOT] "
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-log-hbar
+      providers:
+        - binance
+      symbol: HBAR-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-log-eos
+      providers:
+        - binance
+      symbol: EOS-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-log-rune
+      providers:
+        - binance
+      symbol: RUNE-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log
       providers:
         - binance
         - binance-futures
       symbol: ETH-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log-btc
       providers:
         - binance
         - binance-futures
       symbol: BTC-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log-sol
       providers:
         - binance
         - binance-futures
       symbol: SOL-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log-ada
       providers:
         - binance
         - binance-futures
       symbol: ADA-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log-doge
       providers:
         - binance
         - binance-futures
       symbol: DOGE-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log-xrp
       providers:
         - binance
         - binance-futures
       symbol: XRP-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log-near
       providers:
         - binance
         - binance-futures
       symbol: NEAR-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log-ftm
       providers:
         - binance
         - binance-futures
       symbol: FTM-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log-sand
       providers:
         - binance
         - binance-futures
       symbol: SAND-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-cross-log-axs
       providers:
         - binance
         - binance-futures
       symbol: AXS-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-CROSS] "
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-log-flow
+      providers:
+        - binance
+        - binance-futures
+      symbol: FLOW-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-log-gmt
+      providers:
+        - binance
+        - binance-futures
+      symbol: GMT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-log-ens
+      providers:
+        - binance
+        - binance-futures
+      symbol: ENS-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-btc
       providers:
         - binance-futures
       symbol: BTC-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-eth
       providers:
         - binance-futures
       symbol: ETH-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-bnb
       providers:
         - binance-futures
       symbol: BNB-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-xrp
       providers:
         - binance-futures
       symbol: XRP-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-sol
       providers:
         - binance-futures
       symbol: SOL-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-ada
       providers:
         - binance-futures
       symbol: ADA-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-doge
       providers:
         - binance-futures
       symbol: DOGE-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-matic
       providers:
         - binance-futures
       symbol: MATIC-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-op
       providers:
         - binance-futures
       symbol: OP-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-arb
       providers:
         - binance-futures
       symbol: ARB-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-inj
       providers:
         - binance-futures
       symbol: INJ-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-gmx
       providers:
         - binance-futures
       symbol: GMX-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-rndr
       providers:
         - binance-futures
       symbol: RNDR-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
     - id: binance-futures-log-ldo
       providers:
         - binance-futures
       symbol: LDO-USDT
-      strategy: logging
+      strategy: delay
       config:
         dry_run: true
-        logger_prefix: "[BINANCE-FUTURES] "
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-log-apt
+      providers:
+        - binance-futures
+      symbol: APT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-log-sui
+      providers:
+        - binance-futures
+      symbol: SUI-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-log-dydx
+      providers:
+        - binance-futures
+      symbol: DYDX-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
       auto_start: true
