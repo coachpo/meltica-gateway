@@ -42,7 +42,7 @@ apiServer:
   addr: ":8880"
 
 telemetry:
-  otlpEndpoint: http://localhost:4318
+  otlpEndpoint: http://capy.lan:4318
   serviceName: meltica-gateway-binance
   otlpInsecure: true
   enableMetrics: true
