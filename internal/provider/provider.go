@@ -15,6 +15,6 @@ type Instance interface {
 	Errors() <-chan error
 	SubmitOrder(ctx context.Context, req schema.OrderRequest) error
 	SubscribeRoute(route dispatcher.Route) error
-	UnsubscribeRoute(typ schema.RouteType) error
+	UnsubscribeRoute(route dispatcher.Route) error
 	Instruments() []schema.Instrument
 }

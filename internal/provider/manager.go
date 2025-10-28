@@ -116,7 +116,7 @@ func (m *Manager) DeactivateRoute(ctx context.Context, route dispatcher.Route) e
 	if !ok {
 		return fmt.Errorf("provider %q not found", providerName)
 	}
-	if err := sub.Deactivate(ctx, route.Type); err != nil {
+	if err := sub.Deactivate(ctx, route); err != nil {
 		return fmt.Errorf("deactivate route: %w", err)
 	}
 	return nil

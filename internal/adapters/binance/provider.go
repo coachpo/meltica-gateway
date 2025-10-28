@@ -207,14 +207,21 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 }
 
 // UnsubscribeRoute tears down streaming for the provided route type.
-func (p *Provider) UnsubscribeRoute(routeType schema.RouteType) error {
-	// Note: This is intentionally a no-op. Unsubscribing at the route type level
-	// would cancel all streams of that type across all instruments, which breaks
-	// multi-lambda scenarios where lambdas share providers but track different instruments.
-	// The registrar handles route updates by calling SubscribeRoute with merged filters,
-	// so we only need to add new streams, not remove existing ones.
-	// Cleanup happens naturally when the provider shuts down.
-	return nil
+func (p *Provider) UnsubscribeRoute(route dispatcher.Route) error {
+	if err := p.ensureRunning(); err != nil {
+		return err
+	}
+	instruments := extractInstruments(route.Filters)
+	switch route.Type {
+	case schema.RouteTypeTrade:
+		return p.unsubscribeTradeStreams(instruments)
+	case schema.RouteTypeTicker:
+		return p.unsubscribeTickerStreams(instruments)
+	case schema.RouteTypeOrderbookSnapshot:
+		return p.unsubscribeOrderBookStreams(instruments)
+	default:
+		return nil
+	}
 }
 
 func (p *Provider) ensureRunning() error {
@@ -341,6 +348,30 @@ func (p *Provider) configureTradeStreams(instruments []string) error {
 	return nil
 }
 
+func (p *Provider) unsubscribeTradeStreams(instruments []string) error {
+	p.tradeMu.Lock()
+	defer p.tradeMu.Unlock()
+
+	if p.tradeManager == nil {
+		return nil
+	}
+
+	streams := make([]string, 0, len(instruments))
+	for _, inst := range instruments {
+		meta, ok := p.metaForInstrument(inst)
+		if !ok {
+			continue
+		}
+		streams = append(streams, meta.stream+"@trade")
+	}
+
+	if len(streams) == 0 {
+		return nil
+	}
+
+	return p.tradeManager.unsubscribe(streams)
+}
+
 func (p *Provider) configureTickerStreams(instruments []string) error {
 	p.tickerMu.Lock()
 	defer p.tickerMu.Unlock()
@@ -365,6 +396,30 @@ func (p *Provider) configureTickerStreams(instruments []string) error {
 	return nil
 }
 
+func (p *Provider) unsubscribeTickerStreams(instruments []string) error {
+	p.tickerMu.Lock()
+	defer p.tickerMu.Unlock()
+
+	if p.tickerManager == nil {
+		return nil
+	}
+
+	streams := make([]string, 0, len(instruments))
+	for _, inst := range instruments {
+		meta, ok := p.metaForInstrument(inst)
+		if !ok {
+			continue
+		}
+		streams = append(streams, meta.stream+"@ticker")
+	}
+
+	if len(streams) == 0 {
+		return nil
+	}
+
+	return p.tickerManager.unsubscribe(streams)
+}
+
 func (p *Provider) configureOrderBookStreams(instruments []string) error {
 	p.bookMu.Lock()
 	defer p.bookMu.Unlock()
@@ -382,8 +437,8 @@ func (p *Provider) configureOrderBookStreams(instruments []string) error {
 		}
 
 		// Create book handle if not exists
-		if _, exists := p.bookHandles[inst]; !exists {
-			p.bookHandles[inst] = &bookHandle{
+		if _, exists := p.bookHandles[meta.canonical]; !exists {
+			p.bookHandles[meta.canonical] = &bookHandle{
 				assembler: shared.NewOrderBookAssembler(p.opts.SnapshotDepth),
 			}
 		}
@@ -395,6 +450,31 @@ func (p *Provider) configureOrderBookStreams(instruments []string) error {
 		return p.bookManager.subscribe(streams)
 	}
 	return nil
+}
+
+func (p *Provider) unsubscribeOrderBookStreams(instruments []string) error {
+	p.bookMu.Lock()
+	defer p.bookMu.Unlock()
+
+	if p.bookManager == nil {
+		return nil
+	}
+
+	streams := make([]string, 0, len(instruments))
+	for _, inst := range instruments {
+		meta, ok := p.metaForInstrument(inst)
+		if !ok {
+			continue
+		}
+		streams = append(streams, meta.stream+"@depth@100ms")
+		delete(p.bookHandles, meta.canonical)
+	}
+
+	if len(streams) == 0 {
+		return nil
+	}
+
+	return p.bookManager.unsubscribe(streams)
 }
 
 func (p *Provider) stopAllStreams() {
@@ -484,7 +564,7 @@ func (p *Provider) initStreamManagers(ctx context.Context) error {
 					handle.seeded.Store(true)
 				}
 			}()
-			
+
 			return nil // Skip this diff, wait for seeding to complete
 		}
 		p.bookMu.Unlock()

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +38,9 @@ type Provider struct {
 	instruments   map[string]schema.Instrument
 	states        map[string]*symbolMarketState
 
+	subscriptionsMu sync.Mutex
+	subscriptions   map[schema.RouteType]map[string]struct{}
+
 	orderSeq atomic.Uint64
 }
 
@@ -52,14 +56,15 @@ func NewProvider(opts Options) *Provider {
 	errs := make(chan error, 8)
 
 	p := &Provider{
-		name:        name,
-		opts:        opts,
-		pools:       opts.Pools,
-		clock:       time.Now,
-		events:      events,
-		errs:        errs,
-		instruments: make(map[string]schema.Instrument),
-		states:      make(map[string]*symbolMarketState),
+		name:          name,
+		opts:          opts,
+		pools:         opts.Pools,
+		clock:         time.Now,
+		events:        events,
+		errs:          errs,
+		instruments:   make(map[string]schema.Instrument),
+		states:        make(map[string]*symbolMarketState),
+		subscriptions: make(map[schema.RouteType]map[string]struct{}),
 	}
 	if p.pools == nil {
 		pm := pool.NewPoolManager()
@@ -105,11 +110,52 @@ func (p *Provider) SubmitOrder(_ context.Context, _ schema.OrderRequest) error {
 	return nil
 }
 
-// SubscribeRoute is a no-op in the simplified provider.
-func (p *Provider) SubscribeRoute(dispatcher.Route) error { return nil }
+// SubscribeRoute tracks active instruments for each route type.
+func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
+	if err := p.ensureRunning(); err != nil {
+		return err
+	}
+	instruments := extractRouteInstruments(route.Filters)
+	if len(instruments) == 0 {
+		return nil
+	}
+	p.subscriptionsMu.Lock()
+	defer p.subscriptionsMu.Unlock()
+	set, ok := p.subscriptions[route.Type]
+	if !ok {
+		set = make(map[string]struct{}, len(instruments))
+		p.subscriptions[route.Type] = set
+	}
+	for _, inst := range instruments {
+		set[inst] = struct{}{}
+	}
+	return nil
+}
 
-// UnsubscribeRoute is a no-op in the simplified provider.
-func (p *Provider) UnsubscribeRoute(schema.RouteType) error { return nil }
+// UnsubscribeRoute removes tracked instruments for the given route.
+func (p *Provider) UnsubscribeRoute(route dispatcher.Route) error {
+	if err := p.ensureRunning(); err != nil {
+		return err
+	}
+	instruments := extractRouteInstruments(route.Filters)
+	p.subscriptionsMu.Lock()
+	defer p.subscriptionsMu.Unlock()
+	if len(instruments) == 0 {
+		delete(p.subscriptions, route.Type)
+		return nil
+	}
+	set, ok := p.subscriptions[route.Type]
+	if !ok {
+		return nil
+	}
+	for _, inst := range instruments {
+		delete(set, inst)
+	}
+	if len(set) == 0 {
+		delete(p.subscriptions, route.Type)
+	}
+	return nil
+}
 
 // Instruments returns the current catalogue.
 func (p *Provider) Instruments() []schema.Instrument {
@@ -262,4 +308,47 @@ func (p *Provider) nextPrice(state *symbolMarketState) float64 {
 	delta := math.Max(state.lastPrice*0.001, 0.01)
 	state.lastPrice += delta
 	return state.lastPrice
+}
+
+func extractRouteInstruments(filters []dispatcher.FilterRule) []string {
+	if len(filters) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, filter := range filters {
+		if !strings.EqualFold(filter.Field, "instrument") {
+			continue
+		}
+		switch v := filter.Value.(type) {
+		case string:
+			if trimmed := strings.ToUpper(strings.TrimSpace(v)); trimmed != "" {
+				seen[trimmed] = struct{}{}
+			}
+		case []string:
+			for _, entry := range v {
+				if trimmed := strings.ToUpper(strings.TrimSpace(entry)); trimmed != "" {
+					seen[trimmed] = struct{}{}
+				}
+			}
+		case []any:
+			for _, entry := range v {
+				if trimmed := strings.ToUpper(strings.TrimSpace(fmt.Sprint(entry))); trimmed != "" {
+					seen[trimmed] = struct{}{}
+				}
+			}
+		default:
+			if trimmed := strings.ToUpper(strings.TrimSpace(fmt.Sprint(v))); trimmed != "" {
+				seen[trimmed] = struct{}{}
+			}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for symbol := range seen {
+		out = append(out, symbol)
+	}
+	sort.Strings(out)
+	return out
 }

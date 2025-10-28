@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"sort"
@@ -246,10 +245,8 @@ func (m *Manager) registerDefaults() {
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
 			strat := &strategies.Logging{
-				Logger:       log.New(io.Discard, "", 0),
-				LoggerPrefix: "",
+				LoggerPrefix: stringValue(cfg, "logger_prefix", "[Logging] "),
 			}
-			strat.LoggerPrefix = stringValue(cfg, "logger_prefix", "[Logging] ")
 			return strat, nil
 		},
 	})
