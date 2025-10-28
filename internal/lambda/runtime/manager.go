@@ -110,6 +110,14 @@ type StrategyDefinition struct {
 	factory StrategyFactory
 }
 
+var dryRunConfigField = StrategyConfigField{
+	Name:        "dry_run",
+	Type:        "bool",
+	Description: "When true, strategy logs intended orders without submitting them",
+	Default:     true,
+	Required:    false,
+}
+
 // Metadata returns the strategy metadata.
 func (d StrategyDefinition) Metadata() StrategyMetadata {
 	fields := make([]StrategyConfigField, len(d.meta.Config))
@@ -185,7 +193,7 @@ func (m *Manager) registerDefaults() {
 			Name:        "noop",
 			DisplayName: "No-Op",
 			Description: "Pass-through strategy that performs no actions.",
-			Config:      []StrategyConfigField{},
+			Config:      withDryRunField(nil),
 			Events:      []schema.EventType{},
 		},
 		factory: func(_ map[string]any) (lambda.TradingStrategy, error) {
@@ -198,10 +206,10 @@ func (m *Manager) registerDefaults() {
 			Name:        "delay",
 			DisplayName: "Delay",
 			Description: "Simulates processing latency with a configurable random delay window.",
-			Config: []StrategyConfigField{
+			Config: withDryRunField([]StrategyConfigField{
 				{Name: "min_delay", Type: "duration", Description: "Lower bound for the random delay interval", Default: "100ms", Required: false},
 				{Name: "max_delay", Type: "duration", Description: "Upper bound for the random delay interval", Default: "500ms", Required: false},
-			},
+			}),
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
@@ -227,13 +235,13 @@ func (m *Manager) registerDefaults() {
 			Name:        "logging",
 			DisplayName: "Logging",
 			Description: "Emits detailed logs for all inbound events.",
-			Config: []StrategyConfigField{{
+			Config: withDryRunField([]StrategyConfigField{{
 				Name:        "logger_prefix",
 				Type:        "string",
 				Description: "Prefix prepended to each log message",
 				Default:     "[Logging] ",
 				Required:    false,
-			}},
+			}}),
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
@@ -251,12 +259,12 @@ func (m *Manager) registerDefaults() {
 			Name:        "momentum",
 			DisplayName: "Momentum",
 			Description: "Trades in the direction of recent price momentum.",
-			Config: []StrategyConfigField{
+			Config: withDryRunField([]StrategyConfigField{
 				{Name: "lookback_period", Type: "int", Description: "Number of recent trades used to compute momentum", Default: 20, Required: false},
 				{Name: "momentum_threshold", Type: "float", Description: "Minimum momentum (in percent) required to trigger trades", Default: 0.5, Required: false},
 				{Name: "order_size", Type: "string", Description: "Quantity for each market order", Default: "1", Required: false},
 				{Name: "cooldown", Type: "duration", Description: "Minimum time between trades", Default: "5s", Required: false},
-			},
+			}),
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
@@ -271,6 +279,7 @@ func (m *Manager) registerDefaults() {
 			strat.MomentumThreshold = floatValue(cfg, "momentum_threshold", 0.5)
 			strat.OrderSize = stringValue(cfg, "order_size", "1")
 			strat.Cooldown = durationValue(cfg, "cooldown", 5*time.Second)
+			strat.DryRun = boolValue(cfg, "dry_run", true)
 			return strat, nil
 		},
 	})
@@ -280,11 +289,11 @@ func (m *Manager) registerDefaults() {
 			Name:        "meanreversion",
 			DisplayName: "Mean Reversion",
 			Description: "Trades when price deviates from its moving average.",
-			Config: []StrategyConfigField{
+			Config: withDryRunField([]StrategyConfigField{
 				{Name: "window_size", Type: "int", Description: "Moving average window size", Default: 20, Required: false},
 				{Name: "deviation_threshold", Type: "float", Description: "Deviation percentage required to open a position", Default: 0.5, Required: false},
 				{Name: "order_size", Type: "string", Description: "Order size when entering a position", Default: "1", Required: false},
-			},
+			}),
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
@@ -297,6 +306,7 @@ func (m *Manager) registerDefaults() {
 			strat.WindowSize = intValue(cfg, "window_size", 20)
 			strat.DeviationThreshold = floatValue(cfg, "deviation_threshold", 0.5)
 			strat.OrderSize = stringValue(cfg, "order_size", "1")
+			strat.DryRun = boolValue(cfg, "dry_run", true)
 			return strat, nil
 		},
 	})
@@ -306,12 +316,12 @@ func (m *Manager) registerDefaults() {
 			Name:        "grid",
 			DisplayName: "Grid",
 			Description: "Places a symmetric buy/sell grid around the reference price.",
-			Config: []StrategyConfigField{
+			Config: withDryRunField([]StrategyConfigField{
 				{Name: "grid_levels", Type: "int", Description: "Number of grid levels on each side", Default: 3, Required: false},
 				{Name: "grid_spacing", Type: "float", Description: "Grid spacing expressed as percent", Default: 0.5, Required: false},
 				{Name: "order_size", Type: "string", Description: "Order size per level", Default: "1", Required: false},
 				{Name: "base_price", Type: "float", Description: "Optional base price for the grid", Default: 0.0, Required: false},
-			},
+			}),
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
@@ -326,6 +336,7 @@ func (m *Manager) registerDefaults() {
 			strat.GridSpacing = floatValue(cfg, "grid_spacing", 0.5)
 			strat.OrderSize = stringValue(cfg, "order_size", "1")
 			strat.BasePrice = floatValue(cfg, "base_price", 0)
+			strat.DryRun = boolValue(cfg, "dry_run", true)
 			return strat, nil
 		},
 	})
@@ -335,11 +346,11 @@ func (m *Manager) registerDefaults() {
 			Name:        "marketmaking",
 			DisplayName: "Market Making",
 			Description: "Quotes bid/ask orders around the mid price to capture spread.",
-			Config: []StrategyConfigField{
+			Config: withDryRunField([]StrategyConfigField{
 				{Name: "spread_bps", Type: "float", Description: "Spread in basis points", Default: 25.0, Required: false},
 				{Name: "order_size", Type: "string", Description: "Quoted order size", Default: "1", Required: false},
 				{Name: "max_open_orders", Type: "int", Description: "Maximum concurrent orders per side", Default: 2, Required: false},
-			},
+			}),
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
@@ -357,6 +368,7 @@ func (m *Manager) registerDefaults() {
 			}
 			// #nosec G115 - bounds checked above
 			strat.MaxOpenOrders = int32(maxOrders)
+			strat.DryRun = boolValue(cfg, "dry_run", true)
 			return strat, nil
 		},
 	})
@@ -541,7 +553,9 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec) (*lambda.B
 	}
 
 	orderRouter := &providerOrderRouter{catalog: m.providers}
-	base := lambda.NewBaseLambda(spec.ID, lambda.Config{Symbol: spec.Symbol, Providers: resolvedProviders}, m.bus, orderRouter, m.pools, strategy, m.riskManager)
+	dryRun := boolValue(spec.Config, "dry_run", true)
+	baseCfg := lambda.Config{Symbol: spec.Symbol, Providers: resolvedProviders, DryRun: dryRun}
+	base := lambda.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -887,6 +901,13 @@ func bindStrategy(strategy lambda.TradingStrategy, base *lambda.BaseLambda, _ *l
 	}
 }
 
+func withDryRunField(fields []StrategyConfigField) []StrategyConfigField {
+	out := make([]StrategyConfigField, 0, len(fields)+1)
+	out = append(out, fields...)
+	out = append(out, dryRunConfigField)
+	return out
+}
+
 func stringValue(cfg map[string]any, key, def string) string {
 	if cfg == nil {
 		return def
@@ -894,6 +915,33 @@ func stringValue(cfg map[string]any, key, def string) string {
 	if raw, ok := cfg[key]; ok {
 		if val, ok := raw.(string); ok && strings.TrimSpace(val) != "" {
 			return val
+		}
+	}
+	return def
+}
+
+func boolValue(cfg map[string]any, key string, def bool) bool {
+	if cfg == nil {
+		return def
+	}
+	if raw, ok := cfg[key]; ok {
+		switch v := raw.(type) {
+		case bool:
+			return v
+		case string:
+			trimmed := strings.TrimSpace(v)
+			if trimmed == "" {
+				return def
+			}
+			if parsed, err := strconv.ParseBool(trimmed); err == nil {
+				return parsed
+			}
+		case int:
+			return v != 0
+		case int64:
+			return v != 0
+		case float64:
+			return v != 0
 		}
 	}
 	return def
@@ -984,6 +1032,7 @@ func (a *momentumAdapter) Logger() *log.Logger   { return a.base.Logger() }
 func (a *momentumAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
 func (a *momentumAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
 func (a *momentumAdapter) Providers() []string   { return a.base.Providers() }
+func (a *momentumAdapter) IsDryRun() bool        { return a.base.IsDryRun() }
 func (a *momentumAdapter) SelectProvider(seed uint64) (string, error) {
 	provider, err := a.base.SelectProvider(seed)
 	if err != nil {
@@ -1006,6 +1055,7 @@ func (a *orderStrategyAdapter) Logger() *log.Logger   { return a.base.Logger() }
 func (a *orderStrategyAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
 func (a *orderStrategyAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
 func (a *orderStrategyAdapter) Providers() []string   { return a.base.Providers() }
+func (a *orderStrategyAdapter) IsDryRun() bool        { return a.base.IsDryRun() }
 func (a *orderStrategyAdapter) SelectProvider(seed uint64) (string, error) {
 	provider, err := a.base.SelectProvider(seed)
 	if err != nil {
@@ -1037,6 +1087,7 @@ func (a *marketMakingAdapter) GetBidPrice() float64  { return a.base.GetBidPrice
 func (a *marketMakingAdapter) GetAskPrice() float64  { return a.base.GetAskPrice() }
 func (a *marketMakingAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
 func (a *marketMakingAdapter) Providers() []string   { return a.base.Providers() }
+func (a *marketMakingAdapter) IsDryRun() bool        { return a.base.IsDryRun() }
 func (a *marketMakingAdapter) SelectProvider(seed uint64) (string, error) {
 	provider, err := a.base.SelectProvider(seed)
 	if err != nil {

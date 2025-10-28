@@ -28,7 +28,7 @@ func TestHandleAccountPositionPublishesBalances(t *testing.T) {
 	prov := newTestProvider(t)
 	now := time.Now().UTC()
 	event := accountPositionEvent{
-		EventTime: now.UnixMilli(),
+		EventTime: binanceTimestamp(now.UnixMilli()),
 		Balances: []accountPositionBalance{{
 			Asset:  "USDT",
 			Free:   "10.5",
@@ -76,7 +76,7 @@ func TestHandleBalanceDeltaAdjustsBalance(t *testing.T) {
 	prov := newTestProvider(t)
 	now := time.Now().UTC()
 	initial := accountPositionEvent{
-		EventTime: now.UnixMilli(),
+		EventTime: binanceTimestamp(now.UnixMilli()),
 		Balances: []accountPositionBalance{{
 			Asset:  "BTC",
 			Free:   "1",
@@ -91,7 +91,7 @@ func TestHandleBalanceDeltaAdjustsBalance(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected initial balance event")
 	}
-	delta := balanceDeltaEvent{EventTime: now.Add(time.Second).UnixMilli(), Asset: "BTC", Delta: "0.5"}
+	delta := balanceDeltaEvent{EventTime: binanceTimestamp(now.Add(time.Second).UnixMilli()), Asset: "BTC", Delta: "0.5"}
 	prov.handleBalanceDelta(delta)
 	select {
 	case evt := <-prov.events:
@@ -121,8 +121,8 @@ func TestHandleExecutionReportPublishesExec(t *testing.T) {
 	now := time.Now().UTC()
 	commissionAsset := "BNB"
 	event := executionReportEvent{
-		EventTime:          now.UnixMilli(),
-		TransactionTime:    now.UnixMilli(),
+		EventTime:          binanceTimestamp(now.UnixMilli()),
+		TransactionTime:    binanceTimestamp(now.UnixMilli()),
 		Symbol:             "BTCUSDT",
 		ClientOrderID:      "order-1",
 		Side:               "BUY",

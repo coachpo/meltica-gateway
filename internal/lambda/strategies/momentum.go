@@ -20,6 +20,7 @@ type Momentum struct {
 		Providers() []string
 		SelectProvider(seed uint64) (string, error)
 		SubmitMarketOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string) error
+		IsDryRun() bool
 	}
 
 	// Configuration
@@ -27,6 +28,7 @@ type Momentum struct {
 	MomentumThreshold float64       // Minimum price change % to trigger trade
 	OrderSize         string        // Order size as string
 	Cooldown          time.Duration // Minimum time between trades
+	DryRun            bool
 
 	// State
 	mu            sync.Mutex
@@ -62,6 +64,7 @@ func (s *Momentum) OnTrade(ctx context.Context, _ *schema.Event, _ schema.TradeP
 	if !s.Lambda.IsTradingActive() {
 		return
 	}
+	dryRun := s.DryRun || s.Lambda.IsDryRun()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -100,12 +103,18 @@ func (s *Momentum) OnTrade(ctx context.Context, _ *schema.Event, _ schema.TradeP
 			s.Lambda.Logger().Printf("[MOMENTUM] No provider available for buy: %v", err)
 			return
 		}
-		if err := s.Lambda.SubmitMarketOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize); err != nil {
-			s.Lambda.Logger().Printf("[MOMENTUM] Failed to buy: %v", err)
-		} else {
-			s.Lambda.Logger().Printf("[MOMENTUM] BUY signal on %s: momentum=%.3f%%", provider, momentumPct)
+		if dryRun {
+			s.Lambda.Logger().Printf("[MOMENTUM][DRY-RUN] Would BUY on %s: momentum=%.3f%% size=%s", provider, momentumPct, s.OrderSize)
 			s.position = 1
 			s.lastTradeTime = time.Now()
+		} else {
+			if err := s.Lambda.SubmitMarketOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize); err != nil {
+				s.Lambda.Logger().Printf("[MOMENTUM] Failed to buy: %v", err)
+			} else {
+				s.Lambda.Logger().Printf("[MOMENTUM] BUY signal on %s: momentum=%.3f%%", provider, momentumPct)
+				s.position = 1
+				s.lastTradeTime = time.Now()
+			}
 		}
 	}
 
@@ -116,12 +125,18 @@ func (s *Momentum) OnTrade(ctx context.Context, _ *schema.Event, _ schema.TradeP
 			s.Lambda.Logger().Printf("[MOMENTUM] No provider available for sell: %v", err)
 			return
 		}
-		if err := s.Lambda.SubmitMarketOrder(ctx, provider, schema.TradeSideSell, s.OrderSize); err != nil {
-			s.Lambda.Logger().Printf("[MOMENTUM] Failed to sell: %v", err)
-		} else {
-			s.Lambda.Logger().Printf("[MOMENTUM] SELL signal on %s: momentum=%.3f%%", provider, momentumPct)
+		if dryRun {
+			s.Lambda.Logger().Printf("[MOMENTUM][DRY-RUN] Would SELL on %s: momentum=%.3f%% size=%s", provider, momentumPct, s.OrderSize)
 			s.position = -1
 			s.lastTradeTime = time.Now()
+		} else {
+			if err := s.Lambda.SubmitMarketOrder(ctx, provider, schema.TradeSideSell, s.OrderSize); err != nil {
+				s.Lambda.Logger().Printf("[MOMENTUM] Failed to sell: %v", err)
+			} else {
+				s.Lambda.Logger().Printf("[MOMENTUM] SELL signal on %s: momentum=%.3f%%", provider, momentumPct)
+				s.position = -1
+				s.lastTradeTime = time.Now()
+			}
 		}
 	}
 }

@@ -21,6 +21,7 @@ type Grid struct {
 		Providers() []string
 		SelectProvider(seed uint64) (string, error)
 		SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error
+		IsDryRun() bool
 	}
 
 	// Configuration
@@ -28,6 +29,7 @@ type Grid struct {
 	GridSpacing float64 // Spacing between levels as %
 	OrderSize   string  // Order size per level
 	BasePrice   float64 // Center price for the grid
+	DryRun      bool
 
 	// State
 	mu          sync.Mutex
@@ -114,6 +116,12 @@ func (s *Grid) OnOrderFilled(ctx context.Context, evt *schema.Event, payload sch
 		}
 	}
 
+	dryRun := s.DryRun || s.Lambda.IsDryRun()
+	if dryRun {
+		s.activeGrids[fillPrice] = true
+		s.Lambda.Logger().Printf("[GRID][DRY-RUN] Would place %s order at %.2f on %s after fill", oppositeSide, fillPrice, provider)
+		return
+	}
 	if err := s.Lambda.SubmitOrder(ctx, provider, oppositeSide, s.OrderSize, &fillPrice); err != nil {
 		s.Lambda.Logger().Printf("[GRID] Failed to place opposite order: %v", err)
 	} else {
@@ -140,6 +148,7 @@ func (s *Grid) OnOrderCancelled(_ context.Context, _ *schema.Event, _ schema.Exe
 
 func (s *Grid) placeGridOrders(ctx context.Context) {
 	spacingMultiplier := s.GridSpacing / 100.0
+	dryRun := s.DryRun || s.Lambda.IsDryRun()
 
 	// Place buy orders below base price
 	for i := 1; i <= s.GridLevels; i++ {
@@ -147,6 +156,11 @@ func (s *Grid) placeGridOrders(ctx context.Context) {
 		provider, err := s.randomProvider()
 		if err != nil {
 			s.Lambda.Logger().Printf("[GRID] Unable to select provider for buy order: %v", err)
+			continue
+		}
+		if dryRun {
+			s.activeGrids[buyPrice] = true
+			s.Lambda.Logger().Printf("[GRID][DRY-RUN] Would place buy order at %.2f on %s", buyPrice, provider)
 			continue
 		}
 		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize, &buyPrice); err != nil {
@@ -163,6 +177,11 @@ func (s *Grid) placeGridOrders(ctx context.Context) {
 		provider, err := s.randomProvider()
 		if err != nil {
 			s.Lambda.Logger().Printf("[GRID] Unable to select provider for sell order: %v", err)
+			continue
+		}
+		if dryRun {
+			s.activeGrids[sellPrice] = true
+			s.Lambda.Logger().Printf("[GRID][DRY-RUN] Would place sell order at %.2f on %s", sellPrice, provider)
 			continue
 		}
 		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideSell, s.OrderSize, &sellPrice); err != nil {

@@ -85,12 +85,14 @@ type BaseLambda struct {
 	// Trading state
 	tradingActive atomic.Bool
 	orderCount    atomic.Int64
+	dryRun        atomic.Bool
 }
 
 // Config defines configuration for a lambda trading bot instance.
 type Config struct {
 	Symbol    string
 	Providers []string
+	DryRun    bool
 }
 
 // OrderSubmitter defines the interface for submitting orders to a provider.
@@ -140,6 +142,7 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 	lambda.bidPrice.Store(float64(0))
 	lambda.askPrice.Store(float64(0))
 	lambda.tradingActive.Store(false)
+	lambda.dryRun.Store(config.DryRun)
 
 	return lambda
 }
@@ -480,12 +483,6 @@ func (l *BaseLambda) handleRiskControl(ctx context.Context, evt *schema.Event) {
 
 // SubmitOrder submits an order request to the specified provider.
 func (l *BaseLambda) SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *string) error {
-	if l.orderSubmitter == nil {
-		return fmt.Errorf("order submitter not configured")
-	}
-	if l.pools == nil {
-		return fmt.Errorf("pool manager not configured")
-	}
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
 		return fmt.Errorf("order provider required")
@@ -494,6 +491,24 @@ func (l *BaseLambda) SubmitOrder(ctx context.Context, provider string, side sche
 		if _, ok := l.providerSet[provider]; !ok {
 			return fmt.Errorf("order provider %q not configured for lambda %s", provider, l.id)
 		}
+	}
+
+	if l.IsDryRun() {
+		var priceStr string
+		if price != nil {
+			priceStr = *price
+		} else {
+			priceStr = "market"
+		}
+		l.logger.Printf("[%s] dry-run: skip submit order provider=%s side=%s qty=%s price=%s", l.id, provider, side, quantity, priceStr)
+		return nil
+	}
+
+	if l.orderSubmitter == nil {
+		return fmt.Errorf("order submitter not configured")
+	}
+	if l.pools == nil {
+		return fmt.Errorf("pool manager not configured")
 	}
 
 	orderID := fmt.Sprintf("%s-%d-%d", l.id, time.Now().UnixNano(), l.orderCount.Load())
@@ -532,12 +547,6 @@ func (l *BaseLambda) SubmitOrder(ctx context.Context, provider string, side sche
 
 // SubmitMarketOrder submits a market order.
 func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string) error {
-	if l.orderSubmitter == nil {
-		return fmt.Errorf("order submitter not configured")
-	}
-	if l.pools == nil {
-		return fmt.Errorf("pool manager not configured")
-	}
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
 		return fmt.Errorf("order provider required")
@@ -546,6 +555,18 @@ func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, provider string, sid
 		if _, ok := l.providerSet[provider]; !ok {
 			return fmt.Errorf("order provider %q not configured for lambda %s", provider, l.id)
 		}
+	}
+
+	if l.IsDryRun() {
+		l.logger.Printf("[%s] dry-run: skip submit market order provider=%s side=%s qty=%s", l.id, provider, side, quantity)
+		return nil
+	}
+
+	if l.orderSubmitter == nil {
+		return fmt.Errorf("order submitter not configured")
+	}
+	if l.pools == nil {
+		return fmt.Errorf("pool manager not configured")
 	}
 
 	orderID := fmt.Sprintf("%s-%d-%d", l.id, time.Now().UnixNano(), l.orderCount.Load())
@@ -681,6 +702,11 @@ func (l *BaseLambda) SelectProvider(seed uint64) (string, error) {
 // IsTradingActive returns whether trading is currently enabled.
 func (l *BaseLambda) IsTradingActive() bool {
 	return l.tradingActive.Load()
+}
+
+// IsDryRun reports whether the lambda is operating in dry-run mode.
+func (l *BaseLambda) IsDryRun() bool {
+	return l.dryRun.Load()
 }
 
 // EnableTrading enables or disables trading for this lambda instance.

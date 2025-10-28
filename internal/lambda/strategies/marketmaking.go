@@ -24,12 +24,14 @@ type MarketMaking struct {
 		Providers() []string
 		SelectProvider(seed uint64) (string, error)
 		SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error
+		IsDryRun() bool
 	}
 
 	// Configuration
 	SpreadBps     float64 // Spread in basis points (100 bps = 1%)
 	OrderSize     string  // Order size as string
 	MaxOpenOrders int32   // Maximum number of open orders per side
+	DryRun        bool
 
 	// State
 	activeBuyOrders  atomic.Int32
@@ -144,6 +146,7 @@ func (s *MarketMaking) placeQuotes(ctx context.Context, market MarketState) {
 	if midPrice <= 0 {
 		return
 	}
+	dryRun := s.DryRun || s.Lambda.IsDryRun()
 
 	// Calculate quote prices with configured spread
 	spreadMultiplier := s.SpreadBps / 10000.0 // Convert bps to decimal
@@ -152,21 +155,31 @@ func (s *MarketMaking) placeQuotes(ctx context.Context, market MarketState) {
 
 	// Place buy order if we have capacity
 	if s.activeBuyOrders.Load() < s.MaxOpenOrders {
-		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize, &buyPrice); err != nil {
-			s.Lambda.Logger().Printf("[MM] Failed to submit buy order: %v", err)
-		} else {
+		if dryRun {
 			s.activeBuyOrders.Add(1)
-			s.Lambda.Logger().Printf("[MM] Placed buy order on %s: price=%.2f size=%s", provider, buyPrice, s.OrderSize)
+			s.Lambda.Logger().Printf("[MM][DRY-RUN] Would place buy order on %s: price=%.2f size=%s", provider, buyPrice, s.OrderSize)
+		} else {
+			if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize, &buyPrice); err != nil {
+				s.Lambda.Logger().Printf("[MM] Failed to submit buy order: %v", err)
+			} else {
+				s.activeBuyOrders.Add(1)
+				s.Lambda.Logger().Printf("[MM] Placed buy order on %s: price=%.2f size=%s", provider, buyPrice, s.OrderSize)
+			}
 		}
 	}
 
 	// Place sell order if we have capacity
 	if s.activeSellOrders.Load() < s.MaxOpenOrders {
-		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideSell, s.OrderSize, &sellPrice); err != nil {
-			s.Lambda.Logger().Printf("[MM] Failed to submit sell order: %v", err)
-		} else {
+		if dryRun {
 			s.activeSellOrders.Add(1)
-			s.Lambda.Logger().Printf("[MM] Placed sell order on %s: price=%.2f size=%s", provider, sellPrice, s.OrderSize)
+			s.Lambda.Logger().Printf("[MM][DRY-RUN] Would place sell order on %s: price=%.2f size=%s", provider, sellPrice, s.OrderSize)
+		} else {
+			if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideSell, s.OrderSize, &sellPrice); err != nil {
+				s.Lambda.Logger().Printf("[MM] Failed to submit sell order: %v", err)
+			} else {
+				s.activeSellOrders.Add(1)
+				s.Lambda.Logger().Printf("[MM] Placed sell order on %s: price=%.2f size=%s", provider, sellPrice, s.OrderSize)
+			}
 		}
 	}
 

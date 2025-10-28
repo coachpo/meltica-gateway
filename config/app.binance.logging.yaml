@@ -1,0 +1,70 @@
+environment: prod
+
+exchanges:
+  binance:
+    exchange:
+      name: binance
+      venue: spot
+      enabled: true
+  binance-futures:
+    exchange:
+      name: binance
+      venue: futures
+      enabled: true
+
+eventbus:
+  bufferSize: 8192
+  fanoutWorkers: auto
+
+pools:
+  eventSize: 60000
+  orderRequestSize: 20000
+
+risk:
+  maxPositionSize: "100"
+  maxNotionalValue: "25000"
+  notionalCurrency: "USDT"
+  orderThrottle: 2.5
+  orderBurst: 2
+  maxConcurrentOrders: 5
+  priceBandPercent: 0.8
+  allowedOrderTypes:
+    - Limit
+    - Market
+  killSwitchEnabled: true
+  maxRiskBreaches: 3
+  circuitBreaker:
+    enabled: true
+    threshold: 4
+    cooldown: 60s
+
+apiServer:
+  addr: ":8880"
+
+telemetry:
+  otlpEndpoint: http://localhost:4318
+  serviceName: meltica-gateway-binance
+  otlpInsecure: true
+  enableMetrics: true
+
+lambdaManifest:
+  lambdas:
+    - id: binance-log-btc
+      providers:
+        - binance
+      symbol: BTC-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: false
+    - id: binance-cross-log
+      providers:
+        - binance
+        - binance-futures
+      symbol: ETH-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: false

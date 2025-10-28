@@ -20,12 +20,14 @@ type MeanReversion struct {
 		Providers() []string
 		SelectProvider(seed uint64) (string, error)
 		SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error
+		IsDryRun() bool
 	}
 
 	// Configuration
 	WindowSize         int     // Moving average window size
 	DeviationThreshold float64 // Deviation % to trigger trade
 	OrderSize          string  // Order size as string
+	DryRun             bool
 
 	// State
 	mu          sync.Mutex
@@ -56,6 +58,7 @@ func (s *MeanReversion) OnTrade(ctx context.Context, _ *schema.Event, _ schema.T
 	if !s.Lambda.IsTradingActive() {
 		return
 	}
+	dryRun := s.DryRun || s.Lambda.IsDryRun()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -91,12 +94,17 @@ func (s *MeanReversion) OnTrade(ctx context.Context, _ *schema.Event, _ schema.T
 			s.Lambda.Logger().Printf("[MEAN_REV] No provider available for buy: %v", err)
 			return
 		}
-		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize, &price); err != nil {
-			s.Lambda.Logger().Printf("[MEAN_REV] Failed to buy: %v", err)
-		} else {
-			s.Lambda.Logger().Printf("[MEAN_REV] BUY on %s: price %.2f below MA %.2f (%.2f%%)",
-				provider, price, s.movingAvg, deviation)
+		if dryRun {
+			s.Lambda.Logger().Printf("[MEAN_REV][DRY-RUN] Would BUY on %s: price %.2f below MA %.2f (%.2f%%) size=%s", provider, price, s.movingAvg, deviation, s.OrderSize)
 			s.hasPosition = true
+		} else {
+			if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideBuy, s.OrderSize, &price); err != nil {
+				s.Lambda.Logger().Printf("[MEAN_REV] Failed to buy: %v", err)
+			} else {
+				s.Lambda.Logger().Printf("[MEAN_REV] BUY on %s: price %.2f below MA %.2f (%.2f%%)",
+					provider, price, s.movingAvg, deviation)
+				s.hasPosition = true
+			}
 		}
 	}
 
@@ -107,12 +115,17 @@ func (s *MeanReversion) OnTrade(ctx context.Context, _ *schema.Event, _ schema.T
 			s.Lambda.Logger().Printf("[MEAN_REV] No provider available for sell: %v", err)
 			return
 		}
-		if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideSell, s.OrderSize, &price); err != nil {
-			s.Lambda.Logger().Printf("[MEAN_REV] Failed to sell: %v", err)
-		} else {
-			s.Lambda.Logger().Printf("[MEAN_REV] SELL on %s: price %.2f above MA %.2f (%.2f%%)",
-				provider, price, s.movingAvg, deviation)
+		if dryRun {
+			s.Lambda.Logger().Printf("[MEAN_REV][DRY-RUN] Would SELL on %s: price %.2f above MA %.2f (%.2f%%) size=%s", provider, price, s.movingAvg, deviation, s.OrderSize)
 			s.hasPosition = true
+		} else {
+			if err := s.Lambda.SubmitOrder(ctx, provider, schema.TradeSideSell, s.OrderSize, &price); err != nil {
+				s.Lambda.Logger().Printf("[MEAN_REV] Failed to sell: %v", err)
+			} else {
+				s.Lambda.Logger().Printf("[MEAN_REV] SELL on %s: price %.2f above MA %.2f (%.2f%%)",
+					provider, price, s.movingAvg, deviation)
+				s.hasPosition = true
+			}
 		}
 	}
 

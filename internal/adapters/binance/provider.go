@@ -1,6 +1,7 @@
 package binance
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -574,7 +575,7 @@ func (p *Provider) handleUserDataMessage(data []byte) {
 }
 
 func (p *Provider) handleAccountPosition(event accountPositionEvent) {
-	timestamp := time.UnixMilli(event.EventTime).UTC()
+	timestamp := time.UnixMilli(event.EventTime.Int64()).UTC()
 	for _, bal := range event.Balances {
 		asset := strings.ToUpper(strings.TrimSpace(bal.Asset))
 		if asset == "" {
@@ -598,7 +599,7 @@ func (p *Provider) handleBalanceDelta(event balanceDeltaEvent) {
 	if delta.IsZero() {
 		return
 	}
-	timestamp := time.UnixMilli(event.EventTime).UTC()
+	timestamp := time.UnixMilli(event.EventTime.Int64()).UTC()
 	p.balanceMu.Lock()
 	snapshot := p.balances[asset]
 	snapshot.free = snapshot.free.Add(delta)
@@ -624,9 +625,9 @@ func (p *Provider) handleExecutionReport(event executionReportEvent) {
 		p.reportError(fmt.Errorf("binance exec order type: %w", err))
 		return
 	}
-	timestamp := time.UnixMilli(event.TransactionTime).UTC()
+	timestamp := time.UnixMilli(event.TransactionTime.Int64()).UTC()
 	if timestamp.IsZero() {
-		timestamp = time.UnixMilli(event.EventTime).UTC()
+		timestamp = time.UnixMilli(event.EventTime.Int64()).UTC()
 	}
 	clientOrderID := strings.TrimSpace(event.ClientOrderID)
 	price := strings.TrimSpace(event.Price)
@@ -722,7 +723,7 @@ func (p *Provider) runTradeStream(ctx context.Context, meta symbolMeta) {
 			Side:      tradeSideFromAggressor(event.IsBuyerMaker),
 			Price:     event.Price,
 			Quantity:  event.Quantity,
-			Timestamp: time.UnixMilli(event.TradeTime).UTC(),
+			Timestamp: time.UnixMilli(event.TradeTime.Int64()).UTC(),
 		}
 		p.publisher.PublishTrade(p.ctx, meta.canonical, payload)
 		return nil
@@ -742,7 +743,7 @@ func (p *Provider) runTickerStream(ctx context.Context, meta symbolMeta) {
 			BidPrice:  event.BidPrice,
 			AskPrice:  event.AskPrice,
 			Volume24h: event.Volume,
-			Timestamp: time.UnixMilli(event.EventTime).UTC(),
+			Timestamp: time.UnixMilli(event.EventTime.Int64()).UTC(),
 		}
 		p.publisher.PublishTicker(p.ctx, meta.canonical, payload)
 		return nil
@@ -879,7 +880,7 @@ func (p *Provider) applyDepthDiff(meta symbolMeta, handle *bookHandle, diff dept
 		SequenceID: diff.FinalUpdateID,
 		Bids:       toDiffLevels(diff.Bids),
 		Asks:       toDiffLevels(diff.Asks),
-		Timestamp:  time.UnixMilli(diff.EventTime).UTC(),
+		Timestamp:  time.UnixMilli(diff.EventTime.Int64()).UTC(),
 	}
 	snapshot, applied, err := handle.assembler.ApplyDiff(update)
 	if err != nil {
@@ -1091,42 +1092,82 @@ func tradeSideFromAggressor(isBuyerMaker bool) schema.TradeSide {
 	return schema.TradeSideBuy
 }
 
+type binanceTimestamp int64
+
+func (ts *binanceTimestamp) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*ts = 0
+		return nil
+	}
+
+	if trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
+		inner := bytes.TrimSpace(trimmed[1 : len(trimmed)-1])
+		if len(inner) == 0 {
+			*ts = 0
+			return nil
+		}
+		trimmed = inner
+	}
+
+	if len(trimmed) == 0 {
+		*ts = 0
+		return nil
+	}
+
+	if parsed, err := strconv.ParseInt(string(trimmed), 10, 64); err == nil {
+		*ts = binanceTimestamp(parsed)
+		return nil
+	}
+
+	if parsed, err := strconv.ParseFloat(string(trimmed), 64); err == nil {
+		*ts = binanceTimestamp(int64(parsed))
+		return nil
+	}
+
+	return fmt.Errorf("binance: invalid timestamp %q", string(data))
+}
+
+func (ts binanceTimestamp) Int64() int64 {
+	return int64(ts)
+}
+
 type tradeMessage struct {
-	EventTime    int64  `json:"E"`
-	Symbol       string `json:"s"`
-	TradeID      int64  `json:"t"`
-	Price        string `json:"p"`
-	Quantity     string `json:"q"`
-	TradeTime    int64  `json:"T"`
-	IsBuyerMaker bool   `json:"m"`
+	EventTime    binanceTimestamp `json:"E"`
+	Symbol       string           `json:"s"`
+	TradeID      int64            `json:"t"`
+	Price        string           `json:"p"`
+	Quantity     string           `json:"q"`
+	TradeTime    binanceTimestamp `json:"T"`
+	IsBuyerMaker bool             `json:"m"`
 }
 
 type tickerMessage struct {
-	EventTime int64  `json:"E"`
-	Symbol    string `json:"s"`
-	LastPrice string `json:"c"`
-	BidPrice  string `json:"b"`
-	AskPrice  string `json:"a"`
-	Volume    string `json:"v"`
+	EventTime binanceTimestamp `json:"E"`
+	Symbol    string           `json:"s"`
+	LastPrice string           `json:"c"`
+	BidPrice  string           `json:"b"`
+	AskPrice  string           `json:"a"`
+	Volume    string           `json:"v"`
 }
 
 type depthDiffMessage struct {
-	EventTime     int64      `json:"E"`
-	Symbol        string     `json:"s"`
-	FirstUpdateID uint64     `json:"U"`
-	FinalUpdateID uint64     `json:"u"`
-	Bids          [][]string `json:"b"`
-	Asks          [][]string `json:"a"`
+	EventTime     binanceTimestamp `json:"E"`
+	Symbol        string           `json:"s"`
+	FirstUpdateID uint64           `json:"U"`
+	FinalUpdateID uint64           `json:"u"`
+	Bids          [][]string       `json:"b"`
+	Asks          [][]string       `json:"a"`
 }
 
 type userDataEvent struct {
-	EventType string `json:"e"`
-	EventTime int64  `json:"E"`
+	EventType string           `json:"e"`
+	EventTime binanceTimestamp `json:"E"`
 }
 
 type accountPositionEvent struct {
 	EventType string                   `json:"e"`
-	EventTime int64                    `json:"E"`
+	EventTime binanceTimestamp         `json:"E"`
 	Balances  []accountPositionBalance `json:"B"`
 }
 
@@ -1137,33 +1178,33 @@ type accountPositionBalance struct {
 }
 
 type balanceDeltaEvent struct {
-	EventType string `json:"e"`
-	EventTime int64  `json:"E"`
-	Asset     string `json:"a"`
-	Delta     string `json:"d"`
+	EventType string           `json:"e"`
+	EventTime binanceTimestamp `json:"E"`
+	Asset     string           `json:"a"`
+	Delta     string           `json:"d"`
 }
 
 type executionReportEvent struct {
-	EventType          string  `json:"e"`
-	EventTime          int64   `json:"E"`
-	Symbol             string  `json:"s"`
-	ClientOrderID      string  `json:"c"`
-	Side               string  `json:"S"`
-	OrderType          string  `json:"o"`
-	TimeInForce        string  `json:"f"`
-	OriginalQuantity   string  `json:"q"`
-	Price              string  `json:"p"`
-	StopPrice          string  `json:"P"`
-	TrailingDelta      string  `json:"d"`
-	OrderStatus        string  `json:"X"`
-	OrderID            int64   `json:"i"`
-	LastExecutedQty    string  `json:"l"`
-	CumulativeQuantity string  `json:"z"`
-	LastExecutedPrice  string  `json:"L"`
-	Commission         string  `json:"n"`
-	CommissionAsset    *string `json:"N"`
-	TransactionTime    int64   `json:"T"`
-	CumulativeQuoteQty string  `json:"Z"`
+	EventType          string           `json:"e"`
+	EventTime          binanceTimestamp `json:"E"`
+	Symbol             string           `json:"s"`
+	ClientOrderID      string           `json:"c"`
+	Side               string           `json:"S"`
+	OrderType          string           `json:"o"`
+	TimeInForce        string           `json:"f"`
+	OriginalQuantity   string           `json:"q"`
+	Price              string           `json:"p"`
+	StopPrice          string           `json:"P"`
+	TrailingDelta      string           `json:"d"`
+	OrderStatus        string           `json:"X"`
+	OrderID            int64            `json:"i"`
+	LastExecutedQty    string           `json:"l"`
+	CumulativeQuantity string           `json:"z"`
+	LastExecutedPrice  string           `json:"L"`
+	Commission         string           `json:"n"`
+	CommissionAsset    *string          `json:"N"`
+	TransactionTime    binanceTimestamp `json:"T"`
+	CumulativeQuoteQty string           `json:"Z"`
 }
 
 func levelsToPriceLevels(levels [][]string) []schema.PriceLevel {

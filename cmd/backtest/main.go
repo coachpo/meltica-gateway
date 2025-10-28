@@ -20,6 +20,7 @@ type orderStrategyAdapter struct {
 func (a *orderStrategyAdapter) Logger() *log.Logger   { return a.base.Logger() }
 func (a *orderStrategyAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
 func (a *orderStrategyAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
+func (a *orderStrategyAdapter) IsDryRun() bool        { return a.base.IsDryRun() }
 func (a *orderStrategyAdapter) Providers() []string   { return a.base.Providers() }
 func (a *orderStrategyAdapter) SelectProvider(seed uint64) (string, error) {
 	provider, err := a.base.SelectProvider(seed)
@@ -72,7 +73,7 @@ func main() {
 			OrderSize:   *gridOrderSize,
 			BasePrice:   0,
 		}
-		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{Symbol: "", Providers: []string{"backtest"}}, nil, nil, nil, gridStrategy, nil)
+		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{Symbol: "", Providers: []string{"backtest"}, DryRun: true}, nil, nil, nil, gridStrategy, nil)
 		gridStrategy.Lambda = &orderStrategyAdapter{base: baseLambda}
 		strategy = gridStrategy
 	default:
