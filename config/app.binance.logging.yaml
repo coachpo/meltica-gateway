@@ -58,6 +58,96 @@ lambdaManifest:
         dry_run: true
         logger_prefix: "[BINANCE-SPOT] "
       auto_start: true
+    - id: binance-log-eth
+      providers:
+        - binance
+      symbol: ETH-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-bnb
+      providers:
+        - binance
+      symbol: BNB-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-xrp
+      providers:
+        - binance
+      symbol: XRP-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-sol
+      providers:
+        - binance
+      symbol: SOL-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-ada
+      providers:
+        - binance
+      symbol: ADA-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-doge
+      providers:
+        - binance
+      symbol: DOGE-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-ltc
+      providers:
+        - binance
+      symbol: LTC-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-link
+      providers:
+        - binance
+      symbol: LINK-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-trx
+      providers:
+        - binance
+      symbol: TRX-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
+    - id: binance-log-matic
+      providers:
+        - binance
+      symbol: MATIC-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-SPOT] "
+      auto_start: true
     - id: binance-cross-log
       providers:
         - binance
@@ -67,4 +157,126 @@ lambdaManifest:
       config:
         dry_run: true
         logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-cross-log-btc
+      providers:
+        - binance
+        - binance-futures
+      symbol: BTC-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-cross-log-sol
+      providers:
+        - binance
+        - binance-futures
+      symbol: SOL-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-cross-log-ada
+      providers:
+        - binance
+        - binance-futures
+      symbol: ADA-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-cross-log-doge
+      providers:
+        - binance
+        - binance-futures
+      symbol: DOGE-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-cross-log-xrp
+      providers:
+        - binance
+        - binance-futures
+      symbol: XRP-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-CROSS] "
+      auto_start: true
+    - id: binance-futures-log-btc
+      providers:
+        - binance-futures
+      symbol: BTC-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-eth
+      providers:
+        - binance-futures
+      symbol: ETH-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-bnb
+      providers:
+        - binance-futures
+      symbol: BNB-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-xrp
+      providers:
+        - binance-futures
+      symbol: XRP-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-sol
+      providers:
+        - binance-futures
+      symbol: SOL-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-ada
+      providers:
+        - binance-futures
+      symbol: ADA-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-doge
+      providers:
+        - binance-futures
+      symbol: DOGE-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
+      auto_start: true
+    - id: binance-futures-log-matic
+      providers:
+        - binance-futures
+      symbol: MATIC-USDT
+      strategy: logging
+      config:
+        dry_run: true
+        logger_prefix: "[BINANCE-FUTURES] "
       auto_start: true

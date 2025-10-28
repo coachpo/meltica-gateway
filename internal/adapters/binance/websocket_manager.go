@@ -10,7 +10,7 @@ import (
 
 	"github.com/cenkalti/backoff/v5"
 	"github.com/coder/websocket"
-	json "github.com/goccy/go-json"
+	"github.com/goccy/go-json"
 )
 
 // streamManager manages a single WebSocket connection with live subscribe/unsubscribe support.
@@ -218,7 +218,7 @@ func (sm *streamManager) connect() error {
 		backoffCfg.Reset()
 
 		// Resubscribe to all active streams after reconnection
-		if err := sm.resubscribeAll(); err != nil {
+		if err := sm.subscribeAll(); err != nil {
 			sm.reportError(fmt.Errorf("resubscribe after reconnect: %w", err))
 		}
 
@@ -244,9 +244,9 @@ func (sm *streamManager) connect() error {
 	}
 }
 
-// resubscribeAll sends a bulk SUBSCRIBE request for all active subscriptions.
+// subscribeAll sends a bulk SUBSCRIBE request for all active subscriptions.
 // This is called after reconnection to restore the subscription state.
-func (sm *streamManager) resubscribeAll() error {
+func (sm *streamManager) subscribeAll() error {
 	sm.subsMu.Lock()
 	streams := make([]string, 0, len(sm.subscriptions))
 	for stream := range sm.subscriptions {
