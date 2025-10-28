@@ -42,7 +42,6 @@ type activeOrder struct {
 	filled     float64
 	notional   float64
 	priceTick  priceTick
-	createdAt  time.Time
 	updatedAt  time.Time
 }
 
@@ -57,13 +56,6 @@ func (o *activeOrder) recordFill(qty, price float64, ts time.Time) {
 	o.filled += qty
 	o.notional += qty * price
 	o.updatedAt = ts
-}
-
-func (o *activeOrder) avgFillPrice() float64 {
-	if o == nil || o.filled <= floatTolerance {
-		return o.price
-	}
-	return o.notional / o.filled
 }
 
 type orderFill struct {

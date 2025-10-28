@@ -1,3 +1,4 @@
+// Package binance wires the Binance provider into the adapter registry.
 package binance
 
 import (
@@ -18,7 +19,19 @@ func RegisterFactory(reg *provider.Registry) {
 		}
 
 		opts := Options{
-			Pools: pools,
+			Name:                      "",
+			Venue:                     "",
+			APIBaseURL:                "",
+			WebsocketBaseURL:          "",
+			Symbols:                   nil,
+			SnapshotDepth:             0,
+			InstrumentRefreshInterval: 0,
+			Pools:                     pools,
+			HTTPTimeout:               0,
+			APIKey:                    "",
+			APISecret:                 "",
+			RecvWindow:                0,
+			UserStreamKeepAlive:       0,
 		}
 
 		if raw, ok := stringFromConfig(cfg, "name"); ok {

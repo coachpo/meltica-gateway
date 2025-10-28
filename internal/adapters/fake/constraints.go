@@ -1,3 +1,4 @@
+// Package fake provides helper constraints for the synthetic adapter.
 package fake
 
 import (
@@ -56,14 +57,6 @@ func (c instrumentConstraints) priceForTick(t priceTick) float64 {
 	return float64(t) * c.priceIncrement
 }
 
-func (c instrumentConstraints) normalizePrice(price float64) float64 {
-	if c.priceIncrement <= 0 {
-		return price
-	}
-	ticks := math.Round(price / c.priceIncrement)
-	return ticks * c.priceIncrement
-}
-
 func (c instrumentConstraints) normalizeQuantity(qty float64) float64 {
 	if c.quantityIncrement <= 0 {
 		return qty
@@ -72,39 +65,11 @@ func (c instrumentConstraints) normalizeQuantity(qty float64) float64 {
 	return steps * c.quantityIncrement
 }
 
-func (c instrumentConstraints) validQuantity(qty float64) bool {
-	if qty <= 0 {
-		return false
-	}
-	if c.minQuantity > 0 && qty+floatTolerance < c.minQuantity {
-		return false
-	}
-	if c.maxQuantity > 0 && qty > c.maxQuantity+floatTolerance {
-		return false
-	}
-	return true
-}
-
-func (c instrumentConstraints) enforceNotional(price, qty float64) bool {
-	if c.minNotional <= 0 {
-		return true
-	}
-	return price*qty+floatTolerance >= c.minNotional
-}
-
 func formatWithPrecision(value float64, precision int) string {
 	if precision < 0 {
 		precision = 0
 	}
 	return strconv.FormatFloat(value, 'f', precision, 64)
-}
-
-func formatPrice(price float64, cons instrumentConstraints) string {
-	precision := cons.pricePrecision
-	if precision <= 0 {
-		precision = 2
-	}
-	return formatWithPrecision(price, precision)
 }
 
 func parseFloat(raw string, fallback float64) float64 {

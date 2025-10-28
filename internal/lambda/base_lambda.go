@@ -129,6 +129,7 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 		askPrice:       atomic.Value{},
 		tradingActive:  atomic.Bool{},
 		orderCount:     atomic.Int64{},
+		dryRun:         atomic.Bool{},
 	}
 
 	if base, quote, err := schema.InstrumentCurrencies(config.Symbol); err == nil {
@@ -614,6 +615,7 @@ func (l *BaseLambda) Config() Config {
 	copyCfg := Config{
 		Symbol:    l.config.Symbol,
 		Providers: make([]string, len(l.config.Providers)),
+		DryRun:    l.config.DryRun,
 	}
 	copy(copyCfg.Providers, l.config.Providers)
 	return copyCfg

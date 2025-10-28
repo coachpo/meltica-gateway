@@ -77,12 +77,14 @@ func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("request exchangeInfo: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return nil, nil, fmt.Errorf("exchangeInfo unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	payload := exchangeInfoResponse{}
+	var payload exchangeInfoResponse
 	decoder := json.NewDecoder(resp.Body)
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, nil, fmt.Errorf("decode exchangeInfo: %w", err)
@@ -132,11 +134,19 @@ func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, s
 		BaseCurrency:      strings.ToUpper(strings.TrimSpace(sym.BaseAsset)),
 		QuoteCurrency:     strings.ToUpper(strings.TrimSpace(sym.QuoteAsset)),
 		Venue:             p.opts.Venue,
+		Expiry:            "",
+		ContractValue:     nil,
+		ContractCurrency:  "",
+		Strike:            nil,
+		OptionType:        "",
 		PriceIncrement:    "",
 		QuantityIncrement: "",
+		PricePrecision:    nil,
+		QuantityPrecision: nil,
+		NotionalPrecision: nil,
+		MinNotional:       "",
 		MinQuantity:       "",
 		MaxQuantity:       "",
-		MinNotional:       "",
 	}
 	if sym.QuoteAssetPrecision > 0 {
 		inst.PricePrecision = ptr(sym.QuoteAssetPrecision)
@@ -176,8 +186,8 @@ func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, s
 	meta := symbolMeta{
 		canonical: canonical,
 		rest:      strings.ToUpper(strings.TrimSpace(sym.Symbol)),
+		stream:    strings.ToLower(strings.TrimSpace(sym.Symbol)),
 	}
-	meta.stream = strings.ToLower(meta.rest)
 
 	return inst, meta, nil
 }
@@ -195,12 +205,14 @@ func (p *Provider) fetchDepthSnapshot(ctx context.Context, symbol string) (depth
 	if err != nil {
 		return depthSnapshotResponse{}, fmt.Errorf("request depth snapshot: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return depthSnapshotResponse{}, fmt.Errorf("depth snapshot status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	snapshot := depthSnapshotResponse{}
+	var snapshot depthSnapshotResponse
 	decoder := json.NewDecoder(resp.Body)
 	if err := decoder.Decode(&snapshot); err != nil {
 		return depthSnapshotResponse{}, fmt.Errorf("decode depth snapshot: %w", err)
@@ -224,7 +236,9 @@ func (p *Provider) createListenKey(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("request listen key: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return "", fmt.Errorf("listen key status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -258,7 +272,9 @@ func (p *Provider) keepAliveListenKey(ctx context.Context, listenKey string) err
 	if err != nil {
 		return fmt.Errorf("keepalive listen key: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return fmt.Errorf("listen key keepalive status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -293,7 +309,9 @@ func (p *Provider) fetchAccountBalances(ctx context.Context) ([]accountBalance, 
 	if err != nil {
 		return nil, fmt.Errorf("request account: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return nil, fmt.Errorf("account status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))

@@ -139,16 +139,33 @@ func (h *bookHandle) currentSeq() uint64 {
 func NewProvider(opts Options) *Provider {
 	opts = withDefaults(opts)
 	p := &Provider{
-		name:        opts.Name,
-		opts:        opts,
-		pools:       opts.Pools,
-		clock:       time.Now,
-		events:      make(chan *schema.Event, 2048),
-		errs:        make(chan error, 32),
-		instruments: make(map[string]schema.Instrument),
-		symbols:     make(map[string]symbolMeta),
-		restToCanon: make(map[string]string),
-		bookHandles: make(map[string]*bookHandle),
+		name:             opts.Name,
+		opts:             opts,
+		pools:            opts.Pools,
+		clock:            time.Now,
+		client:           nil,
+		events:           make(chan *schema.Event, 2048),
+		errs:             make(chan error, 32),
+		ctx:              nil,
+		cancel:           nil,
+		started:          atomic.Bool{},
+		publisher:        nil,
+		instrumentsMu:    sync.RWMutex{},
+		instruments:      make(map[string]schema.Instrument),
+		symbols:          make(map[string]symbolMeta),
+		restToCanon:      make(map[string]string),
+		tradeMu:          sync.Mutex{},
+		tradeManager:     nil,
+		tickerMu:         sync.Mutex{},
+		tickerManager:    nil,
+		bookMu:           sync.Mutex{},
+		bookManager:      nil,
+		bookHandles:      make(map[string]*bookHandle),
+		userStreamMu:     sync.Mutex{},
+		userStreamCancel: nil,
+		userStreamWG:     sync.WaitGroup{},
+		balanceMu:        sync.Mutex{},
+		balances:         make(map[string]balanceSnapshot),
 	}
 	if p.pools == nil {
 		pm := pool.NewPoolManager()
@@ -257,6 +274,12 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 		return p.configureTickerStreams(instruments)
 	case schema.RouteTypeOrderbookSnapshot:
 		return p.configureOrderBookStreams(instruments)
+	case schema.RouteTypeAccountBalance,
+		schema.RouteTypeExecutionReport,
+		schema.RouteTypeKlineSummary,
+		schema.RouteTypeInstrumentUpdate,
+		schema.RouteTypeRiskControl:
+		return nil
 	default:
 		// Unsupported routes are acknowledged but inert.
 		return nil
@@ -276,6 +299,12 @@ func (p *Provider) UnsubscribeRoute(route dispatcher.Route) error {
 		return p.unsubscribeTickerStreams(instruments)
 	case schema.RouteTypeOrderbookSnapshot:
 		return p.unsubscribeOrderBookStreams(instruments)
+	case schema.RouteTypeAccountBalance,
+		schema.RouteTypeExecutionReport,
+		schema.RouteTypeKlineSummary,
+		schema.RouteTypeInstrumentUpdate,
+		schema.RouteTypeRiskControl:
+		return nil
 	default:
 		return nil
 	}
@@ -290,7 +319,13 @@ func (p *Provider) ensureRunning() error {
 
 func (p *Provider) httpClient() *http.Client {
 	if p.client == nil {
-		p.client = &http.Client{Timeout: p.opts.HTTPTimeout}
+		client := &http.Client{
+			Transport:     nil,
+			CheckRedirect: nil,
+			Jar:           nil,
+			Timeout:       p.opts.HTTPTimeout,
+		}
+		p.client = client
 	}
 	return p.client
 }
@@ -495,9 +530,16 @@ func (p *Provider) configureOrderBookStreams(instruments []string) error {
 
 		// Create book handle if not exists
 		if _, exists := p.bookHandles[meta.canonical]; !exists {
-			p.bookHandles[meta.canonical] = &bookHandle{
+			handle := &bookHandle{
 				assembler: shared.NewOrderBookAssembler(p.opts.SnapshotDepth),
+				seqMu:     sync.Mutex{},
+				lastSeq:   0,
+				seeded:    atomic.Bool{},
+				seeding:   atomic.Bool{},
+				bufferMu:  sync.Mutex{},
+				buffer:    nil,
 			}
+			p.bookHandles[meta.canonical] = handle
 		}
 
 		streams = append(streams, meta.stream+"@depth@100ms")
@@ -608,6 +650,12 @@ func (p *Provider) initStreamManagers(ctx context.Context) error {
 		if !exists {
 			handle = &bookHandle{
 				assembler: shared.NewOrderBookAssembler(p.opts.SnapshotDepth),
+				seqMu:     sync.Mutex{},
+				lastSeq:   0,
+				seeded:    atomic.Bool{},
+				seeding:   atomic.Bool{},
+				bufferMu:  sync.Mutex{},
+				buffer:    nil,
 			}
 			p.bookHandles[meta.canonical] = handle
 		}
@@ -867,7 +915,7 @@ func (p *Provider) handleExecutionReport(event executionReportEvent) {
 	if event.CommissionAsset != nil {
 		commissionAsset = strings.TrimSpace(*event.CommissionAsset)
 	}
-	payload := schema.ExecReportPayload{
+	payload := &schema.ExecReportPayload{
 		ClientOrderID:    clientOrderID,
 		ExchangeOrderID:  strconv.FormatInt(event.OrderID, 10),
 		State:            binanceStatusToExecState(event.OrderStatus),
@@ -878,11 +926,12 @@ func (p *Provider) handleExecutionReport(event executionReportEvent) {
 		FilledQuantity:   filled,
 		RemainingQty:     remaining,
 		AvgFillPrice:     avgFill,
-		Timestamp:        timestamp,
 		CommissionAmount: strings.TrimSpace(event.Commission),
 		CommissionAsset:  commissionAsset,
+		Timestamp:        timestamp,
+		RejectReason:     nil,
 	}
-	p.publisher.PublishExecReport(p.ctx, meta.canonical, payload)
+	p.publisher.PublishExecReport(p.ctx, meta.canonical, *payload)
 }
 
 func (p *Provider) publishBalance(asset string, free, locked decimal.Decimal, timestamp time.Time) {
@@ -903,13 +952,15 @@ func (p *Provider) publishBalance(asset string, free, locked decimal.Decimal, ti
 func (p *Provider) metaForRESTSymbol(symbol string) (symbolMeta, bool) {
 	key := strings.ToUpper(strings.TrimSpace(symbol))
 	if key == "" {
-		return symbolMeta{}, false
+		var empty symbolMeta
+		return empty, false
 	}
 	p.instrumentsMu.RLock()
 	defer p.instrumentsMu.RUnlock()
 	canonical, ok := p.restToCanon[key]
 	if !ok {
-		return symbolMeta{}, false
+		var empty symbolMeta
+		return empty, false
 	}
 	meta, ok := p.symbols[canonical]
 	return meta, ok
@@ -937,44 +988,50 @@ func (p *Provider) publishBalanceSnapshot(ctx context.Context) error {
 }
 
 func (p *Provider) seedOrderBook(ctx context.Context, meta symbolMeta, handle *bookHandle) (schema.BookSnapshotPayload, error) {
+	var empty schema.BookSnapshotPayload
 	for {
 		if ctx == nil {
 			ctx = p.ctx
 		}
 		if ctx == nil {
-			return schema.BookSnapshotPayload{}, errors.New("binance: missing context for seeding orderbook")
+			return empty, errors.New("binance: missing context for seeding orderbook")
 		}
 
 		snapshotCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
 		snapshot, err := p.fetchDepthSnapshot(snapshotCtx, meta.rest)
 		cancel()
 		if err != nil {
-			return schema.BookSnapshotPayload{}, err
+			return empty, err
 		}
+		if snapshot.LastUpdateID < 0 {
+			continue
+		}
+		seq := uint64(snapshot.LastUpdateID)
 
 		firstBuffered := handle.firstBufferedUpdateID()
-		if firstBuffered != 0 && uint64(snapshot.LastUpdateID) < firstBuffered {
+		if firstBuffered != 0 && seq < firstBuffered {
 			continue
 		}
 
 		now := time.Now().UTC()
-		payload := schema.BookSnapshotPayload{
+		payload := &schema.BookSnapshotPayload{
 			Bids:          levelsToPriceLevels(snapshot.Bids),
 			Asks:          levelsToPriceLevels(snapshot.Asks),
+			Checksum:      "",
 			LastUpdate:    now,
-			FirstUpdateID: uint64(snapshot.LastUpdateID),
-			FinalUpdateID: uint64(snapshot.LastUpdateID),
+			FirstUpdateID: seq,
+			FinalUpdateID: seq,
 		}
 
-		if _, err := handle.assembler.ApplySnapshot(uint64(snapshot.LastUpdateID), payload); err != nil {
-			return schema.BookSnapshotPayload{}, err
+		if _, err := handle.assembler.ApplySnapshot(seq, *payload); err != nil {
+			return empty, fmt.Errorf("apply snapshot: %w", err)
 		}
 		handle.seqMu.Lock()
-		handle.lastSeq = uint64(snapshot.LastUpdateID)
+		handle.lastSeq = seq
 		handle.seqMu.Unlock()
 
-		p.publisher.PublishBookSnapshot(p.ctx, meta.canonical, payload)
-		return payload, nil
+		p.publisher.PublishBookSnapshot(p.ctx, meta.canonical, *payload)
+		return *payload, nil
 	}
 }
 
@@ -1076,7 +1133,7 @@ func (p *Provider) applyDepthDiff(meta symbolMeta, handle *bookHandle, diff dept
 	}
 	snapshot, applied, err := handle.assembler.ApplyDiff(update)
 	if err != nil {
-		return err
+		return fmt.Errorf("apply diff: %w", err)
 	}
 	if !applied {
 		return nil
@@ -1150,7 +1207,9 @@ func (p *Provider) submitOrder(ctx context.Context, meta symbolMeta, req schema.
 	if err != nil {
 		return fmt.Errorf("submit order: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read order response: %w", err)
@@ -1180,7 +1239,7 @@ func (p *Provider) publishOrderAcknowledgement(meta symbolMeta, req schema.Order
 	if clientOrderID == "" {
 		clientOrderID = strings.TrimSpace(order.ClientOrderID)
 	}
-	payload := schema.ExecReportPayload{
+	payload := &schema.ExecReportPayload{
 		ClientOrderID:    clientOrderID,
 		ExchangeOrderID:  strconv.FormatInt(order.OrderID, 10),
 		State:            binanceStatusToExecState(order.Status),
@@ -1191,11 +1250,12 @@ func (p *Provider) publishOrderAcknowledgement(meta symbolMeta, req schema.Order
 		FilledQuantity:   filled,
 		RemainingQty:     remaining,
 		AvgFillPrice:     avgPrice,
-		Timestamp:        timestamp,
 		CommissionAmount: "",
 		CommissionAsset:  "",
+		Timestamp:        timestamp,
+		RejectReason:     nil,
 	}
-	p.publisher.PublishExecReport(p.ctx, meta.canonical, payload)
+	p.publisher.PublishExecReport(p.ctx, meta.canonical, *payload)
 }
 
 func parseOrderError(status int, body []byte) error {

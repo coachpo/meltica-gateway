@@ -222,10 +222,7 @@ func (m *Manager) registerDefaults() {
 				return nil, fmt.Errorf("delay: max_delay must be greater than or equal to min_delay")
 			}
 
-			return &strategies.Delay{
-				MinDelay: minDelay,
-				MaxDelay: maxDelay,
-			}, nil
+			return &strategies.Delay{MinDelay: minDelay, MaxDelay: maxDelay}, nil
 		},
 	})
 
@@ -244,10 +241,10 @@ func (m *Manager) registerDefaults() {
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.Logging{
+			return &strategies.Logging{
+				Logger:       nil,
 				LoggerPrefix: stringValue(cfg, "logger_prefix", "[Logging] "),
-			}
-			return strat, nil
+			}, nil
 		},
 	})
 
@@ -265,19 +262,14 @@ func (m *Manager) registerDefaults() {
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.Momentum{
+			return &strategies.Momentum{
 				Lambda:            nil,
-				LookbackPeriod:    0,
-				MomentumThreshold: 0,
-				OrderSize:         "",
-				Cooldown:          0,
-			}
-			strat.LookbackPeriod = intValue(cfg, "lookback_period", 20)
-			strat.MomentumThreshold = floatValue(cfg, "momentum_threshold", 0.5)
-			strat.OrderSize = stringValue(cfg, "order_size", "1")
-			strat.Cooldown = durationValue(cfg, "cooldown", 5*time.Second)
-			strat.DryRun = boolValue(cfg, "dry_run", true)
-			return strat, nil
+				LookbackPeriod:    intValue(cfg, "lookback_period", 20),
+				MomentumThreshold: floatValue(cfg, "momentum_threshold", 0.5),
+				OrderSize:         stringValue(cfg, "order_size", "1"),
+				Cooldown:          durationValue(cfg, "cooldown", 5*time.Second),
+				DryRun:            boolValue(cfg, "dry_run", true),
+			}, nil
 		},
 	})
 
@@ -294,17 +286,13 @@ func (m *Manager) registerDefaults() {
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.MeanReversion{
+			return &strategies.MeanReversion{
 				Lambda:             nil,
-				WindowSize:         0,
-				DeviationThreshold: 0,
-				OrderSize:          "",
-			}
-			strat.WindowSize = intValue(cfg, "window_size", 20)
-			strat.DeviationThreshold = floatValue(cfg, "deviation_threshold", 0.5)
-			strat.OrderSize = stringValue(cfg, "order_size", "1")
-			strat.DryRun = boolValue(cfg, "dry_run", true)
-			return strat, nil
+				WindowSize:         intValue(cfg, "window_size", 20),
+				DeviationThreshold: floatValue(cfg, "deviation_threshold", 0.5),
+				OrderSize:          stringValue(cfg, "order_size", "1"),
+				DryRun:             boolValue(cfg, "dry_run", true),
+			}, nil
 		},
 	})
 
@@ -322,19 +310,14 @@ func (m *Manager) registerDefaults() {
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.Grid{
+			return &strategies.Grid{
 				Lambda:      nil,
-				GridLevels:  0,
-				GridSpacing: 0,
-				OrderSize:   "",
-				BasePrice:   0,
-			}
-			strat.GridLevels = intValue(cfg, "grid_levels", 3)
-			strat.GridSpacing = floatValue(cfg, "grid_spacing", 0.5)
-			strat.OrderSize = stringValue(cfg, "order_size", "1")
-			strat.BasePrice = floatValue(cfg, "base_price", 0)
-			strat.DryRun = boolValue(cfg, "dry_run", true)
-			return strat, nil
+				GridLevels:  intValue(cfg, "grid_levels", 3),
+				GridSpacing: floatValue(cfg, "grid_spacing", 0.5),
+				OrderSize:   stringValue(cfg, "order_size", "1"),
+				BasePrice:   floatValue(cfg, "base_price", 0),
+				DryRun:      boolValue(cfg, "dry_run", true),
+			}, nil
 		},
 	})
 
@@ -351,22 +334,18 @@ func (m *Manager) registerDefaults() {
 			Events: []schema.EventType{},
 		},
 		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
-			strat := &strategies.MarketMaking{
-				Lambda:        nil,
-				SpreadBps:     0,
-				OrderSize:     "",
-				MaxOpenOrders: 0,
-			}
-			strat.SpreadBps = floatValue(cfg, "spread_bps", 25)
-			strat.OrderSize = stringValue(cfg, "order_size", "1")
 			maxOrders := intValue(cfg, "max_open_orders", 2)
 			if maxOrders > int(^uint32(0)>>1) {
 				maxOrders = int(^uint32(0) >> 1)
 			}
 			// #nosec G115 - bounds checked above
-			strat.MaxOpenOrders = int32(maxOrders)
-			strat.DryRun = boolValue(cfg, "dry_run", true)
-			return strat, nil
+			return &strategies.MarketMaking{
+				Lambda:        nil,
+				SpreadBps:     floatValue(cfg, "spread_bps", 25),
+				OrderSize:     stringValue(cfg, "order_size", "1"),
+				MaxOpenOrders: int32(maxOrders),
+				DryRun:        boolValue(cfg, "dry_run", true),
+			}, nil
 		},
 	})
 }

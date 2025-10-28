@@ -57,10 +57,15 @@ func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) 
 		baseURL:       baseURL,
 		ctx:           managerCtx,
 		cancel:        cancel,
+		conn:          nil,
+		connMu:        sync.RWMutex{},
+		msgIDGen:      atomic.Uint64{},
 		subscriptions: make(map[string]struct{}),
+		subsMu:        sync.Mutex{},
 		handler:       handler,
 		errorChan:     errorChan,
 		ready:         make(chan struct{}),
+		readyOnce:     sync.Once{},
 	}
 }
 
@@ -79,7 +84,7 @@ func (sm *streamManager) start() error {
 	case <-time.After(10 * time.Second):
 		return errors.New("timeout waiting for websocket connection")
 	case <-sm.ctx.Done():
-		return sm.ctx.Err()
+		return fmt.Errorf("stream manager context done: %w", sm.ctx.Err())
 	}
 }
 

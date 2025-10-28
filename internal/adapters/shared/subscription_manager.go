@@ -27,10 +27,11 @@ type SubscriptionManager struct {
 
 // NewSubscriptionManager creates a new manager instance.
 func NewSubscriptionManager(subscriber RouteSubscriber) *SubscriptionManager {
-	manager := new(SubscriptionManager)
-	manager.active = make(map[routeKey]dispatcher.Route)
-	manager.subscriber = subscriber
-	return manager
+	return &SubscriptionManager{
+		mu:         sync.Mutex{},
+		active:     make(map[routeKey]dispatcher.Route),
+		subscriber: subscriber,
+	}
 }
 
 // Activate registers the given route and notifies the provider.
@@ -138,15 +139,17 @@ func sameNonFilterConfig(a, b dispatcher.Route) bool {
 
 func buildDeltaRoute(base dispatcher.Route, filters []dispatcher.FilterRule) dispatcher.Route {
 	if len(filters) == 0 {
-		return dispatcher.Route{}
+		var empty dispatcher.Route
+		return empty
 	}
-	return dispatcher.Route{
+	route := &dispatcher.Route{
 		Provider: base.Provider,
 		Type:     base.Type,
 		WSTopics: base.WSTopics,
 		RestFns:  base.RestFns,
 		Filters:  filters,
 	}
+	return *route
 }
 
 func mergeRouteState(existing, updated dispatcher.Route) dispatcher.Route {
@@ -243,7 +246,8 @@ func diffFilters(target, reference []dispatcher.FilterRule) []dispatcher.FilterR
 			list = append(list, value)
 		}
 		sort.Strings(list)
-		rule := dispatcher.FilterRule{Field: acc.field}
+		var rule dispatcher.FilterRule
+		rule.Field = acc.field
 		if len(list) == 1 {
 			rule.Op = "eq"
 			rule.Value = list[0]

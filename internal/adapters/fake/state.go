@@ -29,14 +29,18 @@ func newSymbolMarketState(symbol string, basePrice float64, cons instrumentConst
 		levels = defaultBookLevels
 	}
 	return &symbolMarketState{
-		symbol:      symbol,
-		basePrice:   basePrice,
-		lastPrice:   basePrice,
-		constraints: cons,
-		bookLevels:  levels,
-		bids:        make(map[priceTick]*bookDepth),
-		asks:        make(map[priceTick]*bookDepth),
-		orderIndex:  make(map[string]*activeOrder),
+		mu:           sync.Mutex{},
+		symbol:       symbol,
+		basePrice:    basePrice,
+		lastPrice:    basePrice,
+		volume24h:    0,
+		constraints:  cons,
+		bookLevels:   levels,
+		bids:         make(map[priceTick]*bookDepth),
+		asks:         make(map[priceTick]*bookDepth),
+		currentKline: nil,
+		completed:    nil,
+		orderIndex:   make(map[string]*activeOrder),
 	}
 }
 
@@ -50,7 +54,7 @@ func (s *symbolMarketState) restOrder(order *activeOrder) {
 	}
 	depth, ok := depthMap[order.priceTick]
 	if !ok {
-		depth = &bookDepth{}
+		depth = &bookDepth{synthetic: 0, orders: nil}
 		depthMap[order.priceTick] = depth
 	}
 	depth.orders = append(depth.orders, order)
@@ -118,30 +122,6 @@ func (s *symbolMarketState) consumeLiquidity(side schema.TradeSide, quantity flo
 	}
 	avg := notional / filled
 	return avg, fills, filled
-}
-
-func (s *symbolMarketState) bestBid() (float64, bool) {
-	return bestPrice(s.bids, false, s.constraints)
-}
-
-func (s *symbolMarketState) bestAsk() (float64, bool) {
-	return bestPrice(s.asks, true, s.constraints)
-}
-
-func bestPrice(levels map[priceTick]*bookDepth, ascending bool, cons instrumentConstraints) (float64, bool) {
-	ticks := orderedTicks(levels, ascending)
-	for _, tick := range ticks {
-		depth := levels[tick]
-		if depth == nil {
-			continue
-		}
-		qty := userQuantity(depth.orders)
-		if qty <= floatTolerance {
-			continue
-		}
-		return cons.priceForTick(tick), true
-	}
-	return 0, false
 }
 
 func orderedTicks(levels map[priceTick]*bookDepth, ascending bool) []priceTick {
@@ -218,6 +198,7 @@ func newKlineWindow(start time.Time, interval time.Duration, price float64) *kli
 		high:      price,
 		low:       price,
 		close:     price,
+		volume:    0,
 	}
 }
 

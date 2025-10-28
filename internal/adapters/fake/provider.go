@@ -56,19 +56,26 @@ func NewProvider(opts Options) *Provider {
 	errs := make(chan error, 8)
 
 	p := &Provider{
-		name:          name,
-		opts:          opts,
-		pools:         opts.Pools,
-		clock:         time.Now,
-		events:        events,
-		errs:          errs,
-		instruments:   make(map[string]schema.Instrument),
-		states:        make(map[string]*symbolMarketState),
-		subscriptions: make(map[schema.RouteType]map[string]struct{}),
+		name:            name,
+		opts:            opts,
+		pools:           opts.Pools,
+		clock:           time.Now,
+		events:          events,
+		errs:            errs,
+		ctx:             nil,
+		cancel:          nil,
+		started:         atomic.Bool{},
+		publisher:       nil,
+		instrumentsMu:   sync.RWMutex{},
+		instruments:     make(map[string]schema.Instrument),
+		states:          make(map[string]*symbolMarketState),
+		subscriptionsMu: sync.Mutex{},
+		subscriptions:   make(map[schema.RouteType]map[string]struct{}),
+		orderSeq:        atomic.Uint64{},
 	}
 	if p.pools == nil {
 		pm := pool.NewPoolManager()
-		_ = pm.RegisterPool("Event", 256, func() any { return &schema.Event{} })
+		_ = pm.RegisterPool("Event", 256, func() any { return new(schema.Event) })
 		p.pools = pm
 	}
 	p.publisher = shared.NewPublisher(p.name, p.events, p.pools, p.clock)

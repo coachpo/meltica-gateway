@@ -72,6 +72,7 @@ func main() {
 			GridSpacing: *gridSpacing,
 			OrderSize:   *gridOrderSize,
 			BasePrice:   0,
+			DryRun:      true,
 		}
 		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{Symbol: "", Providers: []string{"backtest"}, DryRun: true}, nil, nil, nil, gridStrategy, nil)
 		gridStrategy.Lambda = &orderStrategyAdapter{base: baseLambda}
