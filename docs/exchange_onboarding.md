@@ -3,6 +3,10 @@
 ## Overview
 This guide distills the fake provider workflow into practical steps for integrating real exchanges. It covers provider responsibilities, event emission patterns, and how to hydrate order books from snapshot plus diff streams.
 
+## WebSocket Stream Management (MANDATORY)
+
+All exchange adapters **MUST** implement WebSocket stream management using the **Live Subscribing/Unsubscribing** pattern. This approach uses a single WebSocket connection per stream type and manages subscriptions dynamically via the exchange's native subscribe/unsubscribe API.
+
 ## Provider Responsibilities
 - Implement the provider interface with `Start(ctx)` guarding lifecycle and exposing `Events()`/`Errors()` channels backed by pooled `schema.Event` objects.
 - Seed an instrument catalogue on startup and protect access with `sync.RWMutex`; normalize symbols using existing helpers.

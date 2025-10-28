@@ -51,14 +51,15 @@ type Provider struct {
 	symbols       map[string]symbolMeta // canonical symbol -> meta
 	restToCanon   map[string]string     // REST symbol -> canonical
 
-	tradeMu   sync.Mutex
-	tradeSubs map[string]*streamHandle
+	tradeMu      sync.Mutex
+	tradeManager *streamManager
 
-	tickerMu   sync.Mutex
-	tickerSubs map[string]*streamHandle
+	tickerMu      sync.Mutex
+	tickerManager *streamManager
 
-	bookMu   sync.Mutex
-	bookSubs map[string]*bookHandle
+	bookMu      sync.Mutex
+	bookManager *streamManager
+	bookHandles map[string]*bookHandle
 
 	userStreamMu     sync.Mutex
 	userStreamCancel context.CancelFunc
@@ -68,15 +69,11 @@ type Provider struct {
 	balances  map[string]balanceSnapshot
 }
 
-type streamHandle struct {
-	cancel context.CancelFunc
-}
-
 type bookHandle struct {
-	cancel    context.CancelFunc
 	assembler *shared.OrderBookAssembler
 	seqMu     sync.Mutex
 	lastSeq   uint64
+	seeded    atomic.Bool
 }
 
 var errOrderbookOutOfSync = errors.New("orderbook out of sync")
@@ -94,9 +91,7 @@ func NewProvider(opts Options) *Provider {
 		instruments: make(map[string]schema.Instrument),
 		symbols:     make(map[string]symbolMeta),
 		restToCanon: make(map[string]string),
-		tradeSubs:   make(map[string]*streamHandle),
-		tickerSubs:  make(map[string]*streamHandle),
-		bookSubs:    make(map[string]*bookHandle),
+		bookHandles: make(map[string]*bookHandle),
 	}
 	if p.pools == nil {
 		pm := pool.NewPoolManager()
@@ -136,6 +131,13 @@ func (p *Provider) Start(ctx context.Context) error {
 	}
 
 	go p.instrumentRefreshLoop()
+
+	// Initialize stream managers for live subscribe/unsubscribe
+	if err := p.initStreamManagers(runCtx); err != nil {
+		p.started.Store(false)
+		cancel()
+		return fmt.Errorf("init stream managers: %w", err)
+	}
 
 	if p.hasTradingCredentials() {
 		p.startUserDataStream()
@@ -206,15 +208,12 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 
 // UnsubscribeRoute tears down streaming for the provided route type.
 func (p *Provider) UnsubscribeRoute(routeType schema.RouteType) error {
-	switch routeType {
-	case schema.RouteTypeTrade:
-		p.stopTradeStreams()
-	case schema.RouteTypeTicker:
-		p.stopTickerStreams()
-	case schema.RouteTypeOrderbookSnapshot:
-		p.stopOrderBookStreams()
-	default:
-	}
+	// Note: This is intentionally a no-op. Unsubscribing at the route type level
+	// would cancel all streams of that type across all instruments, which breaks
+	// multi-lambda scenarios where lambdas share providers but track different instruments.
+	// The registrar handles route updates by calling SubscribeRoute with merged filters,
+	// so we only need to add new streams, not remove existing ones.
+	// Cleanup happens naturally when the provider shuts down.
 	return nil
 }
 
@@ -321,17 +320,23 @@ func (p *Provider) metaForInstrument(symbol string) (symbolMeta, bool) {
 func (p *Provider) configureTradeStreams(instruments []string) error {
 	p.tradeMu.Lock()
 	defer p.tradeMu.Unlock()
-	p.stopTradeLocked()
+
+	if p.tradeManager == nil {
+		return errors.New("trade stream manager not initialized")
+	}
+
+	streams := make([]string, 0, len(instruments))
 	for _, inst := range instruments {
 		meta, ok := p.metaForInstrument(inst)
 		if !ok {
 			p.reportError(fmt.Errorf("trade stream instrument not found: %s", inst))
 			continue
 		}
-		ctx, cancel := context.WithCancel(p.ctx)
-		handle := &streamHandle{cancel: cancel}
-		p.tradeSubs[inst] = handle
-		go p.runTradeStream(ctx, meta)
+		streams = append(streams, meta.stream+"@trade")
+	}
+
+	if len(streams) > 0 {
+		return p.tradeManager.subscribe(streams)
 	}
 	return nil
 }
@@ -339,17 +344,23 @@ func (p *Provider) configureTradeStreams(instruments []string) error {
 func (p *Provider) configureTickerStreams(instruments []string) error {
 	p.tickerMu.Lock()
 	defer p.tickerMu.Unlock()
-	p.stopTickerLocked()
+
+	if p.tickerManager == nil {
+		return errors.New("ticker stream manager not initialized")
+	}
+
+	streams := make([]string, 0, len(instruments))
 	for _, inst := range instruments {
 		meta, ok := p.metaForInstrument(inst)
 		if !ok {
 			p.reportError(fmt.Errorf("ticker stream instrument not found: %s", inst))
 			continue
 		}
-		ctx, cancel := context.WithCancel(p.ctx)
-		handle := &streamHandle{cancel: cancel}
-		p.tickerSubs[inst] = handle
-		go p.runTickerStream(ctx, meta)
+		streams = append(streams, meta.stream+"@ticker")
+	}
+
+	if len(streams) > 0 {
+		return p.tickerManager.subscribe(streams)
 	}
 	return nil
 }
@@ -357,74 +368,155 @@ func (p *Provider) configureTickerStreams(instruments []string) error {
 func (p *Provider) configureOrderBookStreams(instruments []string) error {
 	p.bookMu.Lock()
 	defer p.bookMu.Unlock()
-	p.stopOrderBookLocked()
+
+	if p.bookManager == nil {
+		return errors.New("orderbook stream manager not initialized")
+	}
+
+	streams := make([]string, 0, len(instruments))
 	for _, inst := range instruments {
 		meta, ok := p.metaForInstrument(inst)
 		if !ok {
 			p.reportError(fmt.Errorf("orderbook stream instrument not found: %s", inst))
 			continue
 		}
-		ctx, cancel := context.WithCancel(p.ctx)
-		handle := &bookHandle{
-			cancel:    cancel,
-			assembler: shared.NewOrderBookAssembler(p.opts.SnapshotDepth),
+
+		// Create book handle if not exists
+		if _, exists := p.bookHandles[inst]; !exists {
+			p.bookHandles[inst] = &bookHandle{
+				assembler: shared.NewOrderBookAssembler(p.opts.SnapshotDepth),
+			}
 		}
-		p.bookSubs[inst] = handle
-		go p.runOrderBookStream(ctx, meta, handle)
+
+		streams = append(streams, meta.stream+"@depth@100ms")
+	}
+
+	if len(streams) > 0 {
+		return p.bookManager.subscribe(streams)
 	}
 	return nil
 }
 
-func (p *Provider) stopTradeStreams() {
-	p.tradeMu.Lock()
-	defer p.tradeMu.Unlock()
-	p.stopTradeLocked()
-}
-
-func (p *Provider) stopTradeLocked() {
-	for key, handle := range p.tradeSubs {
-		if handle != nil && handle.cancel != nil {
-			handle.cancel()
-		}
-		delete(p.tradeSubs, key)
-	}
-}
-
-func (p *Provider) stopTickerStreams() {
-	p.tickerMu.Lock()
-	defer p.tickerMu.Unlock()
-	p.stopTickerLocked()
-}
-
-func (p *Provider) stopTickerLocked() {
-	for key, handle := range p.tickerSubs {
-		if handle != nil && handle.cancel != nil {
-			handle.cancel()
-		}
-		delete(p.tickerSubs, key)
-	}
-}
-
-func (p *Provider) stopOrderBookStreams() {
-	p.bookMu.Lock()
-	defer p.bookMu.Unlock()
-	p.stopOrderBookLocked()
-}
-
-func (p *Provider) stopOrderBookLocked() {
-	for key, handle := range p.bookSubs {
-		if handle != nil && handle.cancel != nil {
-			handle.cancel()
-		}
-		delete(p.bookSubs, key)
-	}
-}
-
 func (p *Provider) stopAllStreams() {
-	p.stopTradeStreams()
-	p.stopTickerStreams()
-	p.stopOrderBookStreams()
+	if p.tradeManager != nil {
+		p.tradeManager.stop()
+	}
+	if p.tickerManager != nil {
+		p.tickerManager.stop()
+	}
+	if p.bookManager != nil {
+		p.bookManager.stop()
+	}
 	p.stopUserDataStream()
+}
+
+func (p *Provider) initStreamManagers(ctx context.Context) error {
+	baseURL := strings.TrimSuffix(p.opts.WebsocketBaseURL, "/") + "/ws"
+
+	// Trade stream handler
+	tradeHandler := func(data []byte) error {
+		var event tradeMessage
+		if err := json.Unmarshal(data, &event); err != nil {
+			return fmt.Errorf("decode trade message: %w", err)
+		}
+		meta, ok := p.metaForRESTSymbol(event.Symbol)
+		if !ok {
+			return nil // Ignore unknown symbols
+		}
+		payload := schema.TradePayload{
+			TradeID:   fmt.Sprintf("%s-%d", meta.canonical, event.TradeID),
+			Side:      tradeSideFromAggressor(event.IsBuyerMaker),
+			Price:     event.Price,
+			Quantity:  event.Quantity,
+			Timestamp: time.UnixMilli(event.TradeTime.Int64()).UTC(),
+		}
+		p.publisher.PublishTrade(p.ctx, meta.canonical, payload)
+		return nil
+	}
+
+	// Ticker stream handler
+	tickerHandler := func(data []byte) error {
+		var event tickerMessage
+		if err := json.Unmarshal(data, &event); err != nil {
+			return fmt.Errorf("decode ticker message: %w", err)
+		}
+		meta, ok := p.metaForRESTSymbol(event.Symbol)
+		if !ok {
+			return nil // Ignore unknown symbols
+		}
+		payload := schema.TickerPayload{
+			LastPrice: event.LastPrice,
+			BidPrice:  event.BidPrice,
+			AskPrice:  event.AskPrice,
+			Volume24h: event.Volume,
+			Timestamp: time.UnixMilli(event.EventTime.Int64()).UTC(),
+		}
+		p.publisher.PublishTicker(p.ctx, meta.canonical, payload)
+		return nil
+	}
+
+	// Orderbook stream handler
+	bookHandler := func(data []byte) error {
+		var diff depthDiffMessage
+		if err := json.Unmarshal(data, &diff); err != nil {
+			return fmt.Errorf("decode depth message: %w", err)
+		}
+		meta, ok := p.metaForRESTSymbol(diff.Symbol)
+		if !ok {
+			return nil // Ignore unknown symbols
+		}
+
+		p.bookMu.Lock()
+		handle, exists := p.bookHandles[meta.canonical]
+		if !exists {
+			// Create handle for this symbol
+			handle = &bookHandle{
+				assembler: shared.NewOrderBookAssembler(p.opts.SnapshotDepth),
+			}
+			p.bookHandles[meta.canonical] = handle
+			p.bookMu.Unlock()
+
+			// Seed the orderbook in background (fetch REST snapshot)
+			go func() {
+				if err := p.seedOrderBook(p.ctx, meta, handle); err != nil {
+					p.reportError(fmt.Errorf("seed orderbook %s: %w", meta.canonical, err))
+				} else {
+					handle.seeded.Store(true)
+				}
+			}()
+			
+			return nil // Skip this diff, wait for seeding to complete
+		}
+		p.bookMu.Unlock()
+
+		// Skip diffs until orderbook is seeded
+		if !handle.seeded.Load() {
+			return nil
+		}
+
+		if err := p.applyDepthDiff(meta, handle, diff); err != nil {
+			return fmt.Errorf("apply depth diff %s: %w", meta.canonical, err)
+		}
+		return nil
+	}
+
+	// Create stream managers
+	p.tradeManager = newStreamManager(ctx, baseURL, tradeHandler, p.errs)
+	if err := p.tradeManager.start(); err != nil {
+		return fmt.Errorf("start trade manager: %w", err)
+	}
+
+	p.tickerManager = newStreamManager(ctx, baseURL, tickerHandler, p.errs)
+	if err := p.tickerManager.start(); err != nil {
+		return fmt.Errorf("start ticker manager: %w", err)
+	}
+
+	p.bookManager = newStreamManager(ctx, baseURL, bookHandler, p.errs)
+	if err := p.bookManager.start(); err != nil {
+		return fmt.Errorf("start book manager: %w", err)
+	}
+
+	return nil
 }
 
 func (p *Provider) hasTradingCredentials() bool {
@@ -711,125 +803,6 @@ func (p *Provider) publishBalanceSnapshot(ctx context.Context) error {
 	return nil
 }
 
-func (p *Provider) runTradeStream(ctx context.Context, meta symbolMeta) {
-	stream := meta.stream + "@trade"
-	handler := func(msg []byte) error {
-		var event tradeMessage
-		if err := json.Unmarshal(msg, &event); err != nil {
-			return fmt.Errorf("decode trade message: %w", err)
-		}
-		payload := schema.TradePayload{
-			TradeID:   fmt.Sprintf("%s-%d", meta.canonical, event.TradeID),
-			Side:      tradeSideFromAggressor(event.IsBuyerMaker),
-			Price:     event.Price,
-			Quantity:  event.Quantity,
-			Timestamp: time.UnixMilli(event.TradeTime.Int64()).UTC(),
-		}
-		p.publisher.PublishTrade(p.ctx, meta.canonical, payload)
-		return nil
-	}
-	p.consumeStream(ctx, stream, handler)
-}
-
-func (p *Provider) runTickerStream(ctx context.Context, meta symbolMeta) {
-	stream := meta.stream + "@ticker"
-	handler := func(msg []byte) error {
-		var event tickerMessage
-		if err := json.Unmarshal(msg, &event); err != nil {
-			return fmt.Errorf("decode ticker message: %w", err)
-		}
-		payload := schema.TickerPayload{
-			LastPrice: event.LastPrice,
-			BidPrice:  event.BidPrice,
-			AskPrice:  event.AskPrice,
-			Volume24h: event.Volume,
-			Timestamp: time.UnixMilli(event.EventTime.Int64()).UTC(),
-		}
-		p.publisher.PublishTicker(p.ctx, meta.canonical, payload)
-		return nil
-	}
-	p.consumeStream(ctx, stream, handler)
-}
-
-func (p *Provider) runOrderBookStream(ctx context.Context, meta symbolMeta, handle *bookHandle) {
-	backoffCfg := backoff.NewExponentialBackOff()
-	stream := meta.stream + "@depth@100ms"
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		base := strings.TrimSuffix(p.opts.WebsocketBaseURL, "/")
-		url := base + "/" + stream
-		conn, _, err := websocket.Dial(ctx, url, nil)
-		if err != nil {
-			p.reportError(fmt.Errorf("dial %s: %w", url, err))
-			sleep := backoffCfg.NextBackOff()
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(sleep):
-				continue
-			}
-		}
-
-		if err := p.seedOrderBook(ctx, meta, handle); err != nil {
-			p.reportError(fmt.Errorf("seed orderbook %s: %w", meta.canonical, err))
-			_ = conn.Close(websocket.StatusInternalError, "seed error")
-			sleep := backoffCfg.NextBackOff()
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(sleep):
-				continue
-			}
-		}
-
-		backoffCfg.Reset()
-
-		reconnect := false
-		for {
-			msgType, data, err := conn.Read(ctx)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-					p.reportError(fmt.Errorf("read depth %s: %w", url, err))
-				}
-				reconnect = true
-				break
-			}
-			if msgType != websocket.MessageText {
-				continue
-			}
-			var diff depthDiffMessage
-			if err := json.Unmarshal(data, &diff); err != nil {
-				p.reportError(fmt.Errorf("decode depth message: %w", err))
-				continue
-			}
-			if err := p.applyDepthDiff(meta, handle, diff); err != nil {
-				if errors.Is(err, errOrderbookOutOfSync) {
-					reconnect = true
-					break
-				}
-				p.reportError(fmt.Errorf("apply depth diff %s: %w", meta.canonical, err))
-			}
-		}
-
-		_ = conn.Close(websocket.StatusNormalClosure, "resync")
-
-		if reconnect {
-			sleep := backoffCfg.NextBackOff()
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(sleep):
-			}
-		}
-	}
-}
-
 func (p *Provider) seedOrderBook(ctx context.Context, meta symbolMeta, handle *bookHandle) error {
 	snapshotCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
 	defer cancel()
@@ -1004,59 +977,6 @@ func (p *Provider) publishOrderAcknowledgement(meta symbolMeta, req schema.Order
 		CommissionAsset:  "",
 	}
 	p.publisher.PublishExecReport(p.ctx, meta.canonical, payload)
-}
-
-func (p *Provider) consumeStream(ctx context.Context, stream string, handler func([]byte) error) error {
-	base := strings.TrimSuffix(p.opts.WebsocketBaseURL, "/")
-	url := base + "/" + stream
-	backoffCfg := backoff.NewExponentialBackOff()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return context.Canceled
-		default:
-		}
-
-		conn, _, err := websocket.Dial(ctx, url, nil)
-		if err != nil {
-			p.reportError(fmt.Errorf("dial %s: %w", url, err))
-			sleep := backoffCfg.NextBackOff()
-			select {
-			case <-ctx.Done():
-				return context.Canceled
-			case <-time.After(sleep):
-				continue
-			}
-		}
-
-		backoffCfg.Reset()
-		readCtx := ctx
-		for {
-			msgType, data, err := conn.Read(readCtx)
-			if err != nil {
-				_ = conn.Close(websocket.StatusNormalClosure, "")
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return context.Canceled
-				}
-				p.reportError(fmt.Errorf("read %s: %w", url, err))
-				break
-			}
-			if msgType != websocket.MessageText {
-				continue
-			}
-			if err := handler(data); err != nil {
-				p.reportError(fmt.Errorf("handle %s: %w", url, err))
-			}
-		}
-
-		sleep := backoffCfg.NextBackOff()
-		select {
-		case <-ctx.Done():
-			return context.Canceled
-		case <-time.After(sleep):
-		}
-	}
 }
 
 func parseOrderError(status int, body []byte) error {
