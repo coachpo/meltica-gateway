@@ -1133,6 +1133,7 @@ func (ts binanceTimestamp) Int64() int64 {
 }
 
 type tradeMessage struct {
+	EventType    string           `json:"e"`
 	EventTime    binanceTimestamp `json:"E"`
 	Symbol       string           `json:"s"`
 	TradeID      int64            `json:"t"`
@@ -1143,6 +1144,7 @@ type tradeMessage struct {
 }
 
 type tickerMessage struct {
+	EventType string           `json:"e"`
 	EventTime binanceTimestamp `json:"E"`
 	Symbol    string           `json:"s"`
 	LastPrice string           `json:"c"`
@@ -1152,6 +1154,7 @@ type tickerMessage struct {
 }
 
 type depthDiffMessage struct {
+	EventType     string           `json:"e"`
 	EventTime     binanceTimestamp `json:"E"`
 	Symbol        string           `json:"s"`
 	FirstUpdateID uint64           `json:"U"`
