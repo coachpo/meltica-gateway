@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,9 +75,65 @@ type bookHandle struct {
 	seqMu     sync.Mutex
 	lastSeq   uint64
 	seeded    atomic.Bool
+	seeding   atomic.Bool
+	bufferMu  sync.Mutex
+	buffer    []depthDiffMessage
 }
 
 var errOrderbookOutOfSync = errors.New("orderbook out of sync")
+
+func (h *bookHandle) appendDiff(diff depthDiffMessage) {
+	h.bufferMu.Lock()
+	h.buffer = append(h.buffer, diff)
+	h.bufferMu.Unlock()
+}
+
+func (h *bookHandle) firstBufferedUpdateID() uint64 {
+	h.bufferMu.Lock()
+	defer h.bufferMu.Unlock()
+	if len(h.buffer) == 0 {
+		return 0
+	}
+	return h.buffer[0].FirstUpdateID
+}
+
+func (h *bookHandle) drainBuffered(after uint64) []depthDiffMessage {
+	h.bufferMu.Lock()
+	defer h.bufferMu.Unlock()
+	if len(h.buffer) == 0 {
+		return nil
+	}
+	drop := 0
+	for drop < len(h.buffer) && h.buffer[drop].FinalUpdateID <= after {
+		drop++
+	}
+	if drop > 0 {
+		copy(h.buffer, h.buffer[drop:])
+		h.buffer = h.buffer[:len(h.buffer)-drop]
+	}
+	if len(h.buffer) == 0 {
+		return nil
+	}
+	out := make([]depthDiffMessage, len(h.buffer))
+	copy(out, h.buffer)
+	h.buffer = h.buffer[:0]
+	return out
+}
+
+func (h *bookHandle) requeueDiffs(diffs []depthDiffMessage) {
+	if len(diffs) == 0 {
+		return
+	}
+	h.bufferMu.Lock()
+	defer h.bufferMu.Unlock()
+	h.buffer = append(diffs, h.buffer...)
+}
+
+func (h *bookHandle) currentSeq() uint64 {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+	return h.lastSeq
+}
 
 // NewProvider constructs a Binance provider instance.
 func NewProvider(opts Options) *Provider {
@@ -549,32 +606,28 @@ func (p *Provider) initStreamManagers(ctx context.Context) error {
 		p.bookMu.Lock()
 		handle, exists := p.bookHandles[meta.canonical]
 		if !exists {
-			// Create handle for this symbol
 			handle = &bookHandle{
 				assembler: shared.NewOrderBookAssembler(p.opts.SnapshotDepth),
 			}
 			p.bookHandles[meta.canonical] = handle
-			p.bookMu.Unlock()
-
-			// Seed the orderbook in background (fetch REST snapshot)
-			go func() {
-				if err := p.seedOrderBook(p.ctx, meta, handle); err != nil {
-					p.reportError(fmt.Errorf("seed orderbook %s: %w", meta.canonical, err))
-				} else {
-					handle.seeded.Store(true)
-				}
-			}()
-
-			return nil // Skip this diff, wait for seeding to complete
 		}
 		p.bookMu.Unlock()
 
-		// Skip diffs until orderbook is seeded
-		if !handle.seeded.Load() {
+		if !handle.seeded.Load() || handle.seeding.Load() {
+			handle.appendDiff(diff)
+			if !handle.seeding.Load() {
+				go p.seedAndReplayBook(meta, handle)
+			}
 			return nil
 		}
 
 		if err := p.applyDepthDiff(meta, handle, diff); err != nil {
+			if errors.Is(err, errOrderbookOutOfSync) {
+				handle.seeded.Store(false)
+				handle.requeueDiffs([]depthDiffMessage{diff})
+				go p.seedAndReplayBook(meta, handle)
+				return nil
+			}
 			return fmt.Errorf("apply depth diff %s: %w", meta.canonical, err)
 		}
 		return nil
@@ -883,29 +936,115 @@ func (p *Provider) publishBalanceSnapshot(ctx context.Context) error {
 	return nil
 }
 
-func (p *Provider) seedOrderBook(ctx context.Context, meta symbolMeta, handle *bookHandle) error {
-	snapshotCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
-	defer cancel()
-	snapshot, err := p.fetchDepthSnapshot(snapshotCtx, meta.rest)
-	if err != nil {
-		return err
+func (p *Provider) seedOrderBook(ctx context.Context, meta symbolMeta, handle *bookHandle) (schema.BookSnapshotPayload, error) {
+	for {
+		if ctx == nil {
+			ctx = p.ctx
+		}
+		if ctx == nil {
+			return schema.BookSnapshotPayload{}, errors.New("binance: missing context for seeding orderbook")
+		}
+
+		snapshotCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
+		snapshot, err := p.fetchDepthSnapshot(snapshotCtx, meta.rest)
+		cancel()
+		if err != nil {
+			return schema.BookSnapshotPayload{}, err
+		}
+
+		firstBuffered := handle.firstBufferedUpdateID()
+		if firstBuffered != 0 && uint64(snapshot.LastUpdateID) < firstBuffered {
+			continue
+		}
+
+		now := time.Now().UTC()
+		payload := schema.BookSnapshotPayload{
+			Bids:          levelsToPriceLevels(snapshot.Bids),
+			Asks:          levelsToPriceLevels(snapshot.Asks),
+			LastUpdate:    now,
+			FirstUpdateID: uint64(snapshot.LastUpdateID),
+			FinalUpdateID: uint64(snapshot.LastUpdateID),
+		}
+
+		if _, err := handle.assembler.ApplySnapshot(uint64(snapshot.LastUpdateID), payload); err != nil {
+			return schema.BookSnapshotPayload{}, err
+		}
+		handle.seqMu.Lock()
+		handle.lastSeq = uint64(snapshot.LastUpdateID)
+		handle.seqMu.Unlock()
+
+		p.publisher.PublishBookSnapshot(p.ctx, meta.canonical, payload)
+		return payload, nil
 	}
-	payload := schema.BookSnapshotPayload{
-		Bids:          levelsToPriceLevels(snapshot.Bids),
-		Asks:          levelsToPriceLevels(snapshot.Asks),
-		LastUpdate:    time.Now().UTC(),
-		FirstUpdateID: uint64(snapshot.LastUpdateID),
-		FinalUpdateID: uint64(snapshot.LastUpdateID),
+}
+
+func (p *Provider) seedAndReplayBook(meta symbolMeta, handle *bookHandle) {
+	if handle == nil {
+		return
 	}
-	_, err = handle.assembler.ApplySnapshot(uint64(snapshot.LastUpdateID), payload)
-	if err != nil {
-		return err
+	if !handle.seeding.CompareAndSwap(false, true) {
+		return
 	}
-	handle.seqMu.Lock()
-	handle.lastSeq = uint64(snapshot.LastUpdateID)
-	handle.seqMu.Unlock()
-	p.publisher.PublishBookSnapshot(p.ctx, meta.canonical, payload)
-	return nil
+	defer handle.seeding.Store(false)
+
+	backoffCfg := backoff.NewExponentialBackOff()
+
+outerLoop:
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		default:
+		}
+
+		snapshot, err := p.seedOrderBook(p.ctx, meta, handle)
+		if err != nil {
+			p.reportError(fmt.Errorf("seed orderbook %s: %w", meta.canonical, err))
+			sleep := backoffCfg.NextBackOff()
+			select {
+			case <-p.ctx.Done():
+				return
+			case <-time.After(sleep):
+				continue
+			}
+		}
+
+		backoffCfg.Reset()
+
+		currentSeq := snapshot.FinalUpdateID
+		for {
+			pending := handle.drainBuffered(currentSeq)
+			if len(pending) == 0 {
+				handle.seeded.Store(true)
+				return
+			}
+			if len(pending) > 1 {
+				sort.SliceStable(pending, func(i, j int) bool {
+					return pending[i].FinalUpdateID < pending[j].FinalUpdateID
+				})
+			}
+
+			for idx := range pending {
+				if err := p.applyDepthDiff(meta, handle, pending[idx]); err != nil {
+					handle.requeueDiffs(pending[idx:])
+					if errors.Is(err, errOrderbookOutOfSync) {
+						handle.seeded.Store(false)
+					} else {
+						p.reportError(fmt.Errorf("apply depth diff %s: %w", meta.canonical, err))
+					}
+					sleep := backoffCfg.NextBackOff()
+					select {
+					case <-p.ctx.Done():
+						return
+					case <-time.After(sleep):
+					}
+					continue outerLoop
+				}
+			}
+
+			currentSeq = handle.currentSeq()
+		}
+	}
 }
 
 func (p *Provider) applyDepthDiff(meta symbolMeta, handle *bookHandle, diff depthDiffMessage) error {
