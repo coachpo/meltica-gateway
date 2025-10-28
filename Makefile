@@ -35,10 +35,6 @@ build-linux-arm64:
 tidy:
 	go mod tidy
 
-coverage:
-	mkdir -p coverage
-	go test ./... -covermode=atomic -coverprofile=coverage/full.out
-
 clean:
 	rm -rf bin/
 	rm -rf coverage/
