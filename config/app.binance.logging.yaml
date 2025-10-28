@@ -57,7 +57,7 @@ lambdaManifest:
       config:
         dry_run: true
         logger_prefix: "[BINANCE-SPOT] "
-      auto_start: false
+      auto_start: true
     - id: binance-cross-log
       providers:
         - binance
@@ -67,4 +67,4 @@ lambdaManifest:
       config:
         dry_run: true
         logger_prefix: "[BINANCE-CROSS] "
-      auto_start: false
+      auto_start: true
