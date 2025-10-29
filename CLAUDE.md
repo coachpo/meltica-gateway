@@ -76,7 +76,7 @@ All event handlers must return pooled objects via `pool.Put()` to avoid leaks.
 
 ### Configuration Structure
 - `environment`: Deployment environment (dev, staging, prod)
-- `exchanges`: Map of provider names to exchange-specific configuration blobs. Each entry must include an `exchange.name` field referencing a registered adapter. Aliases use the same `exchange.name` to share implementations.
+- `providers`: Map of provider aliases to exchange-specific configuration blobs. Each entry must include an `exchange.name` field referencing a registered adapter. Aliases use the same `exchange.name` to share implementations.
 - `eventbus`: Buffer size and fanout worker count
 - `pools`: Event and OrderRequest pool capacities
 - `apiServer`: Control API bind address (default `:8880`)
@@ -86,7 +86,7 @@ All event handlers must return pooled objects via `pool.Put()` to avoid leaks.
 **Example workflow:**
 ```bash
 cp config/app.example.yaml config/app.yaml
-# Edit exchanges, telemetry endpoint, or lambda manifest
+# Edit providers, telemetry endpoint, or lambda manifest
 make run
 ```
 

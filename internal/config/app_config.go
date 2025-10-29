@@ -142,7 +142,7 @@ type TelemetryConfig struct {
 // AppConfig is the unified Meltica application configuration sourced from YAML.
 type AppConfig struct {
 	Environment    Environment                 `yaml:"environment"`
-	Exchanges      map[Exchange]map[string]any `yaml:"exchanges"`
+	Providers      map[Exchange]map[string]any `yaml:"providers"`
 	Eventbus       EventbusConfig              `yaml:"eventbus"`
 	Pools          PoolConfig                  `yaml:"pools"`
 	Risk           RiskConfig                  `yaml:"risk"`
@@ -181,12 +181,12 @@ func Load(ctx context.Context, configPath string) (AppConfig, error) {
 }
 
 func (c *AppConfig) normalise() {
-	normalised := make(map[Exchange]map[string]any, len(c.Exchanges))
-	for key, value := range c.Exchanges {
+	normalised := make(map[Exchange]map[string]any, len(c.Providers))
+	for key, value := range c.Providers {
 		normalizedKey := Exchange(normalizeExchangeName(string(key)))
 		normalised[normalizedKey] = value
 	}
-	c.Exchanges = normalised
+	c.Providers = normalised
 
 	c.Environment = Environment(normalizeExchangeName(string(c.Environment)))
 	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
@@ -213,6 +213,9 @@ func (c AppConfig) Validate() error {
 	case EnvDev, EnvStaging, EnvProd:
 	default:
 		return fmt.Errorf("environment must be one of dev, staging, prod")
+	}
+	if len(c.Providers) == 0 {
+		return fmt.Errorf("at least one provider must be configured")
 	}
 
 	if c.Eventbus.BufferSize <= 0 {

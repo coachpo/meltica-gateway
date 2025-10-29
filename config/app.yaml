@@ -1,7 +1,7 @@
 # environment: deployment environment (dev | staging | prod)
 environment: dev
 
-exchanges:
+providers:
   # fake-liquid: moderate volatility venue demonstrating instrument refresh and klines
   fake-liquid:
     exchange:

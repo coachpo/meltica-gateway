@@ -3,7 +3,7 @@
 # environment: deployment environment (dev | staging | prod)
 environment: prod
 
-exchanges:
+providers:
   # fake: synthetic market-data provider (alias pointing to the "fake" exchange)
   fake:
     exchange:

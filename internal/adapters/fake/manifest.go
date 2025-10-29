@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coachpo/meltica/internal/pool"
@@ -51,8 +52,15 @@ func RegisterFactory(reg *provider.Registry) {
 			BalanceUpdateInterval: 0,
 		}
 
+		if raw, ok := cfg["provider_name"].(string); ok {
+			if trimmed := strings.TrimSpace(raw); trimmed != "" {
+				opts.Name = trimmed
+			}
+		}
 		if name, ok := cfg["name"].(string); ok {
-			opts.Name = name
+			if trimmed := strings.TrimSpace(name); trimmed != "" && strings.TrimSpace(opts.Name) == "" {
+				opts.Name = trimmed
+			}
 		}
 		if ticker, ok := durationFromConfig(cfg, "ticker_interval"); ok {
 			opts.TickerInterval = ticker

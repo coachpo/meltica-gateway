@@ -57,11 +57,11 @@ func main() {
 	if err != nil {
 		logger.Fatalf("load config: %v", err)
 	}
-	logger.Printf("configuration loaded: env=%s, exchanges=%d",
-		appCfg.Environment, len(appCfg.Exchanges))
+	logger.Printf("configuration loaded: env=%s, providers=%d",
+		appCfg.Environment, len(appCfg.Providers))
 
 	logger.Printf("lambda manifest loaded: lambdas=%d", len(appCfg.LambdaManifest.Lambdas))
-	logger.Printf("providers configured: %d", len(appCfg.Exchanges))
+	logger.Printf("providers configured: %d", len(appCfg.Providers))
 
 	telemetryProvider, err := initTelemetry(ctx, logger, appCfg)
 	if err != nil {
@@ -178,7 +178,7 @@ func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 	adapters.RegisterAll(registry)
 
 	manager := provider.NewManager(registry, poolMgr)
-	specs, err := config.BuildProviderSpecs(appCfg.Exchanges)
+	specs, err := config.BuildProviderSpecs(appCfg.Providers)
 	if err != nil {
 		return nil, fmt.Errorf("build provider specs: %w", err)
 	}

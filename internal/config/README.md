@@ -19,7 +19,7 @@ cfg, err := config.Load(ctx, "config/app.yaml")
 ```go
 type AppConfig struct {
     Environment Environment                   // dev, staging, prod
-    Exchanges   map[Exchange]map[string]any   // Exchange-specific blobs
+    Providers   map[Exchange]map[string]any   // Provider-specific blobs
     Eventbus    EventbusConfig                // Message bus sizing
     Pools       PoolConfig                    // Object pooling capacities
     APIServer   APIServerConfig               // Control server settings
@@ -43,7 +43,7 @@ func main() {
     }
     
     log.Printf("Environment: %s", cfg.Environment)
-    log.Printf("Exchanges: %d", len(cfg.Exchanges))
+    log.Printf("Providers: %d", len(cfg.Providers))
 }
 ```
 
@@ -52,7 +52,7 @@ func main() {
 See `config/app.example.yaml` for a complete sample. Key sections include:
 
 - `environment`: Deployment environment string (`dev`, `staging`, `prod`).
-- `exchanges`: Arbitrary blobs forwarded to each exchange adapter; each entry must include an `exchange` field referencing a registered provider name (aliases map to the same exchange by using the same `exchange` value).
+- `providers`: Arbitrary blobs forwarded to each exchange adapter; each entry must include an `exchange` block referencing a registered provider type (aliases map to the same exchange by using the same `exchange.name` value).
 - `eventbus`: In-memory event bus sizing.
 - `pools`: Object pool capacities.
 - `apiServer`: Control API bind address.
@@ -72,7 +72,7 @@ Legacy setups required stitching together `config.FromEnv()` with bespoke stream
 cfg, _ := config.Load(ctx, path)
 
 // Everything in one place
-bin, _ := cfg.Exchanges["binance"]
+bin, _ := cfg.Providers["binance"]
 telemetry := cfg.Telemetry
 ```
 
@@ -83,7 +83,7 @@ telemetry := cfg.Telemetry
 3. **Type Safety**: Compile-time validation of config structure
 4. **Easier Testing**: Mock entire config or individual sections
 5. **Better Validation**: Validate all settings together in one pass
-6. **DRY Principle**: Exchanges define their details within their own packages
+6. **DRY Principle**: Providers define their details within their own packages
 
 ## File Organization
 

@@ -47,6 +47,9 @@ func TestBuildProviderSpecs(t *testing.T) {
 	if fakeSpec.Config["name"] != "fake" {
 		t.Fatalf("expected config name to be fake, got %v", fakeSpec.Config["name"])
 	}
+	if fakeSpec.Config["provider_name"] != "fake" {
+		t.Fatalf("expected provider_name to be fake, got %v", fakeSpec.Config["provider_name"])
+	}
 
 	binanceSpec, ok := lookup["BINANCE"]
 	if !ok {
@@ -58,9 +61,9 @@ func TestBuildProviderSpecs(t *testing.T) {
 }
 
 func TestBuildProviderSpecsErrors(t *testing.T) {
-	t.Run("missing exchanges", func(t *testing.T) {
+	t.Run("missing providers", func(t *testing.T) {
 		if _, err := BuildProviderSpecs(nil); err == nil {
-			t.Fatal("expected error for nil exchanges")
+			t.Fatal("expected error for nil providers")
 		}
 	})
 

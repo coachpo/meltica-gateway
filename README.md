@@ -44,7 +44,7 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
 2. **Configure the gateway**:
    ```bash
    cp config/app.example.yaml config/app.yaml
-   # edit exchanges, telemetry endpoint, or lambda manifest as needed
+   # edit providers, telemetry endpoint, or lambda manifest as needed
    ```
 3. **Run locally**:
    ```bash

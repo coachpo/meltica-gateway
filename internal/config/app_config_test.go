@@ -21,7 +21,7 @@ func TestLoadFromYAML(t *testing.T) {
 	path := filepath.Join(dir, "app.yaml")
 	yaml := `
 environment: DEV
-exchanges:
+providers:
   Fake:
     exchange:
       name: fake
@@ -66,7 +66,7 @@ lambdaManifest:
 		t.Fatalf("expected environment %s, got %s", EnvDev, cfg.Environment)
 	}
 
-	ex, ok := cfg.Exchanges[Exchange("fake")]
+	ex, ok := cfg.Providers[Exchange("fake")]
 	if !ok {
 		t.Fatalf("expected fake exchange config")
 	}
@@ -157,7 +157,7 @@ func loadConfigWithFanout(t *testing.T, fanoutLine string) AppConfig {
 	path := filepath.Join(dir, "app.yaml")
 	yaml := fmt.Sprintf(`
 environment: dev
-exchanges:
+providers:
   fake:
     exchange:
       name: fake

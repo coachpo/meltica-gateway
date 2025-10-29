@@ -1,6 +1,6 @@
 environment: prod
 
-exchanges:
+providers:
   binance:
     exchange:
       name: binance

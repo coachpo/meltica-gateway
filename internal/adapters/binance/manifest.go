@@ -20,6 +20,7 @@ func RegisterFactory(reg *provider.Registry) {
 
 		opts := Options{
 			Name:                      "",
+			Exchange:                  "",
 			Venue:                     "",
 			APIBaseURL:                "",
 			WebsocketBaseURL:          "",
@@ -34,8 +35,14 @@ func RegisterFactory(reg *provider.Registry) {
 			UserStreamKeepAlive:       0,
 		}
 
+		if alias, ok := stringFromConfig(cfg, "provider_name"); ok {
+			opts.Name = alias
+		}
 		if raw, ok := stringFromConfig(cfg, "name"); ok {
-			opts.Name = raw
+			opts.Exchange = raw
+		}
+		if strings.TrimSpace(opts.Name) == "" && strings.TrimSpace(opts.Exchange) != "" {
+			opts.Name = opts.Exchange
 		}
 		if raw, ok := stringFromConfig(cfg, "venue"); ok {
 			opts.Venue = strings.ToUpper(strings.TrimSpace(raw))

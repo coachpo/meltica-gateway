@@ -22,6 +22,7 @@ const (
 // Options configure the Binance adapter.
 type Options struct {
 	Name                      string
+	Exchange                  string
 	Venue                     string
 	APIBaseURL                string
 	WebsocketBaseURL          string
@@ -39,6 +40,9 @@ type Options struct {
 func withDefaults(in Options) Options {
 	if strings.TrimSpace(in.Name) == "" {
 		in.Name = defaultProviderName
+	}
+	if strings.TrimSpace(in.Exchange) == "" {
+		in.Exchange = defaultProviderName
 	}
 	if strings.TrimSpace(in.Venue) == "" {
 		in.Venue = defaultVenue
