@@ -3,6 +3,7 @@ package dispatcher
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/coachpo/meltica/internal/schema"
 )
@@ -11,6 +12,7 @@ func TestRegistrarRegisterLambdaMultipleProviders(t *testing.T) {
 	ctx := context.Background()
 	table := NewTable()
 	registrar := NewRegistrar(table, nil)
+	t.Cleanup(func() { registrar.Close() })
 
 	providers := []string{"alpha", "beta"}
 	routes := []RouteDeclaration{{
@@ -24,10 +26,19 @@ func TestRegistrarRegisterLambdaMultipleProviders(t *testing.T) {
 		t.Fatalf("register lambda: %v", err)
 	}
 
-	registered := table.Routes()
-	if len(registered) != len(providers) {
-		t.Fatalf("expected %d routes, got %d", len(providers), len(registered))
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		registered := table.Routes()
+		if len(registered) == len(providers) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected %d routes, got %d", len(providers), len(registered))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+
+	registered := table.Routes()
 
 	for _, provider := range providers {
 		key := RouteKey{Provider: provider, Type: schema.RouteTypeTrade}.normalize()

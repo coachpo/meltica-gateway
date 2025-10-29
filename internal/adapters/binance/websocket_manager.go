@@ -321,7 +321,6 @@ func (sm *streamManager) sendBatchedControlRequests(ctx context.Context, method 
 		sm.connMu.RUnlock()
 		if conn == nil {
 			sm.controlMu.Unlock()
-			log.Printf("binance stream manager: skip %s request for %d streams, websocket not connected", method, len(streams))
 			return nil
 		}
 
@@ -335,6 +334,8 @@ func (sm *streamManager) sendBatchedControlRequests(ctx context.Context, method 
 
 		sm.lastControlSend = time.Now()
 		sm.controlMu.Unlock()
+
+		log.Printf("binance stream manager: %s request %+v", method, req)
 	}
 
 	return nil

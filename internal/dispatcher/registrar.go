@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -35,6 +36,15 @@ type Registrar struct {
 	table   *Table
 	router  ProviderRouter
 	lambdas map[string]lambdaRegistration
+
+	updates      chan struct{}
+	workerOnce   sync.Once
+	workerCtx    context.Context
+	workerCancel context.CancelFunc
+	wg           sync.WaitGroup
+
+	errMu   sync.RWMutex
+	onError func(error)
 }
 
 // NewRegistrar constructs a dynamic route registrar.
@@ -42,16 +52,29 @@ func NewRegistrar(table *Table, router ProviderRouter) *Registrar {
 	if table == nil {
 		table = NewTable()
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &Registrar{
-		mu:      sync.Mutex{},
-		table:   table,
-		router:  router,
-		lambdas: make(map[string]lambdaRegistration),
+		mu:           sync.Mutex{},
+		table:        table,
+		router:       router,
+		lambdas:      make(map[string]lambdaRegistration),
+		updates:      make(chan struct{}, 1),
+		workerCtx:    ctx,
+		workerCancel: cancel,
+		onError: func(err error) {
+			if err != nil {
+				log.Printf("dispatcher registrar: %v", err)
+			}
+		},
 	}
 }
 
 // RegisterLambda declares or updates the routing requirements for a lambda instance.
 func (r *Registrar) RegisterLambda(ctx context.Context, lambdaID string, providers []string, routes []RouteDeclaration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	lambdaID = strings.TrimSpace(lambdaID)
 	if lambdaID == "" {
 		return fmt.Errorf("lambda id required")
@@ -78,28 +101,103 @@ func (r *Registrar) RegisterLambda(ctx context.Context, lambdaID string, provide
 		Providers: normalizedProviders,
 		Routes:    copied,
 	}
-	err := r.rebuild(ctx)
 	r.mu.Unlock()
-	return err
+
+	r.scheduleRebuild()
+	return nil
 }
 
 // UnregisterLambda removes routing requirements for a lambda instance.
 func (r *Registrar) UnregisterLambda(ctx context.Context, lambdaID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	lambdaID = strings.TrimSpace(lambdaID)
 	if lambdaID == "" {
 		return nil
 	}
 	r.mu.Lock()
 	delete(r.lambdas, lambdaID)
-	err := r.rebuild(ctx)
 	r.mu.Unlock()
-	return err
+
+	r.scheduleRebuild()
+	return nil
 }
 
-func (r *Registrar) rebuild(ctx context.Context) error {
+func (r *Registrar) scheduleRebuild() {
+	r.startWorker()
+	select {
+	case r.updates <- struct{}{}:
+	default:
+	}
+}
+
+func (r *Registrar) startWorker() {
+	r.workerOnce.Do(func() {
+		r.wg.Add(1)
+		go r.run()
+	})
+}
+
+func (r *Registrar) run() {
+	defer r.wg.Done()
+
+	for {
+		select {
+		case <-r.workerCtx.Done():
+			return
+		case <-r.updates:
+			// coalesce bursty signals so we only rebuild once per batch.
+			for {
+				select {
+				case <-r.updates:
+					continue
+				default:
+				}
+				break
+			}
+			snapshot := r.snapshot()
+			if err := r.applyRoutes(r.workerCtx, snapshot); err != nil {
+				r.reportError(err)
+			}
+		}
+	}
+}
+
+func (r *Registrar) snapshot() map[string]lambdaRegistration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.lambdas) == 0 {
+		return nil
+	}
+
+	out := make(map[string]lambdaRegistration, len(r.lambdas))
+	for id, reg := range r.lambdas {
+		providers := append([]string(nil), reg.Providers...)
+		copiedRoutes := make([]RouteDeclaration, len(reg.Routes))
+		for i, route := range reg.Routes {
+			copiedRoutes[i] = RouteDeclaration{
+				Type:    route.Type,
+				Filters: cloneFilterMap(route.Filters),
+			}
+		}
+		out[id] = lambdaRegistration{
+			Providers: providers,
+			Routes:    copiedRoutes,
+		}
+	}
+	return out
+}
+
+func (r *Registrar) applyRoutes(ctx context.Context, state map[string]lambdaRegistration) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	desired := make(map[RouteKey]Route)
 
-	for _, reg := range r.lambdas {
+	for _, reg := range state {
 		if len(reg.Providers) == 0 {
 			continue
 		}
@@ -182,6 +280,31 @@ func (r *Registrar) rebuild(ctx context.Context) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// Close terminates background workers and waits for in-flight updates to finish.
+func (r *Registrar) Close() {
+	r.workerCancel()
+	r.wg.Wait()
+}
+
+// SetErrorHandler installs a callback invoked when asynchronous rebuilds fail.
+func (r *Registrar) SetErrorHandler(handler func(error)) {
+	r.errMu.Lock()
+	r.onError = handler
+	r.errMu.Unlock()
+}
+
+func (r *Registrar) reportError(err error) {
+	if err == nil {
+		return
+	}
+	r.errMu.RLock()
+	handler := r.onError
+	r.errMu.RUnlock()
+	if handler != nil {
+		handler(err)
+	}
 }
 
 func normalizeProviders(providers []string) []string {
