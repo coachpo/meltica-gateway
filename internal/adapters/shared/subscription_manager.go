@@ -76,23 +76,19 @@ func (m *SubscriptionManager) Activate(ctx context.Context, route dispatcher.Rou
 		return nil
 	}
 
-	additions := buildDeltaRoute(route, diffFilters(route.Filters, existing.Filters))
-	removals := buildDeltaRoute(existing, diffFilters(existing.Filters, route.Filters))
-
-	if m.subscriber != nil {
-		if len(removals.Filters) > 0 {
-			if err := m.subscriber.UnsubscribeRoute(removals); err != nil {
-				return fmt.Errorf("unsubscribe route: %w", err)
-			}
+	var subscribeErr error
+	if !sameNonFilterConfig(existing, route) {
+		if m.subscriber != nil {
+			subscribeErr = m.subscriber.SubscribeRoute(route)
 		}
-		if len(additions.Filters) > 0 {
-			if err := m.subscriber.SubscribeRoute(additions); err != nil {
-				if len(removals.Filters) > 0 {
-					_ = m.subscriber.SubscribeRoute(removals)
-				}
-				return fmt.Errorf("subscribe route: %w", err)
-			}
+	} else {
+		additions := buildDeltaRoute(route, diffFilters(route.Filters, existing.Filters))
+		if m.subscriber != nil && len(additions.Filters) > 0 {
+			subscribeErr = m.subscriber.SubscribeRoute(additions)
 		}
+	}
+	if subscribeErr != nil {
+		return fmt.Errorf("subscribe route: %w", subscribeErr)
 	}
 
 	// Merge route state
