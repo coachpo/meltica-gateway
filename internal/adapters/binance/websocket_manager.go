@@ -138,7 +138,7 @@ func (sm *streamManager) subscribe(streams []string) error {
 		return nil // All streams already subscribed
 	}
 
-	return sm.sendBatchedControlRequests("SUBSCRIBE", newStreams)
+	return sm.sendBatchedControlRequests(sm.ctx, "SUBSCRIBE", newStreams)
 }
 
 // unsubscribe removes one or more stream subscriptions.
@@ -163,7 +163,7 @@ func (sm *streamManager) unsubscribe(streams []string) error {
 		return nil // No streams to unsubscribe
 	}
 
-	return sm.sendBatchedControlRequests("UNSUBSCRIBE", existingStreams)
+	return sm.sendBatchedControlRequests(sm.ctx, "UNSUBSCRIBE", existingStreams)
 }
 
 // connect maintains the WebSocket connection with automatic reconnection and exponential backoff.
@@ -285,32 +285,20 @@ func (sm *streamManager) subscribeAll() error {
 		return nil
 	}
 
-	return sm.sendBatchedControlRequests("SUBSCRIBE", streams)
+	return sm.sendBatchedControlRequests(sm.ctx, "SUBSCRIBE", streams)
 }
 
-func (sm *streamManager) sendBatchedControlRequests(method string, streams []string) error {
+func (sm *streamManager) sendBatchedControlRequests(ctx context.Context, method string, streams []string) error {
 	if len(streams) == 0 {
 		return nil
 	}
 
-	sm.controlMu.Lock()
-	defer sm.controlMu.Unlock()
-
-	sm.connMu.RLock()
-	conn := sm.conn
-	sm.connMu.RUnlock()
-	if conn == nil {
-		// During reconnects the subscription map is re-applied once a new socket is ready, so we simply log.
-		log.Printf("binance stream manager: skip %s request for %d streams, websocket not connected", method, len(streams))
-		return nil
+	if ctx == nil {
+		ctx = sm.ctx
 	}
 
 	chunks := chunkStreams(streams, binanceMaxStreamsPerRequest)
 	for _, chunk := range chunks {
-		if err := sm.waitForControlWindowLocked(sm.ctx, method); err != nil {
-			return err
-		}
-
 		req := subscribeRequest{
 			Method: method,
 			Params: chunk,
@@ -322,14 +310,31 @@ func (sm *streamManager) sendBatchedControlRequests(method string, streams []str
 			return fmt.Errorf("marshal %s request: %w", method, err)
 		}
 
-		writeCtx, cancel := context.WithTimeout(sm.ctx, binanceControlWriteTimeout)
+		sm.controlMu.Lock()
+		if err := sm.waitForControlWindowLocked(ctx, method); err != nil {
+			sm.controlMu.Unlock()
+			return err
+		}
+
+		sm.connMu.RLock()
+		conn := sm.conn
+		sm.connMu.RUnlock()
+		if conn == nil {
+			sm.controlMu.Unlock()
+			log.Printf("binance stream manager: skip %s request for %d streams, websocket not connected", method, len(streams))
+			return nil
+		}
+
+		writeCtx, cancel := context.WithTimeout(ctx, binanceControlWriteTimeout)
 		err = conn.Write(writeCtx, websocket.MessageText, data)
 		cancel()
 		if err != nil {
+			sm.controlMu.Unlock()
 			return fmt.Errorf("write %s request: %w", method, err)
 		}
 
 		sm.lastControlSend = time.Now()
+		sm.controlMu.Unlock()
 	}
 
 	return nil
