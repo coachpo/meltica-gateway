@@ -137,6 +137,7 @@ type ProviderCatalog interface {
 // RouteRegistrar manages dynamic route registration for providers.
 type RouteRegistrar interface {
 	RegisterLambda(ctx context.Context, lambdaID string, providers []string, routes []dispatcher.RouteDeclaration) error
+	RegisterLambdaBatch(ctx context.Context, regs []dispatcher.LambdaBatchRegistration) error
 	UnregisterLambda(ctx context.Context, lambdaID string) error
 }
 
@@ -420,15 +421,50 @@ func (m *Manager) StrategyDetail(name string) (StrategyMetadata, bool) {
 
 // StartFromManifest starts all lambdas defined in the lambda manifest.
 func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaManifest) error {
+	autoStart := make([]config.LambdaSpec, 0, len(manifest.Lambdas))
 	for _, definition := range manifest.Lambdas {
 		spec := sanitizeSpec(definition)
 		if err := m.ensureSpec(spec, false); err != nil {
 			return err
 		}
 		if spec.AutoStart {
-			if err := m.Start(ctx, spec.ID); err != nil {
-				return err
+			autoStart = append(autoStart, spec)
+		}
+	}
+
+	if len(autoStart) == 0 {
+		return nil
+	}
+
+	registerImmediately := m.registrar == nil
+	started := make([]string, 0, len(autoStart))
+	batch := make([]dispatcher.LambdaBatchRegistration, 0, len(autoStart))
+
+	for _, spec := range autoStart {
+		_, providers, routes, err := m.launch(ctx, spec, registerImmediately)
+		if err != nil {
+			for _, id := range started {
+				_ = m.Stop(id)
 			}
+			return err
+		}
+		started = append(started, spec.ID)
+		if !registerImmediately && len(routes) > 0 {
+			entry := dispatcher.LambdaBatchRegistration{
+				ID:        spec.ID,
+				Providers: providers,
+				Routes:    routes,
+			}
+			batch = append(batch, entry)
+		}
+	}
+
+	if !registerImmediately && len(batch) > 0 {
+		if err := m.registrar.RegisterLambdaBatch(ctx, batch); err != nil {
+			for _, id := range started {
+				_ = m.Stop(id)
+			}
+			return err
 		}
 	}
 	return nil
@@ -485,14 +521,14 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 	}
 	m.mu.Unlock()
 
-	_, err = m.launch(ctx, spec)
+	_, _, _, err = m.launch(ctx, spec, true)
 	return err
 }
 
-func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec) (*lambda.BaseLambda, error) {
+func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNow bool) (*lambda.BaseLambda, []string, []dispatcher.RouteDeclaration, error) {
 	providers := spec.Providers
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("strategy %s: providers required", spec.ID)
+		return nil, nil, nil, fmt.Errorf("strategy %s: providers required", spec.ID)
 	}
 	resolvedProviders := make([]string, 0, len(providers))
 	for _, name := range providers {
@@ -501,31 +537,29 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec) (*lambda.B
 			continue
 		}
 		if _, ok := m.providers.Provider(name); !ok {
-			return nil, fmt.Errorf("provider %q unavailable", name)
+			return nil, nil, nil, fmt.Errorf("provider %q unavailable", name)
 		}
 		resolvedProviders = append(resolvedProviders, name)
 	}
 	if len(resolvedProviders) == 0 {
-		return nil, fmt.Errorf("strategy %s: no valid providers resolved", spec.ID)
+		return nil, nil, nil, fmt.Errorf("strategy %s: no valid providers resolved", spec.ID)
 	}
 
 	strategy, err := m.buildStrategy(spec.Strategy, spec.Config)
 	if err != nil {
-		return nil, fmt.Errorf("strategy %s: %w", spec.ID, err)
+		return nil, nil, nil, fmt.Errorf("strategy %s: %w", spec.ID, err)
 	}
 	if strategy != nil && len(resolvedProviders) > 1 && !strategy.WantsCrossProviderEvents() {
-		return nil, fmt.Errorf("strategy %s does not support cross-provider feeds", spec.Strategy)
+		return nil, nil, nil, fmt.Errorf("strategy %s does not support cross-provider feeds", spec.Strategy)
 	}
 
+	routes := buildRouteDeclarations(strategy, spec)
 	var registered bool
-	if m.registrar != nil {
-		routes := buildRouteDeclarations(strategy, spec)
-		if len(routes) > 0 {
-			if err := m.registrar.RegisterLambda(ctx, spec.ID, resolvedProviders, routes); err != nil {
-				return nil, fmt.Errorf("strategy %s: register routes: %w", spec.ID, err)
-			}
-			registered = true
+	if registerNow && m.registrar != nil && len(routes) > 0 {
+		if err := m.registrar.RegisterLambda(ctx, spec.ID, resolvedProviders, routes); err != nil {
+			return nil, nil, nil, fmt.Errorf("strategy %s: register routes: %w", spec.ID, err)
 		}
+		registered = true
 	}
 
 	orderRouter := &providerOrderRouter{catalog: m.providers}
@@ -541,7 +575,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec) (*lambda.B
 		if registered && m.registrar != nil {
 			_ = m.registrar.UnregisterLambda(ctx, spec.ID)
 		}
-		return nil, fmt.Errorf("start strategy %s: %w", spec.ID, err)
+		return nil, nil, nil, fmt.Errorf("start strategy %s: %w", spec.ID, err)
 	}
 
 	m.mu.Lock()
@@ -549,7 +583,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec) (*lambda.B
 	m.mu.Unlock()
 
 	go m.observe(runCtx, spec.ID, errs)
-	return base, nil
+	return base, resolvedProviders, routes, nil
 }
 
 func (m *Manager) specForID(id string) (config.LambdaSpec, error) {
@@ -636,7 +670,7 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	if err := m.Stop(spec.ID); err != nil && !errors.Is(err, ErrInstanceNotRunning) {
 		return err
 	}
-	if _, err := m.launch(ctx, spec); err != nil {
+	if _, _, _, err := m.launch(ctx, spec, true); err != nil {
 		return err
 	}
 	return nil

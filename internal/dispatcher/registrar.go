@@ -30,6 +30,13 @@ type lambdaRegistration struct {
 	Routes    []RouteDeclaration
 }
 
+// LambdaBatchRegistration captures a lambda registration to be applied in bulk.
+type LambdaBatchRegistration struct {
+	ID        string
+	Providers []string
+	Routes    []RouteDeclaration
+}
+
 // Registrar coordinates dynamic routing updates based on active lambdas.
 type Registrar struct {
 	mu      sync.Mutex
@@ -78,31 +85,40 @@ func (r *Registrar) RegisterLambda(ctx context.Context, lambdaID string, provide
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("register lambda context: %w", err)
 	}
-	lambdaID = strings.TrimSpace(lambdaID)
-	if lambdaID == "" {
-		return fmt.Errorf("lambda id required")
-	}
-	normalizedProviders := normalizeProviders(providers)
-	if len(normalizedProviders) == 0 {
-		return fmt.Errorf("providers required")
-	}
-
-	copied := make([]RouteDeclaration, len(routes))
-	for i, route := range routes {
-		if err := route.Type.Validate(); err != nil {
-			return fmt.Errorf("lambda route[%d]: %w", i, err)
-		}
-		normalized := schema.NormalizeRouteType(route.Type)
-		copied[i] = RouteDeclaration{
-			Type:    normalized,
-			Filters: cloneFilterMap(route.Filters),
-		}
+	id, reg, err := normalizeLambdaRegistration(lambdaID, providers, routes)
+	if err != nil {
+		return err
 	}
 
 	r.mu.Lock()
-	r.lambdas[lambdaID] = lambdaRegistration{
-		Providers: normalizedProviders,
-		Routes:    copied,
+	r.lambdas[id] = reg
+	r.mu.Unlock()
+
+	r.scheduleRebuild()
+	return nil
+}
+
+// RegisterLambdaBatch stores multiple lambda registrations and schedules a single rebuild.
+func (r *Registrar) RegisterLambdaBatch(ctx context.Context, regs []LambdaBatchRegistration) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("register lambda batch context: %w", err)
+	}
+	if len(regs) == 0 {
+		return nil
+	}
+
+	normalized := make(map[string]lambdaRegistration, len(regs))
+	for i, entry := range regs {
+		id, reg, err := normalizeLambdaRegistration(entry.ID, entry.Providers, entry.Routes)
+		if err != nil {
+			return fmt.Errorf("lambda batch[%d]: %w", i, err)
+		}
+		normalized[id] = reg
+	}
+
+	r.mu.Lock()
+	for id, reg := range normalized {
+		r.lambdas[id] = reg
 	}
 	r.mu.Unlock()
 
@@ -296,6 +312,35 @@ func (r *Registrar) reportError(err error) {
 	if handler != nil {
 		handler(err)
 	}
+}
+
+func normalizeLambdaRegistration(lambdaID string, providers []string, routes []RouteDeclaration) (string, lambdaRegistration, error) {
+	lambdaID = strings.TrimSpace(lambdaID)
+	if lambdaID == "" {
+		return "", lambdaRegistration{}, fmt.Errorf("lambda id required")
+	}
+
+	normalizedProviders := normalizeProviders(providers)
+	if len(normalizedProviders) == 0 {
+		return "", lambdaRegistration{}, fmt.Errorf("providers required")
+	}
+
+	copied := make([]RouteDeclaration, len(routes))
+	for i, route := range routes {
+		if err := route.Type.Validate(); err != nil {
+			return "", lambdaRegistration{}, fmt.Errorf("lambda route[%d]: %w", i, err)
+		}
+		normalized := schema.NormalizeRouteType(route.Type)
+		copied[i] = RouteDeclaration{
+			Type:    normalized,
+			Filters: cloneFilterMap(route.Filters),
+		}
+	}
+
+	return lambdaID, lambdaRegistration{
+		Providers: normalizedProviders,
+		Routes:    copied,
+	}, nil
 }
 
 func normalizeProviders(providers []string) []string {
