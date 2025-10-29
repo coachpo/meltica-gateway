@@ -30,7 +30,7 @@ build:
 	go build -o bin/ ./...
 
 build-linux-arm64:
-	mkdir -p bin/linux-arm64/ && GOOS=linux GOARCH=arm64 go build -o bin/linux-arm64/ ./... && cp config/app.yaml bin/linux-arm64/ 2>/dev/null || true
+	mkdir -p bin/linux-arm64/ && GOOS=linux GOARCH=arm64 go build -o bin/linux-arm64/ ./... && cp config/*.yaml bin/linux-arm64/ 2>/dev/null || true
 
 tidy:
 	go mod tidy
