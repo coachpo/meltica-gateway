@@ -44,6 +44,7 @@ All exchange adapters **MUST** implement WebSocket stream management using the *
 - [ ] Wire provider registration so aliases in `config/app.yaml` can reference the new exchange.
 - [ ] Build a canonical↔venue symbol converter and reuse it across REST, WebSocket, and order submission paths.
 - [ ] Publish tickers, trades, order book updates, balances, and execution reports using the shared publisher utilities.
+- [ ] Confirm logging displays provider info so multi-provider deployments can trace control flow.
 - [ ] Integrate the `OrderBookAssembler` when the exchange offers diff streams, falling back to periodic snapshots if necessary.
 - [ ] Cover the adapter with table-driven unit tests and run contract suites such as `make contract-ws-routing` before merging.
 
