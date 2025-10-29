@@ -51,7 +51,7 @@ telemetry:
 
 lambdaManifest:
   lambdas:
-    - id: binance-log-btc
+    - id: binance-delay-btc-usdt
       providers:
         - binance
       symbol: BTC-USDT
@@ -61,7 +61,7 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-eth
+    - id: binance-delay-eth-usdt
       providers:
         - binance
       symbol: ETH-USDT
@@ -71,7 +71,7 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-bnb
+    - id: binance-delay-bnb-usdt
       providers:
         - binance
       symbol: BNB-USDT
@@ -81,47 +81,17 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-xrp
+    - id: binance-delay-neo-usdt
       providers:
         - binance
-      symbol: XRP-USDT
+      symbol: NEO-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-sol
-      providers:
-        - binance
-      symbol: SOL-USDT
-      strategy: delay
-      config:
-        dry_run: true
-        min_delay: "50ms"
-        max_delay: "200ms"
-      auto_start: true
-    - id: binance-log-ada
-      providers:
-        - binance
-      symbol: ADA-USDT
-      strategy: delay
-      config:
-        dry_run: true
-        min_delay: "50ms"
-        max_delay: "200ms"
-      auto_start: true
-    - id: binance-log-doge
-      providers:
-        - binance
-      symbol: DOGE-USDT
-      strategy: delay
-      config:
-        dry_run: true
-        min_delay: "50ms"
-        max_delay: "200ms"
-      auto_start: true
-    - id: binance-log-ltc
+    - id: binance-delay-ltc-usdt
       providers:
         - binance
       symbol: LTC-USDT
@@ -131,17 +101,77 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-link
+    - id: binance-delay-qtum-usdt
       providers:
         - binance
-      symbol: LINK-USDT
+      symbol: QTUM-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-trx
+    - id: binance-delay-ada-usdt
+      providers:
+        - binance
+      symbol: ADA-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-xrp-usdt
+      providers:
+        - binance
+      symbol: XRP-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-tusd-usdt
+      providers:
+        - binance
+      symbol: TUSD-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-iota-usdt
+      providers:
+        - binance
+      symbol: IOTA-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-xlm-usdt
+      providers:
+        - binance
+      symbol: XLM-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-ont-usdt
+      providers:
+        - binance
+      symbol: ONT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-trx-usdt
       providers:
         - binance
       symbol: TRX-USDT
@@ -151,98 +181,177 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-matic
+    - id: binance-delay-etc-usdt
       providers:
         - binance
-      symbol: MATIC-USDT
+      symbol: ETC-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-avax
+    - id: binance-delay-icx-usdt
       providers:
         - binance
-      symbol: AVAX-USDT
+      symbol: ICX-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-dot
+    - id: binance-delay-vet-usdt
       providers:
         - binance
-      symbol: DOT-USDT
+      symbol: VET-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-atom
+    - id: binance-delay-usdc-usdt
       providers:
         - binance
-      symbol: ATOM-USDT
+      symbol: USDC-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-fil
+    - id: binance-delay-link-usdt
       providers:
         - binance
-      symbol: FIL-USDT
+      symbol: LINK-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-hbar
+    - id: binance-delay-ong-usdt
       providers:
         - binance
-      symbol: HBAR-USDT
+      symbol: ONG-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-eos
+    - id: binance-delay-hot-usdt
       providers:
         - binance
-      symbol: EOS-USDT
+      symbol: HOT-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-log-rune
+    - id: binance-delay-zil-usdt
       providers:
         - binance
-      symbol: RUNE-USDT
+      symbol: ZIL-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log
+    - id: binance-delay-zrx-usdt
       providers:
         - binance
-        - binance-futures
-      symbol: ETH-USDT
+      symbol: ZRX-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-btc
+    - id: binance-delay-fet-usdt
+      providers:
+        - binance
+      symbol: FET-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-bat-usdt
+      providers:
+        - binance
+      symbol: BAT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-zec-usdt
+      providers:
+        - binance
+      symbol: ZEC-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-iost-usdt
+      providers:
+        - binance
+      symbol: IOST-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-celr-usdt
+      providers:
+        - binance
+      symbol: CELR-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-dash-usdt
+      providers:
+        - binance
+      symbol: DASH-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-theta-usdt
+      providers:
+        - binance
+      symbol: THETA-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-delay-enj-usdt
+      providers:
+        - binance
+      symbol: ENJ-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-btc-usdt
       providers:
         - binance
         - binance-futures
@@ -253,18 +362,62 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-sol
+    - id: binance-cross-delay-eth-usdt
       providers:
         - binance
         - binance-futures
-      symbol: SOL-USDT
+      symbol: ETH-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-ada
+    - id: binance-cross-delay-bnb-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: BNB-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-neo-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: NEO-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-ltc-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: LTC-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-qtum-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: QTUM-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-ada-usdt
       providers:
         - binance
         - binance-futures
@@ -275,18 +428,7 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-doge
-      providers:
-        - binance
-        - binance-futures
-      symbol: DOGE-USDT
-      strategy: delay
-      config:
-        dry_run: true
-        min_delay: "50ms"
-        max_delay: "200ms"
-      auto_start: true
-    - id: binance-cross-log-xrp
+    - id: binance-cross-delay-xrp-usdt
       providers:
         - binance
         - binance-futures
@@ -297,84 +439,249 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-near
+    - id: binance-cross-delay-tusd-usdt
       providers:
         - binance
         - binance-futures
-      symbol: NEAR-USDT
+      symbol: TUSD-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-ftm
+    - id: binance-cross-delay-iota-usdt
       providers:
         - binance
         - binance-futures
-      symbol: FTM-USDT
+      symbol: IOTA-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-sand
+    - id: binance-cross-delay-xlm-usdt
       providers:
         - binance
         - binance-futures
-      symbol: SAND-USDT
+      symbol: XLM-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-axs
+    - id: binance-cross-delay-ont-usdt
       providers:
         - binance
         - binance-futures
-      symbol: AXS-USDT
+      symbol: ONT-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-flow
+    - id: binance-cross-delay-trx-usdt
       providers:
         - binance
         - binance-futures
-      symbol: FLOW-USDT
+      symbol: TRX-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-gmt
+    - id: binance-cross-delay-etc-usdt
       providers:
         - binance
         - binance-futures
-      symbol: GMT-USDT
+      symbol: ETC-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-cross-log-ens
+    - id: binance-cross-delay-icx-usdt
       providers:
         - binance
         - binance-futures
-      symbol: ENS-USDT
+      symbol: ICX-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-btc
+    - id: binance-cross-delay-vet-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: VET-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-usdc-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: USDC-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-link-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: LINK-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-ong-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: ONG-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-hot-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: HOT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-zil-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: ZIL-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-zrx-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: ZRX-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-fet-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: FET-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-bat-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: BAT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-zec-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: ZEC-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-iost-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: IOST-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-celr-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: CELR-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-dash-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: DASH-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-theta-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: THETA-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-cross-delay-enj-usdt
+      providers:
+        - binance
+        - binance-futures
+      symbol: ENJ-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-btc-usdt
       providers:
         - binance-futures
       symbol: BTC-USDT
@@ -384,7 +691,7 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-eth
+    - id: binance-futures-delay-eth-usdt
       providers:
         - binance-futures
       symbol: ETH-USDT
@@ -394,7 +701,7 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-bnb
+    - id: binance-futures-delay-bnb-usdt
       providers:
         - binance-futures
       symbol: BNB-USDT
@@ -404,27 +711,37 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-xrp
+    - id: binance-futures-delay-neo-usdt
       providers:
         - binance-futures
-      symbol: XRP-USDT
+      symbol: NEO-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-sol
+    - id: binance-futures-delay-ltc-usdt
       providers:
         - binance-futures
-      symbol: SOL-USDT
+      symbol: LTC-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-ada
+    - id: binance-futures-delay-qtum-usdt
+      providers:
+        - binance-futures
+      symbol: QTUM-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-ada-usdt
       providers:
         - binance-futures
       symbol: ADA-USDT
@@ -434,110 +751,230 @@ lambdaManifest:
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-doge
+    - id: binance-futures-delay-xrp-usdt
       providers:
         - binance-futures
-      symbol: DOGE-USDT
+      symbol: XRP-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-matic
+    - id: binance-futures-delay-tusd-usdt
       providers:
         - binance-futures
-      symbol: MATIC-USDT
+      symbol: TUSD-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-op
+    - id: binance-futures-delay-iota-usdt
       providers:
         - binance-futures
-      symbol: OP-USDT
+      symbol: IOTA-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-arb
+    - id: binance-futures-delay-xlm-usdt
       providers:
         - binance-futures
-      symbol: ARB-USDT
+      symbol: XLM-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-inj
+    - id: binance-futures-delay-ont-usdt
       providers:
         - binance-futures
-      symbol: INJ-USDT
+      symbol: ONT-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-gmx
+    - id: binance-futures-delay-trx-usdt
       providers:
         - binance-futures
-      symbol: GMX-USDT
+      symbol: TRX-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-rndr
+    - id: binance-futures-delay-etc-usdt
       providers:
         - binance-futures
-      symbol: RNDR-USDT
+      symbol: ETC-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-ldo
+    - id: binance-futures-delay-icx-usdt
       providers:
         - binance-futures
-      symbol: LDO-USDT
+      symbol: ICX-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-apt
+    - id: binance-futures-delay-vet-usdt
       providers:
         - binance-futures
-      symbol: APT-USDT
+      symbol: VET-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-sui
+    - id: binance-futures-delay-usdc-usdt
       providers:
         - binance-futures
-      symbol: SUI-USDT
+      symbol: USDC-USDT
       strategy: delay
       config:
         dry_run: true
         min_delay: "50ms"
         max_delay: "200ms"
       auto_start: true
-    - id: binance-futures-log-dydx
+    - id: binance-futures-delay-link-usdt
       providers:
         - binance-futures
-      symbol: DYDX-USDT
+      symbol: LINK-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-ong-usdt
+      providers:
+        - binance-futures
+      symbol: ONG-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-hot-usdt
+      providers:
+        - binance-futures
+      symbol: HOT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-zil-usdt
+      providers:
+        - binance-futures
+      symbol: ZIL-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-zrx-usdt
+      providers:
+        - binance-futures
+      symbol: ZRX-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-fet-usdt
+      providers:
+        - binance-futures
+      symbol: FET-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-bat-usdt
+      providers:
+        - binance-futures
+      symbol: BAT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-zec-usdt
+      providers:
+        - binance-futures
+      symbol: ZEC-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-iost-usdt
+      providers:
+        - binance-futures
+      symbol: IOST-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-celr-usdt
+      providers:
+        - binance-futures
+      symbol: CELR-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-dash-usdt
+      providers:
+        - binance-futures
+      symbol: DASH-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-theta-usdt
+      providers:
+        - binance-futures
+      symbol: THETA-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "50ms"
+        max_delay: "200ms"
+      auto_start: true
+    - id: binance-futures-delay-enj-usdt
+      providers:
+        - binance-futures
+      symbol: ENJ-USDT
       strategy: delay
       config:
         dry_run: true
