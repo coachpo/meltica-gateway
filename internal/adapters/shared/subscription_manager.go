@@ -82,6 +82,12 @@ func (m *SubscriptionManager) Activate(ctx context.Context, route dispatcher.Rou
 			subscribeErr = m.subscriber.SubscribeRoute(route)
 		}
 	} else {
+		removals := buildDeltaRoute(existing, diffFilters(existing.Filters, route.Filters))
+		if m.subscriber != nil && len(removals.Filters) > 0 {
+			if err := m.subscriber.UnsubscribeRoute(removals); err != nil {
+				return fmt.Errorf("unsubscribe route: %w", err)
+			}
+		}
 		additions := buildDeltaRoute(route, diffFilters(route.Filters, existing.Filters))
 		if m.subscriber != nil && len(additions.Filters) > 0 {
 			subscribeErr = m.subscriber.SubscribeRoute(additions)
