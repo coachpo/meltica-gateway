@@ -152,6 +152,7 @@ func NewProvider(opts Options) *Provider {
 		cancel:           nil,
 		started:          atomic.Bool{},
 		publisher:        nil,
+		metrics:          nil,
 		instrumentsMu:    sync.RWMutex{},
 		instruments:      make(map[string]schema.Instrument),
 		symbols:          make(map[string]symbolMeta),

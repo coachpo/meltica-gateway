@@ -38,8 +38,17 @@ func newProviderMetrics(p *Provider) *providerMetrics {
 	env := telemetry.Environment()
 
 	pm := &providerMetrics{
-		environment: env,
-		provider:    telemetry.ProviderBinance,
+		environment:      env,
+		provider:         telemetry.ProviderBinance,
+		ordersReceived:   nil,
+		ordersRejected:   nil,
+		orderLatency:     nil,
+		eventsEmitted:    nil,
+		balanceUpdates:   nil,
+		venueErrors:      nil,
+		venueDisruptions: nil,
+		balanceTotal:     nil,
+		balanceAvailable: nil,
 	}
 
 	pm.ordersReceived, _ = meter.Int64Counter("meltica_provider_binance_orders_received",
@@ -212,9 +221,16 @@ func newStreamMetrics(provider, stream string) *streamMetrics {
 	env := telemetry.Environment()
 
 	sm := &streamMetrics{
-		environment: env,
-		provider:    provider,
-		stream:      stream,
+		environment:      env,
+		provider:         provider,
+		stream:           stream,
+		reconnects:       nil,
+		controlMessages:  nil,
+		messagesReceived: nil,
+		messageBytes:     nil,
+		pingCount:        nil,
+		pingLatency:      nil,
+		subscriptions:    nil,
 	}
 
 	sm.reconnects, _ = meter.Int64Counter("meltica_provider_binance_ws_reconnects",
