@@ -50,6 +50,7 @@ type streamManager struct {
 
 	controlMu       sync.Mutex
 	lastControlSend time.Time
+	metrics         *streamMetrics
 }
 
 type subscribeRequest struct {
@@ -70,7 +71,7 @@ type wsError struct {
 }
 
 // newStreamManager creates a new stream manager instance.
-func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) error, errorChan chan<- error) *streamManager {
+func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) error, errorChan chan<- error, stream, provider string) *streamManager {
 	managerCtx, cancel := context.WithCancel(ctx)
 	return &streamManager{
 		baseURL:         baseURL,
@@ -87,6 +88,7 @@ func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) 
 		readyOnce:       sync.Once{},
 		controlMu:       sync.Mutex{},
 		lastControlSend: time.Time{},
+		metrics:         newStreamMetrics(provider, stream),
 	}
 }
 
@@ -140,6 +142,10 @@ func (sm *streamManager) subscribe(streams []string) error {
 		return nil // All streams already subscribed
 	}
 
+	if sm.metrics != nil {
+		sm.metrics.adjustSubscriptions(sm.ctx, len(newStreams))
+	}
+
 	return sm.sendBatchedControlRequests(sm.ctx, "SUBSCRIBE", newStreams)
 }
 
@@ -165,6 +171,10 @@ func (sm *streamManager) unsubscribe(streams []string) error {
 		return nil // No streams to unsubscribe
 	}
 
+	if sm.metrics != nil {
+		sm.metrics.adjustSubscriptions(sm.ctx, -len(existingStreams))
+	}
+
 	return sm.sendBatchedControlRequests(sm.ctx, "UNSUBSCRIBE", existingStreams)
 }
 
@@ -184,6 +194,9 @@ func (sm *streamManager) connect() error {
 
 		conn, _, err := websocket.Dial(sm.ctx, sm.baseURL, nil)
 		if err != nil {
+			if sm.metrics != nil {
+				sm.metrics.recordReconnect(sm.ctx, "error")
+			}
 			sm.reportError(fmt.Errorf("dial %s: %w", sm.baseURL, err))
 			sleep := backoffCfg.NextBackOff()
 			if sleep == backoff.Stop {
@@ -195,6 +208,10 @@ func (sm *streamManager) connect() error {
 			case <-time.After(sleep):
 				continue
 			}
+		}
+
+		if sm.metrics != nil {
+			sm.metrics.recordReconnect(sm.ctx, "success")
 		}
 
 		sm.connMu.Lock()
@@ -337,6 +354,10 @@ func (sm *streamManager) sendBatchedControlRequests(ctx context.Context, method 
 		sm.lastControlSend = time.Now()
 		sm.controlMu.Unlock()
 
+		if sm.metrics != nil {
+			sm.metrics.recordControl(ctx, method, len(chunk))
+		}
+
 		log.Printf("binance stream manager: %s request %+v", method, req)
 	}
 
@@ -417,9 +438,21 @@ func (sm *streamManager) pingLoop(ctx context.Context, conn *websocket.Conn) err
 				return err
 			}
 
+			if sm.metrics != nil {
+				sm.metrics.recordControl(ctx, "PING", 1)
+			}
+
 			pingCtx, cancel := context.WithTimeout(ctx, binancePingTimeout)
+			start := time.Now()
 			err = conn.Ping(pingCtx)
 			cancel()
+			if sm.metrics != nil {
+				result := "success"
+				if err != nil {
+					result = "error"
+				}
+				sm.metrics.recordPing(ctx, time.Since(start), result)
+			}
 			if err != nil {
 				sm.controlMu.Unlock()
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -477,6 +510,9 @@ func (sm *streamManager) readLoop(ctx context.Context, conn *websocket.Conn) err
 
 		// Handle stream data
 		if sm.handler != nil {
+			if sm.metrics != nil {
+				sm.metrics.recordMessage(ctx, len(data))
+			}
 			if err := sm.handler(data); err != nil {
 				sm.reportError(fmt.Errorf("handle message: %w", err))
 			}

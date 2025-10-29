@@ -51,12 +51,13 @@ const (
 
 // Event type values
 const (
-	EventTypeBookSnapshot  = "book_snapshot"
-	EventTypeTrade         = "trade"
-	EventTypeTicker        = "ticker"
-	EventTypeKline         = "kline"
-	EventTypeExecReport    = "exec_report"
-	EventTypeBalanceUpdate = "balance_update"
+	EventTypeBookSnapshot     = "book_snapshot"
+	EventTypeTrade            = "trade"
+	EventTypeTicker           = "ticker"
+	EventTypeInstrumentUpdate = "instrument_update"
+	EventTypeKline            = "kline"
+	EventTypeExecReport       = "exec_report"
+	EventTypeBalanceUpdate    = "balance_update"
 )
 
 // Provider values

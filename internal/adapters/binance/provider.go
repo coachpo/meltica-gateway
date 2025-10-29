@@ -27,6 +27,7 @@ import (
 	"github.com/coachpo/meltica/internal/dispatcher"
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/schema"
+	"github.com/coachpo/meltica/internal/telemetry"
 )
 
 // Provider implements the Binance spot market adapter.
@@ -46,6 +47,7 @@ type Provider struct {
 	started atomic.Bool
 
 	publisher *shared.Publisher
+	metrics   *providerMetrics
 
 	instrumentsMu sync.RWMutex
 	instruments   map[string]schema.Instrument
@@ -174,6 +176,7 @@ func NewProvider(opts Options) *Provider {
 	}
 	p.publisher = shared.NewPublisher(p.name, p.events, p.pools, p.clock)
 	p.balances = make(map[string]balanceSnapshot)
+	p.metrics = newProviderMetrics(p)
 	return p
 }
 
@@ -375,6 +378,9 @@ func (p *Provider) publishInstrumentUpdates() {
 	for _, inst := range p.instruments {
 		payload := schema.InstrumentUpdatePayload{Instrument: schema.CloneInstrument(inst)}
 		p.publisher.PublishInstrumentUpdate(p.ctx, inst.Symbol, payload)
+		if p.metrics != nil {
+			p.metrics.recordEvent(p.ctx, telemetry.EventTypeInstrumentUpdate, inst.Symbol)
+		}
 	}
 }
 
@@ -610,6 +616,9 @@ func (p *Provider) initStreamManagers(ctx context.Context) error {
 			Timestamp: time.UnixMilli(event.TradeTime.Int64()).UTC(),
 		}
 		p.publisher.PublishTrade(p.ctx, meta.canonical, payload)
+		if p.metrics != nil {
+			p.metrics.recordEvent(p.ctx, telemetry.EventTypeTrade, meta.canonical)
+		}
 		return nil
 	}
 
@@ -631,6 +640,9 @@ func (p *Provider) initStreamManagers(ctx context.Context) error {
 			Timestamp: time.UnixMilli(event.EventTime.Int64()).UTC(),
 		}
 		p.publisher.PublishTicker(p.ctx, meta.canonical, payload)
+		if p.metrics != nil {
+			p.metrics.recordEvent(p.ctx, telemetry.EventTypeTicker, meta.canonical)
+		}
 		return nil
 	}
 
@@ -682,17 +694,17 @@ func (p *Provider) initStreamManagers(ctx context.Context) error {
 	}
 
 	// Create stream managers
-	p.tradeManager = newStreamManager(ctx, baseURL, tradeHandler, p.errs)
+	p.tradeManager = newStreamManager(ctx, baseURL, tradeHandler, p.errs, "trade", telemetry.ProviderBinance)
 	if err := p.tradeManager.start(); err != nil {
 		return fmt.Errorf("start trade manager: %w", err)
 	}
 
-	p.tickerManager = newStreamManager(ctx, baseURL, tickerHandler, p.errs)
+	p.tickerManager = newStreamManager(ctx, baseURL, tickerHandler, p.errs, "ticker", telemetry.ProviderBinance)
 	if err := p.tickerManager.start(); err != nil {
 		return fmt.Errorf("start ticker manager: %w", err)
 	}
 
-	p.bookManager = newStreamManager(ctx, baseURL, bookHandler, p.errs)
+	p.bookManager = newStreamManager(ctx, baseURL, bookHandler, p.errs, "orderbook", telemetry.ProviderBinance)
 	if err := p.bookManager.start(); err != nil {
 		return fmt.Errorf("start book manager: %w", err)
 	}
@@ -915,6 +927,7 @@ func (p *Provider) handleExecutionReport(event executionReportEvent) {
 	if event.CommissionAsset != nil {
 		commissionAsset = strings.TrimSpace(*event.CommissionAsset)
 	}
+	rejectReason := strings.TrimSpace(event.OrderRejectReason)
 	payload := &schema.ExecReportPayload{
 		ClientOrderID:    clientOrderID,
 		ExchangeOrderID:  strconv.FormatInt(event.OrderID, 10),
@@ -931,7 +944,29 @@ func (p *Provider) handleExecutionReport(event executionReportEvent) {
 		Timestamp:        timestamp,
 		RejectReason:     nil,
 	}
+	if rejectReason != "" {
+		localReason := rejectReason
+		payload.RejectReason = &localReason
+	}
 	p.publisher.PublishExecReport(p.ctx, meta.canonical, *payload)
+	if p.metrics != nil {
+		tif := strings.ToUpper(strings.TrimSpace(event.TimeInForce))
+		state := payload.State
+		p.metrics.recordEvent(p.ctx, telemetry.EventTypeExecReport, meta.canonical)
+		p.metrics.recordOrder(p.ctx, meta.canonical, side, orderType, tif, state)
+		if state == schema.ExecReportStateREJECTED || state == schema.ExecReportStateEXPIRED {
+			reason := rejectReason
+			if reason == "" && payload.RejectReason != nil {
+				reason = *payload.RejectReason
+			}
+			p.metrics.recordOrderRejection(p.ctx, meta.canonical, string(state), reason)
+		}
+		latency := time.Since(timestamp)
+		if p.clock != nil {
+			latency = p.clock().UTC().Sub(timestamp)
+		}
+		p.metrics.recordOrderLatency(p.ctx, meta.canonical, side, orderType, tif, state, latency)
+	}
 }
 
 func (p *Provider) publishBalance(asset string, free, locked decimal.Decimal, timestamp time.Time) {
@@ -947,6 +982,10 @@ func (p *Provider) publishBalance(asset string, free, locked decimal.Decimal, ti
 		Timestamp: timestamp,
 	}
 	p.publisher.PublishBalanceUpdate(p.ctx, asset, payload)
+	if p.metrics != nil {
+		p.metrics.recordEvent(p.ctx, telemetry.EventTypeBalanceUpdate, asset)
+		p.metrics.recordBalanceUpdate(p.ctx, asset)
+	}
 }
 
 func (p *Provider) metaForRESTSymbol(symbol string) (symbolMeta, bool) {
@@ -1031,6 +1070,9 @@ func (p *Provider) seedOrderBook(ctx context.Context, meta symbolMeta, handle *b
 		handle.seqMu.Unlock()
 
 		p.publisher.PublishBookSnapshot(p.ctx, meta.canonical, *payload)
+		if p.metrics != nil {
+			p.metrics.recordEvent(p.ctx, telemetry.EventTypeBookSnapshot, meta.canonical)
+		}
 		return *payload, nil
 	}
 }
@@ -1144,6 +1186,9 @@ func (p *Provider) applyDepthDiff(meta symbolMeta, handle *bookHandle, diff dept
 	snapshot.FirstUpdateID = diff.FirstUpdateID
 	snapshot.FinalUpdateID = diff.FinalUpdateID
 	p.publisher.PublishBookSnapshot(p.ctx, meta.canonical, snapshot)
+	if p.metrics != nil {
+		p.metrics.recordEvent(p.ctx, telemetry.EventTypeBookSnapshot, meta.canonical)
+	}
 	return nil
 }
 
@@ -1256,6 +1301,20 @@ func (p *Provider) publishOrderAcknowledgement(meta symbolMeta, req schema.Order
 		RejectReason:     nil,
 	}
 	p.publisher.PublishExecReport(p.ctx, meta.canonical, *payload)
+	if p.metrics != nil {
+		tif := strings.ToUpper(strings.TrimSpace(order.TimeInForce))
+		state := payload.State
+		p.metrics.recordEvent(p.ctx, telemetry.EventTypeExecReport, meta.canonical)
+		p.metrics.recordOrder(p.ctx, meta.canonical, req.Side, req.OrderType, tif, state)
+		if state == schema.ExecReportStateREJECTED || state == schema.ExecReportStateEXPIRED {
+			p.metrics.recordOrderRejection(p.ctx, meta.canonical, string(state), strings.ToLower(string(state)))
+		}
+		latency := time.Since(timestamp)
+		if p.clock != nil {
+			latency = p.clock().UTC().Sub(timestamp)
+		}
+		p.metrics.recordOrderLatency(p.ctx, meta.canonical, req.Side, req.OrderType, tif, state, latency)
+	}
 }
 
 func parseOrderError(status int, body []byte) error {
@@ -1281,6 +1340,19 @@ func (p *Provider) reportError(err error) {
 	case <-p.ctx.Done():
 	case p.errs <- err:
 	default:
+	}
+	if p.metrics != nil {
+		op, result, disruption := classifyBinanceError(err)
+		if op == "" {
+			op = "adapter.binance"
+		}
+		if result == "" {
+			result = "error"
+		}
+		p.metrics.recordVenueError(p.ctx, op, result)
+		if disruption != "" {
+			p.metrics.recordVenueDisruption(p.ctx, disruption)
+		}
 	}
 }
 
@@ -1405,6 +1477,7 @@ type executionReportEvent struct {
 	LastExecutedPrice  string           `json:"L"`
 	Commission         string           `json:"n"`
 	CommissionAsset    *string          `json:"N"`
+	OrderRejectReason  string           `json:"r"`
 	TransactionTime    binanceTimestamp `json:"T"`
 	CumulativeQuoteQty string           `json:"Z"`
 }
@@ -1584,4 +1657,8 @@ func parseDecimal(value string) (decimal.Decimal, bool) {
 type balanceSnapshot struct {
 	free   decimal.Decimal
 	locked decimal.Decimal
+}
+
+func (b balanceSnapshot) total() decimal.Decimal {
+	return b.free.Add(b.locked)
 }
