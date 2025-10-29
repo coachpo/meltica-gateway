@@ -235,16 +235,28 @@ func (l *BaseLambda) consume(ctx context.Context, subs []subscription, errs chan
 
 	var wg conc.WaitGroup
 	for _, sub := range subs {
+		subscription := sub
 		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
-					return
-				case evt, ok := <-sub.ch:
+					// Drain any buffered events to prevent pool leaks.
+					for {
+						select {
+						case evt, ok := <-subscription.ch:
+							if !ok {
+								return
+							}
+							l.recycleEvent(evt)
+						default:
+							return
+						}
+					}
+				case evt, ok := <-subscription.ch:
 					if !ok {
 						return
 					}
-					l.handleEvent(ctx, sub.typ, evt)
+					l.handleEvent(ctx, subscription.typ, evt)
 				}
 			}
 		})
@@ -753,7 +765,13 @@ func (l *BaseLambda) recycleEvent(evt *schema.Event) {
 		return
 	}
 	if l.pools != nil {
-		l.pools.ReturnEventInst(evt)
+		if ok := l.pools.TryReturnEventInst(evt); !ok {
+			// TryReturnEventInst returns false when the pool already reclaimed the object.
+			// Avoid panicking on double puts—log at debug level instead.
+			if l.logger != nil {
+				l.logger.Printf("[%s] skipping double return for event %s from pool", l.id, evt.EventID)
+			}
+		}
 	}
 }
 
