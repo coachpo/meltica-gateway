@@ -142,9 +142,11 @@ func (op *objectPool) deliver(req *poolRequest, obj PooledObject) bool {
 			return false
 		case <-req.ctx.Done():
 			return false
-		case req.result <- poolResult{obj: obj, err: nil}:
+		case req.result <- func() poolResult {
 			obj.Reset()
 			obj.SetReturned(false)
+			return poolResult{obj: obj, err: nil}
+		}():
 			op.activeLeases.Add(1)
 			return true
 		}
