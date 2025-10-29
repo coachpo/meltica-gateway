@@ -464,7 +464,7 @@ func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaM
 			for _, id := range started {
 				_ = m.Stop(id)
 			}
-			return err
+			return fmt.Errorf("register lambda batch: %w", err)
 		}
 	}
 	return nil
