@@ -36,10 +36,14 @@ func newProviderMetrics(p *Provider) *providerMetrics {
 
 	meter := otel.Meter("adapter.binance")
 	env := telemetry.Environment()
+	providerName := strings.TrimSpace(p.name)
+	if providerName == "" {
+		providerName = defaultProviderName
+	}
 
 	pm := &providerMetrics{
 		environment:      env,
-		provider:         telemetry.ProviderBinance,
+		provider:         providerName,
 		ordersReceived:   nil,
 		ordersRejected:   nil,
 		orderLatency:     nil,
@@ -219,6 +223,10 @@ type streamMetrics struct {
 func newStreamMetrics(provider, stream string) *streamMetrics {
 	meter := otel.Meter("adapter.binance")
 	env := telemetry.Environment()
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		provider = defaultProviderName
+	}
 
 	sm := &streamMetrics{
 		environment:      env,

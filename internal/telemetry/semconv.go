@@ -60,12 +60,6 @@ const (
 	EventTypeBalanceUpdate    = "balance_update"
 )
 
-// Provider values
-const (
-	ProviderBinance = "binance"
-	ProviderFake    = "fake"
-)
-
 // Helper functions for creating common attribute sets
 
 // EventAttributes returns common attributes for event metrics.

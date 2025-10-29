@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,8 +14,6 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"github.com/coder/websocket"
 	"github.com/goccy/go-json"
-
-	"github.com/coachpo/meltica/internal/telemetry"
 )
 
 const (
@@ -77,6 +76,10 @@ type wsError struct {
 // newStreamManager creates a new stream manager instance.
 func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) error, errorChan chan<- error, stream, providerName string) *streamManager {
 	managerCtx, cancel := context.WithCancel(ctx)
+	normalizedProvider := strings.TrimSpace(providerName)
+	if normalizedProvider == "" {
+		normalizedProvider = defaultProviderName
+	}
 	return &streamManager{
 		baseURL:         baseURL,
 		ctx:             managerCtx,
@@ -92,9 +95,9 @@ func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) 
 		readyOnce:       sync.Once{},
 		controlMu:       sync.Mutex{},
 		lastControlSend: time.Time{},
-		metrics:         newStreamMetrics(telemetry.ProviderBinance, stream),
+		metrics:         newStreamMetrics(normalizedProvider, stream),
 		streamName:      stream,
-		providerName:    providerName,
+		providerName:    normalizedProvider,
 	}
 }
 
