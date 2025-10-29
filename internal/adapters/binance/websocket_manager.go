@@ -19,6 +19,11 @@ const (
 	binanceControlMessageInterval = 250 * time.Millisecond
 	// Keep subscribe payloads modest so we can throttle between them if the stream count is large.
 	binanceMaxStreamsPerRequest = 100
+	// Keepalive and reconnection tuning.
+	binancePingInterval         = 30 * time.Second
+	binancePingTimeout          = 5 * time.Second
+	binanceControlWriteTimeout  = 5 * time.Second
+	binanceMaxReconnectInterval = 30 * time.Second
 )
 
 // streamManager manages a single WebSocket connection with live subscribe/unsubscribe support.
@@ -161,6 +166,7 @@ func (sm *streamManager) unsubscribe(streams []string) error {
 // connect maintains the WebSocket connection with automatic reconnection and exponential backoff.
 func (sm *streamManager) connect() error {
 	backoffCfg := backoff.NewExponentialBackOff()
+	backoffCfg.MaxInterval = binanceMaxReconnectInterval
 
 	for {
 		select {
@@ -173,6 +179,9 @@ func (sm *streamManager) connect() error {
 		if err != nil {
 			sm.reportError(fmt.Errorf("dial %s: %w", sm.baseURL, err))
 			sleep := backoffCfg.NextBackOff()
+			if sleep == backoff.Stop {
+				sleep = binanceMaxReconnectInterval
+			}
 			select {
 			case <-sm.ctx.Done():
 				return context.Canceled
@@ -184,6 +193,10 @@ func (sm *streamManager) connect() error {
 		sm.connMu.Lock()
 		sm.conn = conn
 		sm.connMu.Unlock()
+
+		sm.controlMu.Lock()
+		sm.lastControlSend = time.Time{}
+		sm.controlMu.Unlock()
 
 		// Signal ready on first successful connection
 		sm.readyOnce.Do(func() {
@@ -197,20 +210,50 @@ func (sm *streamManager) connect() error {
 			sm.reportError(fmt.Errorf("resubscribe after reconnect: %w", err))
 		}
 
-		// Start read loop
-		if err := sm.readLoop(conn); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return context.Canceled
-			}
-			sm.reportError(fmt.Errorf("read loop: %w", err))
-		}
+		connCtx, connCancel := context.WithCancel(sm.ctx)
+		errCh := make(chan error, 2)
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			errCh <- sm.readLoop(connCtx, conn)
+		}()
+
+		go func() {
+			defer wg.Done()
+			errCh <- sm.pingLoop(connCtx, conn)
+		}()
+
+		firstErr := <-errCh
+		connCancel()
 
 		sm.connMu.Lock()
-		sm.conn = nil
+		if sm.conn == conn {
+			sm.conn = nil
+		}
 		sm.connMu.Unlock()
 
-		// Reconnect with backoff
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+
+		wg.Wait()
+		close(errCh)
+
+		aggregatedErr := firstErr
+		for e := range errCh {
+			if aggregatedErr == nil || errors.Is(aggregatedErr, context.Canceled) || errors.Is(aggregatedErr, context.DeadlineExceeded) {
+				aggregatedErr = e
+			}
+		}
+
+		if aggregatedErr != nil && !errors.Is(aggregatedErr, context.Canceled) && !errors.Is(aggregatedErr, context.DeadlineExceeded) {
+			sm.reportError(fmt.Errorf("connection loop: %w", aggregatedErr))
+		}
+
 		sleep := backoffCfg.NextBackOff()
+		if sleep == backoff.Stop {
+			sleep = binanceMaxReconnectInterval
+		}
 		select {
 		case <-sm.ctx.Done():
 			return context.Canceled
@@ -253,7 +296,7 @@ func (sm *streamManager) sendBatchedControlRequests(method string, streams []str
 
 	chunks := chunkStreams(streams, binanceMaxStreamsPerRequest)
 	for _, chunk := range chunks {
-		if err := sm.waitForControlWindowLocked(method); err != nil {
+		if err := sm.waitForControlWindowLocked(sm.ctx, method); err != nil {
 			return err
 		}
 
@@ -268,7 +311,7 @@ func (sm *streamManager) sendBatchedControlRequests(method string, streams []str
 			return fmt.Errorf("marshal %s request: %w", method, err)
 		}
 
-		writeCtx, cancel := context.WithTimeout(sm.ctx, 5*time.Second)
+		writeCtx, cancel := context.WithTimeout(sm.ctx, binanceControlWriteTimeout)
 		err = conn.Write(writeCtx, websocket.MessageText, data)
 		cancel()
 		if err != nil {
@@ -305,7 +348,11 @@ func chunkStreams(streams []string, size int) [][]string {
 	return chunks
 }
 
-func (sm *streamManager) waitForControlWindowLocked(method string) error {
+func (sm *streamManager) waitForControlWindowLocked(ctx context.Context, method string) error {
+	if ctx == nil {
+		ctx = sm.ctx
+	}
+
 	if sm.lastControlSend.IsZero() {
 		return nil
 	}
@@ -322,21 +369,68 @@ func (sm *streamManager) waitForControlWindowLocked(method string) error {
 	select {
 	case <-timer.C:
 		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("context done while pacing %s requests: %w", method, ctx.Err())
 	case <-sm.ctx.Done():
 		return fmt.Errorf("context done while pacing %s requests: %w", method, sm.ctx.Err())
 	}
 }
 
+// pingLoop periodically sends ping control frames to keep the connection alive and detect stale sockets.
+func (sm *streamManager) pingLoop(ctx context.Context, conn *websocket.Conn) error {
+	ticker := time.NewTicker(binancePingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			sm.controlMu.Lock()
+			err := sm.waitForControlWindowLocked(ctx, "PING")
+			if err != nil {
+				sm.controlMu.Unlock()
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return context.Canceled
+				}
+				return err
+			}
+
+			pingCtx, cancel := context.WithTimeout(ctx, binancePingTimeout)
+			err = conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				sm.controlMu.Unlock()
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return context.Canceled
+				}
+				if status := websocket.CloseStatus(err); status != -1 {
+					return fmt.Errorf("ping: remote closed with status %d", status)
+				}
+				return fmt.Errorf("ping: %w", err)
+			}
+
+			sm.lastControlSend = time.Now()
+			sm.controlMu.Unlock()
+		}
+	}
+}
+
 // readLoop continuously reads messages from the WebSocket connection.
 // It distinguishes between control messages (subscribe/unsubscribe responses) and stream data.
-func (sm *streamManager) readLoop(conn *websocket.Conn) error {
+func (sm *streamManager) readLoop(ctx context.Context, conn *websocket.Conn) error {
 	for {
-		msgType, data, err := conn.Read(sm.ctx)
+		msgType, data, err := conn.Read(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return context.Canceled
 			}
-			_ = conn.Close(websocket.StatusNormalClosure, "")
+			if status := websocket.CloseStatus(err); status != -1 {
+				if status == websocket.StatusNormalClosure {
+					return context.Canceled
+				}
+				return fmt.Errorf("read: remote closed with status %d", status)
+			}
 			return fmt.Errorf("read: %w", err)
 		}
 
