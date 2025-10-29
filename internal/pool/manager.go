@@ -133,10 +133,10 @@ func (pm *PoolManager) RegisterPool(name string, capacity int, newFunc func() an
 		}
 		return po
 	}
-	
+
 	sampleObj := factory()
 	sampleObj.Reset()
-	
+
 	pool, err := newObjectPool(name, objectType, capacity, factory)
 	if err != nil {
 		return err
@@ -175,12 +175,7 @@ func (pm *PoolManager) Get(ctx context.Context, poolName string) (PooledObject, 
 			attribute.String("pool_name", poolName),
 			attribute.String("object_type", objectType)))
 	}
-	if pm.activeObjectsGauge != nil {
-		pm.activeObjectsGauge.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("environment", telemetry.Environment()),
-			attribute.String("pool_name", poolName),
-			attribute.String("object_type", objectType)))
-	}
+	pm.recordActiveGauge(ctx, pool, poolName, 1)
 	if pm.borrowDuration != nil {
 		duration := time.Since(start).Milliseconds()
 		pm.borrowDuration.Record(ctx, float64(duration), metric.WithAttributes(
@@ -231,6 +226,7 @@ func (pm *PoolManager) TryGet(poolName string) (PooledObject, bool, error) {
 
 	pm.inFlight.Add(1)
 	pm.activeCount.Add(1)
+	pm.recordActiveGauge(context.Background(), pool, poolName, 1)
 	return obj, true, nil
 }
 
@@ -258,7 +254,6 @@ func (pm *PoolManager) TryGetMany(poolName string, count int) ([]PooledObject, b
 
 // Put returns an object to the named pool, panicking if the pool is unknown.
 func (pm *PoolManager) Put(poolName string, obj PooledObject) {
-	ctx := context.Background()
 	pool, err := pm.lookup(poolName)
 	if err != nil {
 		panic(err)
@@ -270,13 +265,7 @@ func (pm *PoolManager) Put(poolName string, obj PooledObject) {
 		panic(err)
 	}
 
-	objectType := pool.getObjectType()
-	if pm.activeObjectsGauge != nil {
-		pm.activeObjectsGauge.Add(ctx, -1, metric.WithAttributes(
-			attribute.String("environment", telemetry.Environment()),
-			attribute.String("pool_name", poolName),
-			attribute.String("object_type", objectType)))
-	}
+	pm.recordActiveGauge(context.Background(), pool, poolName, -1)
 }
 
 // PutMany returns multiple objects to the named pool.
@@ -301,6 +290,7 @@ func (pm *PoolManager) TryPut(poolName string, obj PooledObject) (bool, error) {
 	if success {
 		pm.inFlight.Done()
 		pm.activeCount.Add(-1)
+		pm.recordActiveGauge(context.Background(), pool, poolName, -1)
 	} else if putErr == nil {
 		log.Printf("pool manager: try put rejected for pool %s", poolName)
 	}
@@ -327,6 +317,7 @@ func (pm *PoolManager) TryPutMany(poolName string, objects []PooledObject) (bool
 		if putSuccess {
 			pm.inFlight.Done()
 			pm.activeCount.Add(-1)
+			pm.recordActiveGauge(context.Background(), pool, poolName, -1)
 			continue
 		}
 		if putErr != nil {
@@ -388,6 +379,19 @@ func (pm *PoolManager) lookup(name string) (*objectPool, error) {
 		return nil, fmt.Errorf("%w: %s", ErrPoolNotRegistered, name)
 	}
 	return pool, nil
+}
+
+func (pm *PoolManager) recordActiveGauge(ctx context.Context, pool *objectPool, poolName string, delta int64) {
+	if pm.activeObjectsGauge == nil || pool == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	pm.activeObjectsGauge.Add(ctx, delta, metric.WithAttributes(
+		attribute.String("environment", telemetry.Environment()),
+		attribute.String("pool_name", poolName),
+		attribute.String("object_type", pool.getObjectType())))
 }
 
 func (pm *PoolManager) logOutstanding(remaining int64) {
