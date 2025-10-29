@@ -146,11 +146,11 @@
       "datasource": {
         "uid": "$datasource"
       },
-      "description": "Order Latency p95",
+      "description": "Order latency quantiles",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "thresholds": {
             "mode": "absolute",
@@ -169,14 +169,17 @@
               }
             ]
           },
-          "unit": "ms"
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "Latency (ms)"
+          }
         }
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 2
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
       },
       "id": 103,
       "options": {
@@ -186,16 +189,34 @@
           "calcs": [
             "lastNotNull"
           ]
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
         }
       },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum(rate(meltica_provider_binance_order_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(meltica_provider_binance_order_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
+          "refId": "B",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(meltica_provider_binance_order_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
+          "refId": "C",
+          "legendFormat": "p99"
         }
       ],
-      "title": "Order Latency p95",
-      "type": "stat"
+      "title": "Order Latency",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -662,6 +683,163 @@
       ],
       "title": "Rejections by State",
       "type": "timeseries"
+    },
+    {
+      "id": 200,
+      "type": "stat",
+      "title": "WS Reconnects (5m)",
+      "description": "Successful and failed reconnect attempts (5m rate)",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "datasource": {
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(meltica_provider_binance_ws_reconnects{environment=\"$environment\",result=\"success\"}[5m]))",
+          "legendFormat": "success"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(meltica_provider_binance_ws_reconnects{environment=\"$environment\",result=\"error\"}[5m]))",
+          "legendFormat": "error"
+        }
+      ]
+    },
+    {
+      "id": 202,
+      "type": "timeseries",
+      "title": "WS Message Rate by Stream",
+      "description": "Incoming websocket messages by stream type",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(meltica_provider_binance_ws_messages{environment=\"$environment\"}[1m])) by (message_type)",
+          "legendFormat": "{{message_type}}"
+        }
+      ]
+    },
+    {
+      "id": 204,
+      "type": "stat",
+      "title": "Active WS Subscriptions",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "streams"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": ""
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(meltica_provider_binance_ws_active_subscriptions{environment=\"$environment\"})",
+          "legendFormat": "active"
+        }
+      ]
+    },
+    {
+      "id": 205,
+      "type": "timeseries",
+      "title": "WS Ping Latency",
+      "description": "Ping RTT p95",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "datasource": {
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(meltica_provider_binance_ws_ping_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
+          "legendFormat": "ping p95"
+        }
+      ]
     }
   ],
   "refresh": "30s",
