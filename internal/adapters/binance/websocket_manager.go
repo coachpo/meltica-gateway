@@ -13,6 +13,8 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"github.com/coder/websocket"
 	"github.com/goccy/go-json"
+
+	"github.com/coachpo/meltica/internal/telemetry"
 )
 
 const (
@@ -51,6 +53,8 @@ type streamManager struct {
 	controlMu       sync.Mutex
 	lastControlSend time.Time
 	metrics         *streamMetrics
+	streamName      string
+	providerName    string
 }
 
 type subscribeRequest struct {
@@ -71,7 +75,7 @@ type wsError struct {
 }
 
 // newStreamManager creates a new stream manager instance.
-func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) error, errorChan chan<- error, stream, provider string) *streamManager {
+func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) error, errorChan chan<- error, stream, providerName string) *streamManager {
 	managerCtx, cancel := context.WithCancel(ctx)
 	return &streamManager{
 		baseURL:         baseURL,
@@ -88,7 +92,9 @@ func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) 
 		readyOnce:       sync.Once{},
 		controlMu:       sync.Mutex{},
 		lastControlSend: time.Time{},
-		metrics:         newStreamMetrics(provider, stream),
+		metrics:         newStreamMetrics(telemetry.ProviderBinance, stream),
+		streamName:      stream,
+		providerName:    providerName,
 	}
 }
 
@@ -358,7 +364,7 @@ func (sm *streamManager) sendBatchedControlRequests(ctx context.Context, method 
 			sm.metrics.recordControl(ctx, method, len(chunk))
 		}
 
-		log.Printf("binance stream manager: %s request %+v", method, req)
+		log.Printf("binance stream manager [%s/%s]: %s request %+v", sm.providerName, sm.streamName, method, req)
 	}
 
 	return nil
@@ -523,6 +529,9 @@ func (sm *streamManager) readLoop(ctx context.Context, conn *websocket.Conn) err
 func (sm *streamManager) reportError(err error) {
 	if err == nil || sm.errorChan == nil {
 		return
+	}
+	if sm.providerName != "" || sm.streamName != "" {
+		err = fmt.Errorf("binance stream manager [%s/%s]: %w", sm.providerName, sm.streamName, err)
 	}
 	select {
 	case <-sm.ctx.Done():

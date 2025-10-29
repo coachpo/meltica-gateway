@@ -695,17 +695,17 @@ func (p *Provider) initStreamManagers(ctx context.Context) error {
 	}
 
 	// Create stream managers
-	p.tradeManager = newStreamManager(ctx, baseURL, tradeHandler, p.errs, "trade", telemetry.ProviderBinance)
+	p.tradeManager = newStreamManager(ctx, baseURL, tradeHandler, p.errs, "trade", p.name)
 	if err := p.tradeManager.start(); err != nil {
 		return fmt.Errorf("start trade manager: %w", err)
 	}
 
-	p.tickerManager = newStreamManager(ctx, baseURL, tickerHandler, p.errs, "ticker", telemetry.ProviderBinance)
+	p.tickerManager = newStreamManager(ctx, baseURL, tickerHandler, p.errs, "ticker", p.name)
 	if err := p.tickerManager.start(); err != nil {
 		return fmt.Errorf("start ticker manager: %w", err)
 	}
 
-	p.bookManager = newStreamManager(ctx, baseURL, bookHandler, p.errs, "orderbook", telemetry.ProviderBinance)
+	p.bookManager = newStreamManager(ctx, baseURL, bookHandler, p.errs, "orderbook", p.name)
 	if err := p.bookManager.start(); err != nil {
 		return fmt.Errorf("start book manager: %w", err)
 	}
