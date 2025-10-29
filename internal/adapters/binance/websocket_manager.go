@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +26,7 @@ const (
 	binancePingTimeout          = 5 * time.Second
 	binanceControlWriteTimeout  = 5 * time.Second
 	binanceMaxReconnectInterval = 30 * time.Second
+	binanceReadLimit            = 2 * 1024 * 1024
 )
 
 // streamManager manages a single WebSocket connection with live subscribe/unsubscribe support.
@@ -168,6 +171,8 @@ func (sm *streamManager) connect() error {
 	backoffCfg := backoff.NewExponentialBackOff()
 	backoffCfg.MaxInterval = binanceMaxReconnectInterval
 
+	// Persistently attempt to keep a single websocket session alive until the parent context terminates.
+	// The loop dials, replays subscriptions, and coordinates reader/pinger goroutines for each session.
 	for {
 		select {
 		case <-sm.ctx.Done():
@@ -194,6 +199,8 @@ func (sm *streamManager) connect() error {
 		sm.conn = conn
 		sm.connMu.Unlock()
 
+		conn.SetReadLimit(binanceReadLimit)
+
 		sm.controlMu.Lock()
 		sm.lastControlSend = time.Time{}
 		sm.controlMu.Unlock()
@@ -210,6 +217,7 @@ func (sm *streamManager) connect() error {
 			sm.reportError(fmt.Errorf("resubscribe after reconnect: %w", err))
 		}
 
+		// Each connection instance runs isolated read and ping loops that can cancel one another.
 		connCtx, connCancel := context.WithCancel(sm.ctx)
 		errCh := make(chan error, 2)
 		var wg sync.WaitGroup
@@ -254,6 +262,7 @@ func (sm *streamManager) connect() error {
 		if sleep == backoff.Stop {
 			sleep = binanceMaxReconnectInterval
 		}
+		// Back off before re-dialing to avoid hammering Binance when transient faults occur.
 		select {
 		case <-sm.ctx.Done():
 			return context.Canceled
@@ -291,7 +300,9 @@ func (sm *streamManager) sendBatchedControlRequests(method string, streams []str
 	conn := sm.conn
 	sm.connMu.RUnlock()
 	if conn == nil {
-		return errors.New("websocket not connected")
+		// During reconnects the subscription map is re-applied once a new socket is ready, so we simply log.
+		log.Printf("binance stream manager: skip %s request for %d streams, websocket not connected", method, len(streams))
+		return nil
 	}
 
 	chunks := chunkStreams(streams, binanceMaxStreamsPerRequest)
@@ -353,6 +364,7 @@ func (sm *streamManager) waitForControlWindowLocked(ctx context.Context, method 
 		ctx = sm.ctx
 	}
 
+	// Binance enforces a strict control-frame rate limit; pace outbound requests accordingly.
 	if sm.lastControlSend.IsZero() {
 		return nil
 	}
@@ -386,6 +398,7 @@ func (sm *streamManager) pingLoop(ctx context.Context, conn *websocket.Conn) err
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			// Serialize pings with other control messages so we respect Binance control budgets.
 			sm.controlMu.Lock()
 			err := sm.waitForControlWindowLocked(ctx, "PING")
 			if err != nil {
@@ -402,6 +415,9 @@ func (sm *streamManager) pingLoop(ctx context.Context, conn *websocket.Conn) err
 			if err != nil {
 				sm.controlMu.Unlock()
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return context.Canceled
+				}
+				if errors.Is(err, net.ErrClosed) {
 					return context.Canceled
 				}
 				if status := websocket.CloseStatus(err); status != -1 {
@@ -425,6 +441,10 @@ func (sm *streamManager) readLoop(ctx context.Context, conn *websocket.Conn) err
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return context.Canceled
 			}
+			if errors.Is(err, net.ErrClosed) {
+				return context.Canceled
+			}
+			// Surface remote close codes for observability; otherwise bubble the transport error.
 			if status := websocket.CloseStatus(err); status != -1 {
 				if status == websocket.StatusNormalClosure {
 					return context.Canceled
