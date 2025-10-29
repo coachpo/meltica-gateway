@@ -253,21 +253,9 @@ func (r *Registrar) applyRoutes(ctx context.Context, state map[string]lambdaRegi
 		if ok && EqualRoutes(existing, route) {
 			continue
 		}
-		if ok && r.router != nil {
-			if err := r.router.DeactivateRoute(ctx, existing); err != nil {
-				errs = append(errs, fmt.Errorf("refresh %s/%s: %w", existing.Provider, existing.Type, err))
-				continue
-			}
-		}
 		if r.router != nil {
 			if err := r.router.ActivateRoute(ctx, route); err != nil {
 				errs = append(errs, fmt.Errorf("activate %s/%s: %w", route.Provider, route.Type, err))
-				// Attempt to restore previous route if it existed.
-				if ok {
-					if restoreErr := r.router.ActivateRoute(ctx, existing); restoreErr == nil {
-						_ = r.table.Upsert(existing)
-					}
-				}
 				continue
 			}
 		}
