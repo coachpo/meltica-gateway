@@ -182,7 +182,6 @@ func (e *Event) Reset() {
 	e.IngestTS = time.Time{}
 	e.EmitTS = time.Time{}
 	e.Payload = nil
-	e.returned = false
 }
 
 // SetReturned toggles the ownership flag for pooling.

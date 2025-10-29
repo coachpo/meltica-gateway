@@ -32,7 +32,6 @@ func (o *OrderRequest) Reset() {
 	o.Quantity = ""
 	o.TIF = ""
 	o.Timestamp = time.Time{}
-	o.returned = false
 }
 
 // SetReturned toggles the pool ownership flag.
