@@ -156,10 +156,12 @@ func initTelemetry(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 
 func buildPoolManager(cfg config.PoolConfig) (*pool.PoolManager, error) {
 	manager := pool.NewPoolManager()
-	if err := manager.RegisterPool(eventPoolName, cfg.EventSize, func() interface{} { return new(schema.Event) }); err != nil {
+	eventQueueSize := cfg.Event.QueueSize()
+	if err := manager.RegisterPool(eventPoolName, cfg.Event.Size, eventQueueSize, func() interface{} { return new(schema.Event) }); err != nil {
 		return nil, fmt.Errorf("register Event pool: %w", err)
 	}
-	if err := manager.RegisterPool(orderRequestPoolName, cfg.OrderRequestSize, func() interface{} { return new(schema.OrderRequest) }); err != nil {
+	orderQueueSize := cfg.OrderRequest.QueueSize()
+	if err := manager.RegisterPool(orderRequestPoolName, cfg.OrderRequest.Size, orderQueueSize, func() interface{} { return new(schema.OrderRequest) }); err != nil {
 		return nil, fmt.Errorf("register OrderRequest pool: %w", err)
 	}
 	return manager, nil

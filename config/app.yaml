@@ -363,8 +363,12 @@ eventbus:
 
 # pools: object pool capacities
 pools:
-  eventSize: 25000
-  orderRequestSize: 25000
+  event:
+    size: 25000
+    waitQueueSize: 25000
+  orderRequest:
+    size: 25000
+    waitQueueSize: 25000
 
 risk:
   maxPositionSize: "1000"

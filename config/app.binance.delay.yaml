@@ -19,8 +19,12 @@ eventbus:
   fanoutWorkers: auto
 
 pools:
-  eventSize: 60000
-  orderRequestSize: 20000
+  event:
+    size: 60000
+    waitQueueSize: 60000
+  orderRequest:
+    size: 20000
+    waitQueueSize: 20000
 
 risk:
   maxPositionSize: "100"

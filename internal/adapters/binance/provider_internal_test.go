@@ -16,7 +16,7 @@ func newTestProvider(t *testing.T) *Provider {
 	t.Cleanup(func() {
 		_ = pm.Shutdown(context.Background())
 	})
-	if err := pm.RegisterPool("Event", 16, func() any { return &schema.Event{} }); err != nil {
+	if err := pm.RegisterPool("Event", 16, 0, func() any { return &schema.Event{} }); err != nil {
 		t.Fatalf("register pool: %v", err)
 	}
 	prov := NewProvider(Options{Pools: pm, APIKey: "key", APISecret: "secret"})

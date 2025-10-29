@@ -21,18 +21,18 @@ func TestNewPoolManager(t *testing.T) {
 
 func TestRegisterPool(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	factory := func() any {
 		return &schema.Event{}
 	}
-	
-	err := pm.RegisterPool("test-pool", 10, factory)
+
+	err := pm.RegisterPool("test-pool", 10, 0, factory)
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	// Try to register same pool again
-	err = pm.RegisterPool("test-pool", 10, factory)
+	err = pm.RegisterPool("test-pool", 10, 0, factory)
 	if err == nil {
 		t.Error("expected error when registering duplicate pool")
 	}
@@ -40,17 +40,17 @@ func TestRegisterPool(t *testing.T) {
 
 func TestRegisterPoolInvalidCapacity(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	factory := func() any {
 		return &schema.Event{}
 	}
-	
-	err := pm.RegisterPool("test-pool", 0, factory)
+
+	err := pm.RegisterPool("test-pool", 0, 0, factory)
 	if err == nil {
 		t.Error("expected error for zero capacity")
 	}
-	
-	err = pm.RegisterPool("test-pool", -1, factory)
+
+	err = pm.RegisterPool("test-pool", -1, 0, factory)
 	if err == nil {
 		t.Error("expected error for negative capacity")
 	}
@@ -58,18 +58,18 @@ func TestRegisterPoolInvalidCapacity(t *testing.T) {
 
 func TestGetAndPut(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	factory := func() any {
 		return &schema.Event{}
 	}
-	
-	err := pm.RegisterPool("events", 5, factory)
+
+	err := pm.RegisterPool("events", 5, 0, factory)
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	ctx := context.Background()
-	
+
 	// Borrow object
 	obj, err := pm.Get(ctx, "events")
 	if err != nil {
@@ -78,31 +78,31 @@ func TestGetAndPut(t *testing.T) {
 	if obj == nil {
 		t.Fatal("expected non-nil object")
 	}
-	
+
 	// Verify it's the right type
 	evt, ok := obj.(*schema.Event)
 	if !ok {
 		t.Fatalf("expected *schema.Event, got %T", obj)
 	}
-	
+
 	// Use the object
 	evt.EventID = "test-123"
 	evt.Provider = "test-provider"
-	
+
 	// Return object
 	pm.Put("events", obj)
-	
+
 	// Borrow again - should be reset
 	obj2, err := pm.Get(ctx, "events")
 	if err != nil {
 		t.Fatalf("second Get failed: %v", err)
 	}
-	
+
 	evt2, ok := obj2.(*schema.Event)
 	if !ok {
 		t.Fatalf("expected *schema.Event, got %T", obj2)
 	}
-	
+
 	// Should be reset
 	if evt2.EventID != "" {
 		t.Errorf("expected reset EventID, got %q", evt2.EventID)
@@ -110,13 +110,13 @@ func TestGetAndPut(t *testing.T) {
 	if evt2.Provider != "" {
 		t.Errorf("expected reset Provider, got %q", evt2.Provider)
 	}
-	
+
 	pm.Put("events", obj2)
 }
 
 func TestGetNonExistentPool(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	ctx := context.Background()
 	_, err := pm.Get(ctx, "non-existent")
 	if err == nil {
@@ -146,16 +146,16 @@ func containsSubstring(s, substr string) bool {
 
 func TestTryGet(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	factory := func() any {
 		return &schema.Event{}
 	}
-	
-	err := pm.RegisterPool("events", 2, factory)
+
+	err := pm.RegisterPool("events", 2, 0, factory)
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	// TryGet should succeed
 	obj, ok, err := pm.TryGet("events")
 	if err != nil {
@@ -167,24 +167,24 @@ func TestTryGet(t *testing.T) {
 	if obj == nil {
 		t.Fatal("expected non-nil object")
 	}
-	
+
 	pm.Put("events", obj)
 }
 
 func TestGetMany(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	factory := func() any {
 		return &schema.Event{}
 	}
-	
-	err := pm.RegisterPool("events", 10, factory)
+
+	err := pm.RegisterPool("events", 10, 0, factory)
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	ctx := context.Background()
-	
+
 	// Get multiple objects
 	objs, err := pm.GetMany(ctx, "events", 3)
 	if err != nil {
@@ -193,32 +193,32 @@ func TestGetMany(t *testing.T) {
 	if len(objs) != 3 {
 		t.Errorf("expected 3 objects, got %d", len(objs))
 	}
-	
+
 	// All should be non-nil
 	for i, obj := range objs {
 		if obj == nil {
 			t.Errorf("object %d is nil", i)
 		}
 	}
-	
+
 	// Return them
 	pm.PutMany("events", objs)
 }
 
 func TestGetManyZeroCount(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	factory := func() any {
 		return &schema.Event{}
 	}
-	
-	err := pm.RegisterPool("events", 10, factory)
+
+	err := pm.RegisterPool("events", 10, 0, factory)
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	ctx := context.Background()
-	
+
 	objs, err := pm.GetMany(ctx, "events", 0)
 	if err != nil {
 		t.Errorf("GetMany with 0 count failed: %v", err)
@@ -230,23 +230,23 @@ func TestGetManyZeroCount(t *testing.T) {
 
 func TestTryPut(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	factory := func() any {
 		return &schema.Event{}
 	}
-	
-	err := pm.RegisterPool("events", 2, factory)
+
+	err := pm.RegisterPool("events", 2, 0, factory)
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	ctx := context.Background()
-	
+
 	obj, err := pm.Get(ctx, "events")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	
+
 	// TryPut should succeed
 	ok, err := pm.TryPut("events", obj)
 	if err != nil {
@@ -259,34 +259,34 @@ func TestTryPut(t *testing.T) {
 
 func TestShutdown(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	factory := func() any {
 		return &schema.Event{}
 	}
-	
-	err := pm.RegisterPool("events", 5, factory)
+
+	err := pm.RegisterPool("events", 5, 0, factory)
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	ctx := context.Background()
-	
+
 	// Borrow and return an object
 	obj, err := pm.Get(ctx, "events")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
 	pm.Put("events", obj)
-	
+
 	// Shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	err = pm.Shutdown(shutdownCtx)
 	if err != nil {
 		t.Fatalf("Shutdown failed: %v", err)
 	}
-	
+
 	// Operations after shutdown should fail
 	_, err = pm.Get(ctx, "events")
 	if err != ErrPoolManagerClosed {
@@ -296,17 +296,17 @@ func TestShutdown(t *testing.T) {
 
 func TestBorrowEventInst(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	// Register canonical event pool
-	err := pm.RegisterPool("Event", 10, func() any {
+	err := pm.RegisterPool("Event", 10, 0, func() any {
 		return &schema.Event{}
 	})
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	ctx := context.Background()
-	
+
 	evt, err := pm.BorrowEventInst(ctx)
 	if err != nil {
 		t.Fatalf("BorrowEventInst failed: %v", err)
@@ -314,62 +314,62 @@ func TestBorrowEventInst(t *testing.T) {
 	if evt == nil {
 		t.Fatal("expected non-nil event")
 	}
-	
+
 	// Should be clean
 	if evt.EventID != "" || evt.Provider != "" {
 		t.Error("expected reset event")
 	}
-	
+
 	pm.ReturnEventInst(evt)
 }
 
 func TestReturnEventInst(t *testing.T) {
 	pm := NewPoolManager()
-	
-	err := pm.RegisterPool("Event", 10, func() any {
+
+	err := pm.RegisterPool("Event", 10, 0, func() any {
 		return &schema.Event{}
 	})
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	ctx := context.Background()
-	
+
 	evt, err := pm.BorrowEventInst(ctx)
 	if err != nil {
 		t.Fatalf("BorrowEventInst failed: %v", err)
 	}
-	
+
 	evt.EventID = "test-123"
-	
+
 	pm.ReturnEventInst(evt)
-	
+
 	// Borrow again
 	evt2, err := pm.BorrowEventInst(ctx)
 	if err != nil {
 		t.Fatalf("second BorrowEventInst failed: %v", err)
 	}
-	
+
 	// Should be reset
 	if evt2.EventID != "" {
 		t.Error("expected reset event")
 	}
-	
+
 	pm.ReturnEventInst(evt2)
 }
 
 func TestBorrowEventInsts(t *testing.T) {
 	pm := NewPoolManager()
-	
-	err := pm.RegisterPool("Event", 20, func() any {
+
+	err := pm.RegisterPool("Event", 20, 0, func() any {
 		return &schema.Event{}
 	})
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	ctx := context.Background()
-	
+
 	events, err := pm.BorrowEventInsts(ctx, 5)
 	if err != nil {
 		t.Fatalf("BorrowEventInsts failed: %v", err)
@@ -377,19 +377,19 @@ func TestBorrowEventInsts(t *testing.T) {
 	if len(events) != 5 {
 		t.Errorf("expected 5 events, got %d", len(events))
 	}
-	
+
 	for i, evt := range events {
 		if evt == nil {
 			t.Errorf("event %d is nil", i)
 		}
 	}
-	
+
 	pm.ReturnEventInsts(events)
 }
 
 func TestReturnEventInstsNil(t *testing.T) {
 	pm := NewPoolManager()
-	
+
 	// Should not panic
 	pm.ReturnEventInsts(nil)
 	pm.ReturnEventInsts([]*schema.Event{})
@@ -397,21 +397,21 @@ func TestReturnEventInstsNil(t *testing.T) {
 
 func TestTryReturnEventInst(t *testing.T) {
 	pm := NewPoolManager()
-	
-	err := pm.RegisterPool("Event", 10, func() any {
+
+	err := pm.RegisterPool("Event", 10, 0, func() any {
 		return &schema.Event{}
 	})
 	if err != nil {
 		t.Fatalf("RegisterPool failed: %v", err)
 	}
-	
+
 	ctx := context.Background()
-	
+
 	evt, err := pm.BorrowEventInst(ctx)
 	if err != nil {
 		t.Fatalf("BorrowEventInst failed: %v", err)
 	}
-	
+
 	ok := pm.TryReturnEventInst(evt)
 	if !ok {
 		t.Error("TryReturnEventInst returned false")

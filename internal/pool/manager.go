@@ -107,7 +107,7 @@ func NewPoolManager() *PoolManager {
 }
 
 // RegisterPool registers a bounded pool with the provided name, capacity, and constructor.
-func (pm *PoolManager) RegisterPool(name string, capacity int, newFunc func() any) error {
+func (pm *PoolManager) RegisterPool(name string, capacity int, queueSize int, newFunc func() any) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -137,7 +137,7 @@ func (pm *PoolManager) RegisterPool(name string, capacity int, newFunc func() an
 	sampleObj := factory()
 	sampleObj.Reset()
 
-	pool, err := newObjectPool(name, objectType, capacity, factory)
+	pool, err := newObjectPool(name, objectType, capacity, queueSize, factory)
 	if err != nil {
 		return err
 	}

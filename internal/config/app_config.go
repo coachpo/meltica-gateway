@@ -96,10 +96,24 @@ func (c EventbusConfig) FanoutWorkerCount() int {
 	return c.FanoutWorkers.resolve()
 }
 
+// ObjectPoolConfig describes sizing for a single named pool.
+type ObjectPoolConfig struct {
+	Size          int `yaml:"size"`
+	WaitQueueSize int `yaml:"waitQueueSize"`
+}
+
 // PoolConfig controls pooled object capacities.
 type PoolConfig struct {
-	EventSize        int `yaml:"eventSize"`
-	OrderRequestSize int `yaml:"orderRequestSize"`
+	Event        ObjectPoolConfig `yaml:"event"`
+	OrderRequest ObjectPoolConfig `yaml:"orderRequest"`
+}
+
+// QueueSize returns the effective pending borrower queue size, defaulting to Size.
+func (c ObjectPoolConfig) QueueSize() int {
+	if c.WaitQueueSize <= 0 {
+		return c.Size
+	}
+	return c.WaitQueueSize
 }
 
 // APIServerConfig configures the gateway's HTTP control surface.
@@ -225,11 +239,17 @@ func (c AppConfig) Validate() error {
 		return fmt.Errorf("eventbus fanoutWorkers must be >0")
 	}
 
-	if c.Pools.EventSize <= 0 {
-		return fmt.Errorf("pools eventSize must be >0")
+	if c.Pools.Event.Size <= 0 {
+		return fmt.Errorf("pools.event.size must be >0")
 	}
-	if c.Pools.OrderRequestSize <= 0 {
-		return fmt.Errorf("pools orderRequestSize must be >0")
+	if c.Pools.Event.WaitQueueSize < 0 {
+		return fmt.Errorf("pools.event.waitQueueSize must be >=0")
+	}
+	if c.Pools.OrderRequest.Size <= 0 {
+		return fmt.Errorf("pools.orderRequest.size must be >0")
+	}
+	if c.Pools.OrderRequest.WaitQueueSize < 0 {
+		return fmt.Errorf("pools.orderRequest.waitQueueSize must be >=0")
 	}
 
 	if strings.TrimSpace(c.APIServer.Addr) == "" {

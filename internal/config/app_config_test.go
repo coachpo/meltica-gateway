@@ -30,8 +30,12 @@ eventbus:
   bufferSize: 128
   fanoutWorkers: 4
 pools:
-  eventSize: 100
-  orderRequestSize: 50
+  event:
+    size: 100
+    waitQueueSize: 110
+  orderRequest:
+    size: 50
+    waitQueueSize: 60
 risk:
   maxPositionSize: "10"
   maxNotionalValue: "1000"
@@ -97,11 +101,17 @@ lambdaManifest:
 		t.Fatalf("expected telemetry metrics disabled")
 	}
 
-	if cfg.Pools.EventSize != 100 {
-		t.Fatalf("expected pool event size 100, got %d", cfg.Pools.EventSize)
+	if cfg.Pools.Event.Size != 100 {
+		t.Fatalf("expected pool event size 100, got %d", cfg.Pools.Event.Size)
 	}
-	if cfg.Pools.OrderRequestSize != 50 {
-		t.Fatalf("expected pool order request size 50, got %d", cfg.Pools.OrderRequestSize)
+	if cfg.Pools.Event.WaitQueueSize != 110 {
+		t.Fatalf("expected pool event queue size 110, got %d", cfg.Pools.Event.WaitQueueSize)
+	}
+	if cfg.Pools.OrderRequest.Size != 50 {
+		t.Fatalf("expected pool order request size 50, got %d", cfg.Pools.OrderRequest.Size)
+	}
+	if cfg.Pools.OrderRequest.WaitQueueSize != 60 {
+		t.Fatalf("expected pool order request queue size 60, got %d", cfg.Pools.OrderRequest.WaitQueueSize)
 	}
 
 	if len(cfg.LambdaManifest.Lambdas) != 1 {
@@ -165,8 +175,10 @@ providers:
 eventbus:
   bufferSize: 128
 %spools:
-  eventSize: 100
-  orderRequestSize: 50
+  event:
+    size: 100
+  orderRequest:
+    size: 50
 risk:
   maxPositionSize: "10"
   maxNotionalValue: "1000"

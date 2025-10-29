@@ -12,21 +12,21 @@ import (
 // setupTestBus creates a bus with properly initialized pool manager for testing
 func setupTestBus(t *testing.T) (Bus, *pool.PoolManager) {
 	t.Helper()
-	
+
 	poolMgr := pool.NewPoolManager()
-	err := poolMgr.RegisterPool("Event", 100, func() interface{} {
+	err := poolMgr.RegisterPool("Event", 100, 0, func() interface{} {
 		return new(schema.Event)
 	})
 	if err != nil {
 		t.Fatalf("failed to register pool: %v", err)
 	}
-	
+
 	bus := NewMemoryBus(MemoryConfig{
 		BufferSize:    10,
 		FanoutWorkers: 2,
 		Pools:         poolMgr,
 	})
-	
+
 	return bus, poolMgr
 }
 
@@ -35,20 +35,20 @@ func TestNewMemoryBus(t *testing.T) {
 		BufferSize:    10,
 		FanoutWorkers: 2,
 	}
-	
+
 	bus := NewMemoryBus(cfg)
-	
+
 	if bus == nil {
 		t.Fatal("expected non-nil bus")
 	}
-	
+
 	bus.Close()
 }
 
 func TestMemoryBusPublishNoSubscribers(t *testing.T) {
 	bus := NewMemoryBus(MemoryConfig{BufferSize: 10})
 	defer bus.Close()
-	
+
 	ctx := context.Background()
 	evt := &schema.Event{
 		EventID:  "test-1",
@@ -56,7 +56,7 @@ func TestMemoryBusPublishNoSubscribers(t *testing.T) {
 		Type:     schema.EventTypeTrade,
 		Symbol:   "BTC-USD",
 	}
-	
+
 	// Should not error when no subscribers
 	err := bus.Publish(ctx, evt)
 	if err != nil {
@@ -67,10 +67,10 @@ func TestMemoryBusPublishNoSubscribers(t *testing.T) {
 func TestMemoryBusPublishNilEvent(t *testing.T) {
 	bus := NewMemoryBus(MemoryConfig{BufferSize: 10})
 	defer bus.Close()
-	
+
 	ctx := context.Background()
 	err := bus.Publish(ctx, nil)
-	
+
 	if err != nil {
 		t.Errorf("expected no error for nil event, got %v", err)
 	}
@@ -79,13 +79,13 @@ func TestMemoryBusPublishNilEvent(t *testing.T) {
 func TestMemoryBusPublishEmptyType(t *testing.T) {
 	bus := NewMemoryBus(MemoryConfig{BufferSize: 10})
 	defer bus.Close()
-	
+
 	ctx := context.Background()
 	evt := &schema.Event{
 		EventID: "test-1",
 		Type:    "", // Empty type
 	}
-	
+
 	err := bus.Publish(ctx, evt)
 	if err == nil {
 		t.Error("expected error for empty event type")
@@ -96,17 +96,17 @@ func TestMemoryBusSubscribeAndPublish(t *testing.T) {
 	bus, poolMgr := setupTestBus(t)
 	defer bus.Close()
 	defer poolMgr.Shutdown(context.Background())
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	
+
 	// Subscribe
 	subID, eventsCh, err := bus.Subscribe(ctx, schema.EventTypeTrade)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
 	defer bus.Unsubscribe(subID)
-	
+
 	// Publish - borrow event from pool
 	testEvent, err := poolMgr.BorrowEventInst(ctx)
 	if err != nil {
@@ -117,12 +117,12 @@ func TestMemoryBusSubscribeAndPublish(t *testing.T) {
 	testEvent.Provider = "binance"
 	testEvent.Type = schema.EventTypeTrade
 	testEvent.Symbol = "BTC-USD"
-	
+
 	err = bus.Publish(ctx, testEvent)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
-	
+
 	// Receive
 	select {
 	case received := <-eventsCh:
@@ -142,10 +142,10 @@ func TestMemoryBusSubscribeAndPublish(t *testing.T) {
 func TestMemoryBusSubscribeEmptyType(t *testing.T) {
 	bus := NewMemoryBus(MemoryConfig{BufferSize: 10})
 	defer bus.Close()
-	
+
 	ctx := context.Background()
 	_, _, err := bus.Subscribe(ctx, "")
-	
+
 	if err == nil {
 		t.Error("expected error for empty event type")
 	}
@@ -154,15 +154,15 @@ func TestMemoryBusSubscribeEmptyType(t *testing.T) {
 func TestMemoryBusUnsubscribe(t *testing.T) {
 	bus := NewMemoryBus(MemoryConfig{BufferSize: 10})
 	defer bus.Close()
-	
+
 	ctx := context.Background()
 	subID, eventsCh, err := bus.Subscribe(ctx, schema.EventTypeTrade)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
-	
+
 	bus.Unsubscribe(subID)
-	
+
 	// Channel should be closed
 	select {
 	case _, ok := <-eventsCh:
@@ -176,15 +176,15 @@ func TestMemoryBusUnsubscribe(t *testing.T) {
 
 func TestMemoryBusClose(t *testing.T) {
 	bus := NewMemoryBus(MemoryConfig{BufferSize: 10})
-	
+
 	ctx := context.Background()
 	_, eventsCh, err := bus.Subscribe(ctx, schema.EventTypeTrade)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
-	
+
 	bus.Close()
-	
+
 	// Channel should be closed
 	select {
 	case _, ok := <-eventsCh:
@@ -200,22 +200,22 @@ func TestMemoryBusMultipleSubscribers(t *testing.T) {
 	bus, poolMgr := setupTestBus(t)
 	defer bus.Close()
 	defer poolMgr.Shutdown(context.Background())
-	
+
 	ctx := context.Background()
-	
+
 	// Subscribe twice
 	sub1, ch1, err1 := bus.Subscribe(ctx, schema.EventTypeTrade)
 	if err1 != nil {
 		t.Fatalf("Subscribe 1 error = %v", err1)
 	}
 	defer bus.Unsubscribe(sub1)
-	
+
 	sub2, ch2, err2 := bus.Subscribe(ctx, schema.EventTypeTrade)
 	if err2 != nil {
 		t.Fatalf("Subscribe 2 error = %v", err2)
 	}
 	defer bus.Unsubscribe(sub2)
-	
+
 	// Publish - borrow event from pool
 	testEvent, err := poolMgr.BorrowEventInst(ctx)
 	if err != nil {
@@ -226,17 +226,17 @@ func TestMemoryBusMultipleSubscribers(t *testing.T) {
 	testEvent.Provider = "binance"
 	testEvent.Type = schema.EventTypeTrade
 	testEvent.Symbol = "ETH-USD"
-	
+
 	err = bus.Publish(ctx, testEvent)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
-	
+
 	// Both should receive
 	timeout := time.After(1 * time.Second)
 	received1 := false
 	received2 := false
-	
+
 	for !received1 || !received2 {
 		select {
 		case evt := <-ch1:
@@ -266,9 +266,9 @@ func TestMemoryConfigNormalize(t *testing.T) {
 		BufferSize:    0, // Should be normalized
 		FanoutWorkers: 0, // Should be normalized
 	}
-	
+
 	normalized := cfg.normalize()
-	
+
 	if normalized.BufferSize <= 0 {
 		t.Error("expected positive buffer size after normalization")
 	}

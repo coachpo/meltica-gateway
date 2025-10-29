@@ -3,6 +3,7 @@ package eventbus
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -300,12 +301,26 @@ func (b *MemoryBus) deliverWithRecycle(ctx context.Context, sub *subscriber, evt
 	case sub.ch <- evt:
 		return nil
 	default:
-		b.recycle(evt)
+		var dropped *schema.Event
+		select {
+		case dropped = <-sub.ch:
+		default:
+		}
+		if dropped != nil {
+			b.recycle(dropped)
+		}
+		log.Printf("eventbus: subscriber buffer full; dropped oldest event type=%s provider=%s symbol=%s", evt.Type, evt.Provider, evt.Symbol)
 		if b.deliveryBlockedCounter != nil {
 			attrs := telemetry.EventAttributes(telemetry.Environment(), string(evt.Type), evt.Provider, evt.Symbol)
 			b.deliveryBlockedCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
 		}
-		return errs.New("eventbus/publish", errs.CodeUnavailable, errs.WithMessage("subscriber buffer full"))
+		select {
+		case sub.ch <- evt:
+			return nil
+		default:
+			b.recycle(evt)
+			return errs.New("eventbus/publish", errs.CodeUnavailable, errs.WithMessage("subscriber buffer full"))
+		}
 	}
 }
 

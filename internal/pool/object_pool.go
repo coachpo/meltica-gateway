@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,7 @@ type objectPool struct {
 	objectType   string
 	factory      func() PooledObject
 	requests     chan *poolRequest
+	queueSize    int
 	stop         chan struct{}
 	leases       sync.Map // map[uintptr]*lease
 	workers      *concpool.Pool
@@ -36,7 +38,12 @@ type objectPool struct {
 
 type poolRequest struct {
 	ctx    context.Context
-	result chan PooledObject
+	result chan poolResult
+}
+
+type poolResult struct {
+	obj PooledObject
+	err error
 }
 
 type lease struct {
@@ -50,23 +57,27 @@ func newPoolRequest(ctx context.Context) *poolRequest {
 	}
 	return &poolRequest{
 		ctx:    ctx,
-		result: make(chan PooledObject, 1),
+		result: make(chan poolResult, 1),
 	}
 }
 
-func newObjectPool(name string, objectType string, capacity int, factory func() PooledObject) (*objectPool, error) {
+func newObjectPool(name string, objectType string, capacity int, queueSize int, factory func() PooledObject) (*objectPool, error) {
 	if capacity <= 0 {
 		return nil, fmt.Errorf("pool %s: capacity must be positive", name)
 	}
 	if factory == nil {
 		return nil, fmt.Errorf("pool %s: factory required", name)
 	}
+	if queueSize <= 0 {
+		queueSize = capacity
+	}
 	//nolint:exhaustruct // zero values for leases and closed are intentional
 	op := &objectPool{
 		name:       name,
 		objectType: objectType,
 		factory:    factory,
-		requests:   make(chan *poolRequest),
+		requests:   make(chan *poolRequest, queueSize),
+		queueSize:  queueSize,
 		stop:       make(chan struct{}),
 		capacity:   capacity,
 		workers:    concpool.New().WithMaxGoroutines(capacity),
@@ -131,7 +142,7 @@ func (op *objectPool) deliver(req *poolRequest, obj PooledObject) bool {
 			return false
 		case <-req.ctx.Done():
 			return false
-		case req.result <- obj:
+		case req.result <- poolResult{obj: obj, err: nil}:
 			op.activeLeases.Add(1)
 			return true
 		}
@@ -178,19 +189,24 @@ func (op *objectPool) get(ctx context.Context) (PooledObject, error) {
 	}
 
 	req := newPoolRequest(ctx)
-	select {
-	case <-op.stop:
-		return nil, errPoolClosed
-	case op.requests <- req:
-	case <-req.ctx.Done():
-		return nil, fmt.Errorf("request context cancelled: %w", req.ctx.Err())
+	if err := op.enqueueRequest(req); err != nil {
+		return nil, err
 	}
 
 	select {
 	case <-op.stop:
 		return nil, errPoolClosed
-	case obj := <-req.result:
-		return obj, nil
+	case res, ok := <-req.result:
+		if !ok {
+			return nil, fmt.Errorf("pool %s: request closed", op.name)
+		}
+		if res.err != nil {
+			return nil, res.err
+		}
+		if res.obj == nil {
+			return nil, fmt.Errorf("pool %s: request delivered nil object", op.name)
+		}
+		return res.obj, nil
 	case <-req.ctx.Done():
 		return nil, fmt.Errorf("result wait context cancelled: %w", req.ctx.Err())
 	}
@@ -214,8 +230,41 @@ func (op *objectPool) tryGet() (PooledObject, bool, error) {
 	select {
 	case <-op.stop:
 		return nil, false, errPoolClosed
-	case obj := <-req.result:
-		return obj, true, nil
+	case res, ok := <-req.result:
+		if !ok {
+			return nil, false, fmt.Errorf("pool %s: request closed", op.name)
+		}
+		if res.err != nil {
+			return nil, false, res.err
+		}
+		if res.obj == nil {
+			return nil, false, fmt.Errorf("pool %s: request delivered nil object", op.name)
+		}
+		return res.obj, true, nil
+	}
+}
+
+func (op *objectPool) enqueueRequest(req *poolRequest) error {
+	for {
+		select {
+		case <-op.stop:
+			return errPoolClosed
+		case <-req.ctx.Done():
+			return fmt.Errorf("request context cancelled: %w", req.ctx.Err())
+		default:
+		}
+
+		select {
+		case op.requests <- req:
+			return nil
+		default:
+			old := <-op.requests
+			if old != nil {
+				err := fmt.Errorf("pool %s: request dropped: queue full", op.name)
+				old.fail(err)
+				log.Printf("pool %s: request queue full (size=%d); dropping oldest borrower", op.name, op.queueSize)
+			}
+		}
 	}
 }
 
@@ -298,6 +347,16 @@ func (op *objectPool) getAvailable() int64 {
 
 func (op *objectPool) getObjectType() string {
 	return op.objectType
+}
+
+func (req *poolRequest) fail(err error) {
+	if req == nil {
+		return
+	}
+	select {
+	case req.result <- poolResult{obj: nil, err: err}:
+	default:
+	}
 }
 
 func pointerKey(obj PooledObject) uintptr {

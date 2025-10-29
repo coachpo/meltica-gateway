@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -171,9 +172,8 @@ func NewProvider(opts Options) *Provider {
 		balances:         make(map[string]balanceSnapshot),
 	}
 	if p.pools == nil {
-		pm := pool.NewPoolManager()
-		_ = pm.RegisterPool("Event", 1024, func() any { return new(schema.Event) })
-		p.pools = pm
+		log.Printf("binance/provider: Pools not injected; provider cannot start without shared PoolManager")
+		panic("binance/provider: nil PoolManager in options")
 	}
 	p.publisher = shared.NewPublisher(p.name, p.events, p.pools, p.clock)
 	p.balances = make(map[string]balanceSnapshot)

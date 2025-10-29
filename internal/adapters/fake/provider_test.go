@@ -84,7 +84,7 @@ func TestKlineFinalizeProducesBucket(t *testing.T) {
 
 func TestProviderPublishTradeEvent(t *testing.T) {
 	pm := pool.NewPoolManager()
-	err := pm.RegisterPool("Event", 32, func() any { return &schema.Event{} })
+	err := pm.RegisterPool("Event", 32, 0, func() any { return &schema.Event{} })
 	if err != nil {
 		t.Fatalf("register event pool: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestProviderPublishTradeEvent(t *testing.T) {
 
 func TestProviderPublishTickerEvent(t *testing.T) {
 	pm := pool.NewPoolManager()
-	err := pm.RegisterPool("Event", 32, func() any { return &schema.Event{} })
+	err := pm.RegisterPool("Event", 32, 0, func() any { return &schema.Event{} })
 	if err != nil {
 		t.Fatalf("register event pool: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestProviderPublishTickerEvent(t *testing.T) {
 
 func TestProviderPublishExecReport(t *testing.T) {
 	pm := pool.NewPoolManager()
-	err := pm.RegisterPool("Event", 32, func() any { return &schema.Event{} })
+	err := pm.RegisterPool("Event", 32, 0, func() any { return &schema.Event{} })
 	if err != nil {
 		t.Fatalf("register event pool: %v", err)
 	}

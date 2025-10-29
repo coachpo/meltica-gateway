@@ -15,7 +15,7 @@ All exchange adapters **MUST** implement WebSocket stream management using the *
 - Seed an instrument catalogue on startup and protect access with `sync.RWMutex`; normalize symbols using existing helpers.
 - Maintain a **two-way symbol map** so canonical symbols (e.g. `BTC-USDT`) can be translated to the venue’s native identifiers (e.g. `BTCUSDT`) for requests and responses.
 - Use `shared.Publisher` to emit canonical events, passing in the provider name, event channel, pool manager, and a monotonic clock.
-- Ensure object pooling via `pool.PoolManager` to avoid allocations when publishing and returning schema instances.
+- Ensure object pooling via `pool.PoolManager` to avoid allocations when publishing and returning schema instances, and fail fast (with clear logs) if a provider starts without an injected pool manager so misconfigurations surface immediately.
 - Provide order-submission plumbing (even if initially a stub) so `SubmitOrder` can accept canonical `schema.OrderRequest` payloads and apply symbol/unit conversions.
 
 ## Event Emission Patterns
