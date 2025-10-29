@@ -73,18 +73,20 @@ type wsError struct {
 func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) error, errorChan chan<- error) *streamManager {
 	managerCtx, cancel := context.WithCancel(ctx)
 	return &streamManager{
-		baseURL:       baseURL,
-		ctx:           managerCtx,
-		cancel:        cancel,
-		conn:          nil,
-		connMu:        sync.RWMutex{},
-		msgIDGen:      atomic.Uint64{},
-		subscriptions: make(map[string]struct{}),
-		subsMu:        sync.Mutex{},
-		handler:       handler,
-		errorChan:     errorChan,
-		ready:         make(chan struct{}),
-		readyOnce:     sync.Once{},
+		baseURL:         baseURL,
+		ctx:             managerCtx,
+		cancel:          cancel,
+		conn:            nil,
+		connMu:          sync.RWMutex{},
+		msgIDGen:        atomic.Uint64{},
+		subscriptions:   make(map[string]struct{}),
+		subsMu:          sync.Mutex{},
+		handler:         handler,
+		errorChan:       errorChan,
+		ready:           make(chan struct{}),
+		readyOnce:       sync.Once{},
+		controlMu:       sync.Mutex{},
+		lastControlSend: time.Time{},
 	}
 }
 
@@ -402,7 +404,7 @@ func (sm *streamManager) pingLoop(ctx context.Context, conn *websocket.Conn) err
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("ping loop context done: %w", ctx.Err())
 		case <-ticker.C:
 			// Serialize pings with other control messages so we respect Binance control budgets.
 			sm.controlMu.Lock()

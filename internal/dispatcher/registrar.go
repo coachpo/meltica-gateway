@@ -60,8 +60,11 @@ func NewRegistrar(table *Table, router ProviderRouter) *Registrar {
 		router:       router,
 		lambdas:      make(map[string]lambdaRegistration),
 		updates:      make(chan struct{}, 1),
+		workerOnce:   sync.Once{},
 		workerCtx:    ctx,
 		workerCancel: cancel,
+		wg:           sync.WaitGroup{},
+		errMu:        sync.RWMutex{},
 		onError: func(err error) {
 			if err != nil {
 				log.Printf("dispatcher registrar: %v", err)
@@ -73,7 +76,7 @@ func NewRegistrar(table *Table, router ProviderRouter) *Registrar {
 // RegisterLambda declares or updates the routing requirements for a lambda instance.
 func (r *Registrar) RegisterLambda(ctx context.Context, lambdaID string, providers []string, routes []RouteDeclaration) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("register lambda context: %w", err)
 	}
 	lambdaID = strings.TrimSpace(lambdaID)
 	if lambdaID == "" {
@@ -110,7 +113,7 @@ func (r *Registrar) RegisterLambda(ctx context.Context, lambdaID string, provide
 // UnregisterLambda removes routing requirements for a lambda instance.
 func (r *Registrar) UnregisterLambda(ctx context.Context, lambdaID string) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("unregister lambda context: %w", err)
 	}
 	lambdaID = strings.TrimSpace(lambdaID)
 	if lambdaID == "" {
@@ -191,8 +194,8 @@ func (r *Registrar) snapshot() map[string]lambdaRegistration {
 }
 
 func (r *Registrar) applyRoutes(ctx context.Context, state map[string]lambdaRegistration) error {
-	if ctx.Err() != nil {
-		return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("apply routes context: %w", err)
 	}
 
 	desired := make(map[RouteKey]Route)
