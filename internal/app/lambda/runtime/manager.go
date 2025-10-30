@@ -1,3 +1,4 @@
+// Package runtime manages lambda lifecycle orchestration and strategy execution.
 package runtime
 
 import (

@@ -1,3 +1,4 @@
+// Package httpserver exposes HTTP handlers for managing lambda strategies and risk settings.
 package httpserver
 
 import (
@@ -225,7 +226,7 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 		Lambdas: []config.LambdaSpec{spec},
 	}
 	if err := manifest.Validate(); err != nil {
-		return spec, err
+		return spec, fmt.Errorf("validate lambda manifest: %w", err)
 	}
 	spec = manifest.Lambdas[0]
 	if len(spec.AllSymbols()) == 0 {

@@ -41,22 +41,6 @@ func (p *ProviderSymbols) normalize() {
 	p.Symbols = out
 }
 
-func (p ProviderSymbols) includes(symbol string) bool {
-	if len(p.Symbols) == 0 {
-		return true
-	}
-	symbol = strings.ToUpper(strings.TrimSpace(symbol))
-	if symbol == "" {
-		return false
-	}
-	for _, candidate := range p.Symbols {
-		if strings.EqualFold(candidate, symbol) {
-			return true
-		}
-	}
-	return false
-}
-
 // Normalize applies canonical formatting to symbol entries.
 func (p *ProviderSymbols) Normalize() {
 	p.normalize()
