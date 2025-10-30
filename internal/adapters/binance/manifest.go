@@ -18,15 +18,8 @@ func RegisterFactory(reg *provider.Registry) {
 			return nil, fmt.Errorf("binance provider requires pool manager")
 		}
 
-		opts := Options{
-			Name:          "",
-			Venue:         "",
-			Symbols:       nil,
-			SnapshotDepth: 0,
-			Pools:         pools,
-			APIKey:        "",
-			APISecret:     "",
-		}
+		var opts Options
+		opts.Pools = pools
 
 		if alias, ok := stringFromConfig(cfg, "provider_name"); ok {
 			opts.Name = alias
