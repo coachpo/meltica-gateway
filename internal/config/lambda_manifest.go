@@ -57,6 +57,11 @@ func (p ProviderSymbols) includes(symbol string) bool {
 	return false
 }
 
+// Normalize applies canonical formatting to symbol entries.
+func (p *ProviderSymbols) Normalize() {
+	p.normalize()
+}
+
 // LambdaSpec defines a lambda instance configuration.
 type LambdaSpec struct {
 	ID              string                     `yaml:"id" json:"id"`

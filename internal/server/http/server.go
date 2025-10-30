@@ -1,5 +1,4 @@
-// Package runtime provides HTTP handlers and runtime management for lambda functions.
-package runtime
+package httpserver
 
 import (
 	"errors"
@@ -10,12 +9,13 @@ import (
 	json "github.com/goccy/go-json"
 
 	"github.com/coachpo/meltica/internal/config"
+	"github.com/coachpo/meltica/internal/lambda/runtime"
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/risk"
 )
 
-// NewHTTPHandler creates an HTTP handler for lambda management operations.
-func NewHTTPHandler(manager *Manager) http.Handler {
+// NewHandler creates an HTTP handler for lambda management operations.
+func NewHandler(manager *runtime.Manager) http.Handler {
 	server := &httpServer{manager: manager}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/strategies", server.handleStrategies)
@@ -27,7 +27,7 @@ func NewHTTPHandler(manager *Manager) http.Handler {
 }
 
 type httpServer struct {
-	manager *Manager
+	manager *runtime.Manager
 }
 
 func (s *httpServer) handleStrategies(w http.ResponseWriter, r *http.Request) {
@@ -92,8 +92,7 @@ func (s *httpServer) handleRiskLimits(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		limits := buildRiskLimits(cfg, s.manager.logger)
-		s.manager.UpdateRiskLimits(limits)
+		limits := s.manager.ApplyRiskConfig(cfg)
 		writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "limits": riskConfigFromLimits(limits)})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -176,13 +175,13 @@ func (s *httpServer) handleInstance(w http.ResponseWriter, r *http.Request) {
 
 func (s *httpServer) writeManagerError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrInstanceExists):
+	case errors.Is(err, runtime.ErrInstanceExists):
 		writeError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, ErrInstanceAlreadyRunning):
+	case errors.Is(err, runtime.ErrInstanceAlreadyRunning):
 		writeError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, ErrInstanceNotRunning):
+	case errors.Is(err, runtime.ErrInstanceNotRunning):
 		writeError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, ErrInstanceNotFound):
+	case errors.Is(err, runtime.ErrInstanceNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -201,16 +200,16 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 	spec.ID = strings.TrimSpace(spec.ID)
 	spec.Strategy = strings.TrimSpace(spec.Strategy)
 	if len(spec.ProviderSymbols) > 0 {
-		normalizedAssignments := make(map[string]config.ProviderSymbols, len(spec.ProviderSymbols))
-		for name, assignment := range spec.ProviderSymbols {
+		symbolSets := make(map[string]config.ProviderSymbols, len(spec.ProviderSymbols))
+		for name, symbolSpec := range spec.ProviderSymbols {
 			trimmed := strings.TrimSpace(name)
 			if trimmed == "" {
 				continue
 			}
-			assignment.normalize()
-			normalizedAssignments[trimmed] = assignment
+			symbolSpec.Normalize()
+			symbolSets[trimmed] = symbolSpec
 		}
-		spec.ProviderSymbols = normalizedAssignments
+		spec.ProviderSymbols = symbolSets
 	}
 	spec.RefreshProviders()
 	if spec.Config == nil {

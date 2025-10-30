@@ -21,6 +21,7 @@ import (
 	"github.com/coachpo/meltica/internal/pool"
 	"github.com/coachpo/meltica/internal/provider"
 	"github.com/coachpo/meltica/internal/schema"
+	httpserver "github.com/coachpo/meltica/internal/server/http"
 	"github.com/coachpo/meltica/internal/telemetry"
 	"github.com/sourcegraph/conc"
 )
@@ -44,6 +45,7 @@ var controlAPIRoutes = [...]string{
 	"/strategies/",
 	"/strategy-instances",
 	"/strategy-instances/",
+	"/risk/limits",
 }
 
 func main() {
@@ -223,7 +225,7 @@ func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventb
 }
 
 func buildAPIServer(cfg config.APIServerConfig, lambdaManager *lambdaruntime.Manager) *http.Server {
-	handler := lambdaruntime.NewHTTPHandler(lambdaManager)
+	handler := httpserver.NewHandler(lambdaManager)
 
 	mux := http.NewServeMux()
 	for _, route := range controlAPIRoutes {

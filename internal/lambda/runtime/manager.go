@@ -364,6 +364,13 @@ func (m *Manager) UpdateRiskLimits(limits risk.Limits) {
 	}
 }
 
+// ApplyRiskConfig converts the supplied risk configuration into limits and applies them.
+func (m *Manager) ApplyRiskConfig(cfg config.RiskConfig) risk.Limits {
+	limits := buildRiskLimits(cfg, m.logger)
+	m.UpdateRiskLimits(limits)
+	return limits
+}
+
 func (m *Manager) registerStrategy(def StrategyDefinition) {
 	name := strings.ToLower(strings.TrimSpace(def.meta.Name))
 	if name == "" {
