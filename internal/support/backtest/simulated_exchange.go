@@ -8,7 +8,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/coachpo/meltica/internal/app/lambda"
+	"github.com/coachpo/meltica/internal/app/lambda/core"
 	"github.com/coachpo/meltica/internal/domain/schema"
 )
 
@@ -37,7 +37,7 @@ var defaultFeeRate = decimal.RequireFromString("0.002")
 type simulatedExchange struct {
 	mu            sync.RWMutex
 	orderBooks    map[string]*OrderBook
-	lambda        lambda.TradingStrategy
+	lambda        core.TradingStrategy
 	feeModel      FeeModel
 	slippageModel SlippageModel
 	observer      FillObserver
@@ -73,7 +73,7 @@ func WithExchangeClock(clock Clock) ExchangeOption {
 }
 
 // NewSimulatedExchange creates a new simulated exchange instance.
-func NewSimulatedExchange(strategy lambda.TradingStrategy, opts ...ExchangeOption) SimulatedExchange {
+func NewSimulatedExchange(strategy core.TradingStrategy, opts ...ExchangeOption) SimulatedExchange {
 	se := &simulatedExchange{
 		mu:            sync.RWMutex{},
 		orderBooks:    make(map[string]*OrderBook),

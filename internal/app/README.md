@@ -6,8 +6,10 @@ domain types from `internal/domain` with infrastructure services from
 
 - `dispatcher/` maintains routing tables, registrar logic, and the runtime loop
   that fans provider events out to downstream consumers.
-- `lambda/` hosts the lambda framework: the base runtime, lifecycle manager, and
-  built-in strategy implementations.
+- `lambda/` contains:
+  - `core/` for reusable lambda primitives
+  - `runtime/` for lifecycle orchestration
+  - `strategies/` for built-in strategies and guides
 - `provider/` defines provider contracts and manages adapter lifecycle,
   including registry and startup sequencing.
 - `risk/` enforces runtime risk controls shared across lambda instances.

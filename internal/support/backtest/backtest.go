@@ -12,7 +12,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/coachpo/meltica/internal/app/lambda"
+	"github.com/coachpo/meltica/internal/app/lambda/core"
 	"github.com/coachpo/meltica/internal/domain/schema"
 )
 
@@ -42,7 +42,7 @@ func WithLatencyModel(model LatencyModel) EngineOption {
 type Engine struct {
 	feeder   DataFeeder
 	exchange SimulatedExchange
-	strategy lambda.TradingStrategy
+	strategy core.TradingStrategy
 	clock    Clock
 	latency  LatencyModel
 
@@ -54,7 +54,7 @@ type Engine struct {
 }
 
 // NewEngine creates a new backtest engine.
-func NewEngine(feeder DataFeeder, exchange SimulatedExchange, strategy lambda.TradingStrategy, opts ...EngineOption) *Engine {
+func NewEngine(feeder DataFeeder, exchange SimulatedExchange, strategy core.TradingStrategy, opts ...EngineOption) *Engine {
 	cfg := engineConfig{
 		Clock:        NewVirtualClock(time.Unix(0, 0)),
 		LatencyModel: ConstantLatency{Value: 0},

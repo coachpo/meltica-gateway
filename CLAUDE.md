@@ -54,7 +54,7 @@ Meltica uses a four-layer pipeline architecture:
 
 3. **Dispatcher (`internal/app/dispatcher`)**: Maintains routing tables mapping `(provider, symbol, event_type)` tuples to downstream subscribers. The `Registrar` handles route registration from lambda instances.
 
-4. **Lambda Runtime (`internal/app/lambda/runtime`)**: Manages strategy lifecycles declared in the manifest or created via REST API. Each lambda consumes events from the dispatcher and publishes order requests back to the bus.
+4. **Lambda Core & Runtime (`internal/app/lambda/core`, `internal/app/lambda/runtime`)**: `core` provides the reusable lambda primitives (BaseLambda, shared configuration, order helpers) while `runtime` manages lifecycle operations declared in the manifest or via the control plane. Each lambda consumes events from the dispatcher and publishes order requests back to the bus.
 
 ### Key Data Flow
 ```

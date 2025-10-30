@@ -1,5 +1,6 @@
-// Package lambda implements trading lambdas that process market data events and execute trading logic.
-package lambda
+// Package core implements the reusable trading lambda primitives shared across
+// Meltica strategies.
+package core
 
 import (
 	"context"

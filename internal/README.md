@@ -11,7 +11,7 @@ This prevents external projects from depending on internal implementation detail
 
 - **`app/`** – Application runtime orchestration
   - `dispatcher/` – Routing tables, registrar, and runtime fan-out
-  - `lambda/` – Lambda base types, runtime manager, and built-in strategies
+  - `lambda/` – Lambda primitives (`core/`), lifecycle (`runtime/`), and built-in strategies (`strategies/`)
   - `provider/` – Registry, manager, and provider contracts
   - `risk/` – Runtime risk-limit enforcement
 

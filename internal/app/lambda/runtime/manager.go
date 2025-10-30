@@ -15,7 +15,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/coachpo/meltica/internal/app/dispatcher"
-	"github.com/coachpo/meltica/internal/app/lambda"
+	"github.com/coachpo/meltica/internal/app/lambda/core"
 	"github.com/coachpo/meltica/internal/app/lambda/strategies"
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/app/risk"
@@ -84,7 +84,7 @@ func buildRiskLimits(cfg config.RiskConfig, logger *log.Logger) risk.Limits {
 }
 
 // StrategyFactory creates trading strategy instances from configuration.
-type StrategyFactory func(config map[string]any) (lambda.TradingStrategy, error)
+type StrategyFactory func(config map[string]any) (core.TradingStrategy, error)
 
 // StrategyConfigField describes a configurable parameter for a strategy.
 type StrategyConfigField struct {
@@ -159,7 +159,7 @@ type Manager struct {
 }
 
 type lambdaInstance struct {
-	base   *lambda.BaseLambda
+	base   *core.BaseLambda
 	cancel context.CancelFunc
 	errs   <-chan error
 }
@@ -197,7 +197,7 @@ func (m *Manager) registerDefaults() {
 			Config:      withDryRunField(nil),
 			Events:      []schema.EventType{},
 		},
-		factory: func(_ map[string]any) (lambda.TradingStrategy, error) {
+		factory: func(_ map[string]any) (core.TradingStrategy, error) {
 			return &strategies.NoOp{}, nil
 		},
 	})
@@ -213,7 +213,7 @@ func (m *Manager) registerDefaults() {
 			}),
 			Events: []schema.EventType{},
 		},
-		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
+		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			minDelay := durationValue(cfg, "min_delay", strategies.DefaultMinDelay)
 			maxDelay := durationValue(cfg, "max_delay", strategies.DefaultMaxDelay)
 
@@ -242,7 +242,7 @@ func (m *Manager) registerDefaults() {
 			}}),
 			Events: []schema.EventType{},
 		},
-		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
+		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			return &strategies.Logging{
 				Logger:       nil,
 				LoggerPrefix: stringValue(cfg, "logger_prefix", "[Logging] "),
@@ -263,7 +263,7 @@ func (m *Manager) registerDefaults() {
 			}),
 			Events: []schema.EventType{},
 		},
-		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
+		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			return &strategies.Momentum{
 				Lambda:            nil,
 				LookbackPeriod:    intValue(cfg, "lookback_period", 20),
@@ -287,7 +287,7 @@ func (m *Manager) registerDefaults() {
 			}),
 			Events: []schema.EventType{},
 		},
-		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
+		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			return &strategies.MeanReversion{
 				Lambda:             nil,
 				WindowSize:         intValue(cfg, "window_size", 20),
@@ -311,7 +311,7 @@ func (m *Manager) registerDefaults() {
 			}),
 			Events: []schema.EventType{},
 		},
-		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
+		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			return &strategies.Grid{
 				Lambda:      nil,
 				GridLevels:  intValue(cfg, "grid_levels", 3),
@@ -335,7 +335,7 @@ func (m *Manager) registerDefaults() {
 			}),
 			Events: []schema.EventType{},
 		},
-		factory: func(cfg map[string]any) (lambda.TradingStrategy, error) {
+		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			maxOrders := intValue(cfg, "max_open_orders", 2)
 			if maxOrders > int(^uint32(0)>>1) {
 				maxOrders = int(^uint32(0) >> 1)
@@ -479,7 +479,7 @@ func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaM
 }
 
 // Create creates a new lambda instance from the specification.
-func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*lambda.BaseLambda, error) {
+func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*core.BaseLambda, error) {
 	spec = sanitizeSpec(spec)
 	if spec.ID == "" || len(spec.Providers) == 0 || spec.Strategy == "" {
 		return nil, fmt.Errorf("strategy instance requires id, providers, and strategy")
@@ -536,7 +536,7 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 	return err
 }
 
-func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNow bool) (*lambda.BaseLambda, []string, []dispatcher.RouteDeclaration, error) {
+func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNow bool) (*core.BaseLambda, []string, []dispatcher.RouteDeclaration, error) {
 	providers := spec.Providers
 	if len(providers) == 0 {
 		return nil, nil, nil, fmt.Errorf("strategy %s: providers required", spec.ID)
@@ -575,8 +575,8 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 
 	orderRouter := &providerOrderRouter{catalog: m.providers}
 	dryRun := boolValue(spec.Config, "dry_run", true)
-	baseCfg := lambda.Config{Providers: resolvedProviders, ProviderSymbols: spec.ProviderSymbolMap(), DryRun: dryRun}
-	base := lambda.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
+	baseCfg := core.Config{Providers: resolvedProviders, ProviderSymbols: spec.ProviderSymbolMap(), DryRun: dryRun}
+	base := core.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -787,7 +787,7 @@ func (r *providerOrderRouter) SubmitOrder(ctx context.Context, req schema.OrderR
 	return nil
 }
 
-func (m *Manager) buildStrategy(name string, cfg map[string]any) (lambda.TradingStrategy, error) {
+func (m *Manager) buildStrategy(name string, cfg map[string]any) (core.TradingStrategy, error) {
 	def, ok := m.strategies[strings.ToLower(strings.TrimSpace(name))]
 	if !ok {
 		return nil, fmt.Errorf("strategy %q not registered", name)
@@ -903,7 +903,7 @@ func equalProviderSymbols(a, b map[string]config.ProviderSymbols) bool {
 	return true
 }
 
-func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaSpec) []dispatcher.RouteDeclaration {
+func buildRouteDeclarations(strategy core.TradingStrategy, spec config.LambdaSpec) []dispatcher.RouteDeclaration {
 	if strategy == nil {
 		return nil
 	}
@@ -977,7 +977,7 @@ func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaS
 	return routes
 }
 
-func bindStrategy(strategy lambda.TradingStrategy, base *lambda.BaseLambda, _ *log.Logger) {
+func bindStrategy(strategy core.TradingStrategy, base *core.BaseLambda, _ *log.Logger) {
 	switch s := strategy.(type) {
 	case *strategies.Momentum:
 		s.Lambda = &momentumAdapter{base: base}
@@ -1101,7 +1101,7 @@ func durationValue(cfg map[string]any, key string, def time.Duration) time.Durat
 	return def
 }
 
-func submitOrderWithFloat(ctx context.Context, base *lambda.BaseLambda, provider string, side schema.TradeSide, quantity string, price *float64) error {
+func submitOrderWithFloat(ctx context.Context, base *core.BaseLambda, provider string, side schema.TradeSide, quantity string, price *float64) error {
 	var priceStr *string
 	if price != nil {
 		formatted := strconv.FormatFloat(*price, 'f', -1, 64)
@@ -1114,7 +1114,7 @@ func submitOrderWithFloat(ctx context.Context, base *lambda.BaseLambda, provider
 }
 
 type momentumAdapter struct {
-	base *lambda.BaseLambda
+	base *core.BaseLambda
 }
 
 func (a *momentumAdapter) Logger() *log.Logger   { return a.base.Logger() }
@@ -1137,7 +1137,7 @@ func (a *momentumAdapter) SubmitMarketOrder(ctx context.Context, provider string
 }
 
 type orderStrategyAdapter struct {
-	base *lambda.BaseLambda
+	base *core.BaseLambda
 }
 
 func (a *orderStrategyAdapter) Logger() *log.Logger   { return a.base.Logger() }
@@ -1157,7 +1157,7 @@ func (a *orderStrategyAdapter) SubmitOrder(ctx context.Context, provider string,
 }
 
 type marketMakingAdapter struct {
-	base *lambda.BaseLambda
+	base *core.BaseLambda
 }
 
 func (a *marketMakingAdapter) Logger() *log.Logger { return a.base.Logger() }

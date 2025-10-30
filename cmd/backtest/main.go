@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/coachpo/meltica/internal/app/lambda"
+	"github.com/coachpo/meltica/internal/app/lambda/core"
 	"github.com/coachpo/meltica/internal/app/lambda/strategies"
 	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/support/backtest"
 )
 
 type orderStrategyAdapter struct {
-	base *lambda.BaseLambda
+	base *core.BaseLambda
 }
 
 func (a *orderStrategyAdapter) Logger() *log.Logger   { return a.base.Logger() }
@@ -61,7 +61,7 @@ func main() {
 		log.Fatalf("create csv feeder: %v", err)
 	}
 
-	var strategy lambda.TradingStrategy
+	var strategy core.TradingStrategy
 	switch *strategyName {
 	case "noop":
 		strategy = &strategies.NoOp{}
@@ -74,7 +74,7 @@ func main() {
 			BasePrice:   0,
 			DryRun:      true,
 		}
-		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{Providers: []string{"backtest"}, ProviderSymbols: nil, DryRun: true}, nil, nil, nil, gridStrategy, nil)
+		baseLambda := core.NewBaseLambda("backtest", core.Config{Providers: []string{"backtest"}, ProviderSymbols: nil, DryRun: true}, nil, nil, nil, gridStrategy, nil)
 		gridStrategy.Lambda = &orderStrategyAdapter{base: baseLambda}
 		strategy = gridStrategy
 	default:
