@@ -19,7 +19,7 @@ cfg, err := config.Load(ctx, "config/app.yaml")
 ```go
 type AppConfig struct {
     Environment Environment                   // dev, staging, prod
-    Providers   map[Exchange]map[string]any   // Provider-specific blobs
+    Providers   map[Provider]map[string]any   // Provider-specific blobs
     Eventbus    EventbusConfig                // Message bus sizing
     Pools       PoolConfig                    // Object pooling capacities
     APIServer   APIServerConfig               // Control server settings

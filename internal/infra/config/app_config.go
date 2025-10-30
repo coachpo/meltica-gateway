@@ -156,7 +156,7 @@ type TelemetryConfig struct {
 // AppConfig is the unified Meltica application configuration sourced from YAML.
 type AppConfig struct {
 	Environment    Environment                 `yaml:"environment"`
-	Providers      map[Exchange]map[string]any `yaml:"providers"`
+	Providers      map[Provider]map[string]any `yaml:"providers"`
 	Eventbus       EventbusConfig              `yaml:"eventbus"`
 	Pools          PoolConfig                  `yaml:"pools"`
 	Risk           RiskConfig                  `yaml:"risk"`
@@ -185,7 +185,9 @@ func Load(ctx context.Context, configPath string) (AppConfig, error) {
 		return AppConfig{}, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	cfg.normalise()
+	if err := cfg.normalise(); err != nil {
+		return AppConfig{}, err
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return AppConfig{}, err
@@ -194,10 +196,13 @@ func Load(ctx context.Context, configPath string) (AppConfig, error) {
 	return cfg, nil
 }
 
-func (c *AppConfig) normalise() {
-	normalised := make(map[Exchange]map[string]any, len(c.Providers))
+func (c *AppConfig) normalise() error {
+	normalised := make(map[Provider]map[string]any, len(c.Providers))
 	for key, value := range c.Providers {
-		normalizedKey := Exchange(normalizeExchangeName(string(key)))
+		normalizedKey := Provider(normalizeProviderAlias(string(key)))
+		if _, exists := normalised[normalizedKey]; exists {
+			return fmt.Errorf("duplicate provider alias %q", normalizedKey)
+		}
 		normalised[normalizedKey] = value
 	}
 	c.Providers = normalised
@@ -219,6 +224,7 @@ func (c *AppConfig) normalise() {
 	for i, ot := range c.Risk.AllowedOrderTypes {
 		c.Risk.AllowedOrderTypes[i] = strings.TrimSpace(ot)
 	}
+	return nil
 }
 
 // Validate performs semantic validation on the configuration.

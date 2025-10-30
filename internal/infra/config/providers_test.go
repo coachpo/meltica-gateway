@@ -3,7 +3,7 @@ package config
 import "testing"
 
 func TestBuildProviderSpecs(t *testing.T) {
-	configs := map[Exchange]map[string]any{
+	configs := map[Provider]map[string]any{
 		"binanceSpot": {
 			"exchange": map[string]any{
 				"identifier": "binance",
@@ -71,7 +71,7 @@ func TestBuildProviderSpecsErrors(t *testing.T) {
 	})
 
 	t.Run("missing exchange block", func(t *testing.T) {
-		_, err := BuildProviderSpecs(map[Exchange]map[string]any{
+		_, err := BuildProviderSpecs(map[Provider]map[string]any{
 			"binance": {},
 		})
 		if err == nil {
@@ -80,7 +80,7 @@ func TestBuildProviderSpecsErrors(t *testing.T) {
 	})
 
 	t.Run("invalid exchange map", func(t *testing.T) {
-		_, err := BuildProviderSpecs(map[Exchange]map[string]any{
+		_, err := BuildProviderSpecs(map[Provider]map[string]any{
 			"binance": {
 				"exchange": "not-a-map",
 			},
@@ -91,7 +91,7 @@ func TestBuildProviderSpecsErrors(t *testing.T) {
 	})
 
 	t.Run("missing exchange identifier", func(t *testing.T) {
-		_, err := BuildProviderSpecs(map[Exchange]map[string]any{
+		_, err := BuildProviderSpecs(map[Provider]map[string]any{
 			"binance": {
 				"exchange": map[string]any{},
 			},

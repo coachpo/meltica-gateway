@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -13,6 +14,28 @@ func TestLoadMissingFile(t *testing.T) {
 	_, err := Load(context.Background(), filepath.Join(t.TempDir(), "missing.yaml"))
 	if err == nil {
 		t.Fatalf("expected error when config file missing")
+	}
+}
+
+func TestLoadDuplicateProviderAlias(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.yaml")
+	yaml := `
+environment: dev
+providers:
+  BinanceSpot: {}
+  binanceSpot: {}
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	_, err := Load(context.Background(), path)
+	if err == nil {
+		t.Fatalf("expected error when duplicate provider aliases supplied")
+	}
+	if !strings.Contains(err.Error(), `duplicate provider alias "binanceSpot"`) {
+		t.Fatalf("expected duplicate alias error, got %v", err)
 	}
 }
 
@@ -73,7 +96,7 @@ lambdaManifest:
 		t.Fatalf("expected environment %s, got %s", EnvDev, cfg.Environment)
 	}
 
-	ex, ok := cfg.Providers[Exchange("binanceSpot")]
+	ex, ok := cfg.Providers[Provider("binanceSpot")]
 	if !ok {
 		t.Fatalf("expected binance exchange config")
 	}

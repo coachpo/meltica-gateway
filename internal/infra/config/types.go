@@ -1,12 +1,15 @@
 package config
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 // Environment identifies the runtime environment where Meltica operates.
 type Environment string
 
-// Exchange names a supported exchange integration.
-type Exchange string
+// Provider identifies a configured provider name in the application config.
+type Provider string
 
 const (
 	// EnvDev marks the development environment.
@@ -17,6 +20,25 @@ const (
 	EnvProd Environment = "prod"
 )
 
-func normalizeExchangeName(name string) string {
+func normalizeExchangeIdentifier(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func normalizeProviderName(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.ContainsAny(trimmed, "-_/") {
+		return strings.ToLower(trimmed)
+	}
+
+	if trimmed == strings.ToUpper(trimmed) {
+		return trimmed
+	}
+
+	runes := []rune(trimmed)
+	runes[0] = unicode.ToLower(runes[0])
+	return string(runes)
 }
