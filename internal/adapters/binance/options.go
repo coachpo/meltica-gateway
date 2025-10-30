@@ -8,114 +8,41 @@ import (
 )
 
 const (
-	defaultAPIBaseURLSpot        = "https://api.binance.com"
-	defaultAPIBaseURLFuturesUSDM = "https://fapi.binance.com"
-	defaultAPIBaseURLFuturesCoin = "https://dapi.binance.com"
-	defaultWebsocketSpot         = "wss://stream.binance.com"
-	defaultWebsocketUSDM         = "wss://fstream.binance.com"
-	defaultWebsocketCoin         = "wss://dstream.binance.com"
-	defaultProviderName          = "binance"
-	defaultVenue                 = "BINANCE"
-	defaultSnapshotDepth         = 1000
-	defaultHTTPTimeout           = 10 * time.Second
-	defaultInstrumentRefresh     = 30 * time.Minute
-	defaultRecvWindow            = 5 * time.Second
-	defaultUserStreamKeepAlive   = 15 * time.Minute
+	defaultAPIBaseURL          = "https://api.binance.com"
+	defaultWebsocketBaseURL    = "wss://stream.binance.com"
+	defaultProviderName        = "binance"
+	defaultVenue               = "BINANCE"
+	defaultSnapshotDepth       = 1000
+	defaultHTTPTimeout         = 10 * time.Second
+	defaultInstrumentRefresh   = 30 * time.Minute
+	defaultRecvWindow          = 5 * time.Second
+	defaultUserStreamKeepAlive = 15 * time.Minute
+
+	exchangeInfoPath = "/api/v3/exchangeInfo"
+	depthPath        = "/api/v3/depth"
+	listenKeyPath    = "/api/v3/userDataStream"
+	accountInfoPath  = "/api/v3/account"
+	orderPath        = "/api/v3/order"
 )
-
-type marketKind int
-
-const (
-	marketUnset marketKind = iota
-	marketSpot
-	marketFuturesUSDM
-	marketFuturesCoinM
-)
-
-type apiPathConfig struct {
-	exchangeInfo string
-	depth        string
-	listenKey    string
-	accountInfo  string
-	order        string
-}
-
-type marketProfile struct {
-	apiBase   string
-	wsBase    string
-	apiPaths  apiPathConfig
-	isFutures bool
-}
-
-var marketProfiles = map[marketKind]marketProfile{
-	marketSpot: {
-		apiBase: defaultAPIBaseURLSpot,
-		wsBase:  defaultWebsocketSpot,
-		apiPaths: apiPathConfig{
-			exchangeInfo: "/api/v3/exchangeInfo",
-			depth:        "/api/v3/depth",
-			listenKey:    "/api/v3/userDataStream",
-			accountInfo:  "/api/v3/account",
-			order:        "/api/v3/order",
-		},
-		isFutures: false,
-	},
-	marketFuturesUSDM: {
-		apiBase: defaultAPIBaseURLFuturesUSDM,
-		wsBase:  defaultWebsocketUSDM,
-		apiPaths: apiPathConfig{
-			exchangeInfo: "/fapi/v1/exchangeInfo",
-			depth:        "/fapi/v1/depth",
-			listenKey:    "/fapi/v1/listenKey",
-			accountInfo:  "/fapi/v2/balance",
-			order:        "/fapi/v1/order",
-		},
-		isFutures: true,
-	},
-	marketFuturesCoinM: {
-		apiBase: defaultAPIBaseURLFuturesCoin,
-		wsBase:  defaultWebsocketCoin,
-		apiPaths: apiPathConfig{
-			exchangeInfo: "/dapi/v1/exchangeInfo",
-			depth:        "/dapi/v1/depth",
-			listenKey:    "/dapi/v1/listenKey",
-			accountInfo:  "/dapi/v1/balance",
-			order:        "/dapi/v1/order",
-		},
-		isFutures: true,
-	},
-}
 
 // Options configure the Binance adapter.
 type Options struct {
-	Name          string
-	Venue         string
-	Symbols       []string
-	SnapshotDepth int
-	Pools         *pool.PoolManager
-	APIKey        string
-	APISecret     string
+	Name             string
+	Venue            string
+	APIBaseURL       string
+	WebsocketBaseURL string
+	Symbols          []string
+	SnapshotDepth    int
+	Pools            *pool.PoolManager
+	APIKey           string
+	APISecret        string
 
-	market              marketKind
-	apiPaths            apiPathConfig
 	apiBaseURL          string
 	websocketBaseURL    string
 	instrumentRefresh   time.Duration
 	httpTimeout         time.Duration
 	recvWindow          time.Duration
 	userStreamKeepAlive time.Duration
-}
-
-func detectMarket(venue string) marketKind {
-	normalized := strings.ToLower(strings.TrimSpace(venue))
-	switch {
-	case strings.Contains(normalized, "coin"):
-		return marketFuturesCoinM
-	case strings.Contains(normalized, "future"):
-		return marketFuturesUSDM
-	default:
-		return marketSpot
-	}
 }
 
 func normalizeWebsocketBase(raw string) string {
@@ -137,22 +64,17 @@ func withDefaults(in Options) Options {
 		in.Venue = defaultVenue
 	}
 
-	market := in.market
-	if market == marketUnset {
-		market = detectMarket(in.Venue)
+	baseURL := strings.TrimSpace(in.APIBaseURL)
+	if baseURL == "" {
+		baseURL = defaultAPIBaseURL
 	}
-	if market == marketUnset {
-		market = marketSpot
-	}
-	in.market = market
+	in.apiBaseURL = baseURL
 
-	profile, ok := marketProfiles[market]
-	if !ok {
-		profile = marketProfiles[marketSpot]
+	wsBase := strings.TrimSpace(in.WebsocketBaseURL)
+	if wsBase == "" {
+		wsBase = defaultWebsocketBaseURL
 	}
-
-	in.apiBaseURL = profile.apiBase
-	in.websocketBaseURL = normalizeWebsocketBase(profile.wsBase)
+	in.websocketBaseURL = normalizeWebsocketBase(wsBase)
 
 	if in.SnapshotDepth <= 0 {
 		in.SnapshotDepth = defaultSnapshotDepth
@@ -169,8 +91,6 @@ func withDefaults(in Options) Options {
 	if in.userStreamKeepAlive <= 0 {
 		in.userStreamKeepAlive = defaultUserStreamKeepAlive
 	}
-
-	in.apiPaths = profile.apiPaths
 
 	normalized := make([]string, 0, len(in.Symbols))
 	seen := make(map[string]struct{}, len(in.Symbols))
@@ -204,42 +124,23 @@ func (o Options) restEndpoint(path string) string {
 }
 
 func (o Options) exchangeInfoEndpoint() string {
-	return o.restEndpoint(o.apiPaths.exchangeInfo)
+	return o.restEndpoint(exchangeInfoPath)
 }
 
 func (o Options) depthEndpoint() string {
-	return o.restEndpoint(o.apiPaths.depth)
+	return o.restEndpoint(depthPath)
 }
 
 func (o Options) listenKeyEndpoint() string {
-	return o.restEndpoint(o.apiPaths.listenKey)
+	return o.restEndpoint(listenKeyPath)
 }
 
 func (o Options) accountInfoEndpoint() string {
-	if o.apiPaths.accountInfo == "" {
-		return ""
-	}
-	return o.restEndpoint(o.apiPaths.accountInfo)
+	return o.restEndpoint(accountInfoPath)
 }
 
 func (o Options) orderEndpoint() string {
-	return o.restEndpoint(o.apiPaths.order)
-}
-
-func (o Options) isFuturesMarket() bool {
-	profile, ok := marketProfiles[o.market]
-	if !ok {
-		return false
-	}
-	return profile.isFutures
-}
-
-func (o Options) isFuturesUSDM() bool {
-	return o.market == marketFuturesUSDM
-}
-
-func (o Options) isFuturesCoinM() bool {
-	return o.market == marketFuturesCoinM
+	return o.restEndpoint(orderPath)
 }
 
 func (o Options) httpTimeoutDuration() time.Duration {

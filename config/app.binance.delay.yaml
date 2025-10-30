@@ -7,18 +7,6 @@ providers:
       venue: spot
       enabled: true
       snapshot_depth: 100
-  binance-futures:
-    exchange:
-      name: binance
-      venue: futures
-      enabled: true
-      snapshot_depth: 100
-  binance-futures-coin:
-    exchange:
-      name: binance
-      venue: coin
-      enabled: true
-      snapshot_depth: 100
 
 eventbus:
   bufferSize: 8192
@@ -66,12 +54,12 @@ lambdaManifest:
         binance:
           symbols:
             - BTC-USDT
-        binance-futures:
+        binance:
           symbols:
             - BTC-USDT
-        binance-futures-coin:
+        binance:
           symbols:
-            - BTC-USD
+            - ETH-USDT
       strategy: logging
       config:
         dry_run: true

@@ -1,7 +1,6 @@
 package binance
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"strings"
 
 	json "github.com/goccy/go-json"
-	"github.com/shopspring/decimal"
 
 	"github.com/coachpo/meltica/internal/schema"
 )
@@ -24,11 +22,8 @@ type exchangeInfoResponse struct {
 type exchangeInfoSymbol struct {
 	Symbol                 string               `json:"symbol"`
 	Status                 string               `json:"status"`
-	ContractStatus         string               `json:"contractStatus"`
 	BaseAsset              string               `json:"baseAsset"`
 	QuoteAsset             string               `json:"quoteAsset"`
-	ContractSize           stringOrNumber       `json:"contractSize"`
-	ContractType           string               `json:"contractType"`
 	BaseAssetPrecision     int                  `json:"baseAssetPrecision"`
 	QuoteAssetPrecision    int                  `json:"quotePrecision"`
 	QuoteAssetPrecisionAlt int                  `json:"quoteAssetPrecision"`
@@ -52,30 +47,6 @@ type exchangeInfoFilter struct {
 	MinNotional string `json:"minNotional"`
 }
 
-type stringOrNumber string
-
-func (val *stringOrNumber) UnmarshalJSON(data []byte) error {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		*val = ""
-		return nil
-	}
-	if trimmed[0] == '"' {
-		var str string
-		if err := json.Unmarshal(trimmed, &str); err != nil {
-			return fmt.Errorf("stringOrNumber: unmarshal string: %w", err)
-		}
-		*val = stringOrNumber(str)
-		return nil
-	}
-	*val = stringOrNumber(string(trimmed))
-	return nil
-}
-
-func (val stringOrNumber) String() string {
-	return string(val)
-}
-
 type depthSnapshotResponse struct {
 	LastUpdateID int64      `json:"lastUpdateId"`
 	Bids         [][]string `json:"bids"`
@@ -94,15 +65,6 @@ type accountBalance struct {
 	Asset  string `json:"asset"`
 	Free   string `json:"free"`
 	Locked string `json:"locked"`
-}
-
-type futuresBalanceEntry struct {
-	Asset              string `json:"asset"`
-	Balance            string `json:"balance"`
-	WalletBalance      string `json:"walletBalance"`
-	CrossWalletBalance string `json:"crossWalletBalance"`
-	AvailableBalance   string `json:"availableBalance"`
-	WithdrawAvailable  string `json:"withdrawAvailable"`
 }
 
 func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, map[string]symbolMeta, error) {
@@ -142,16 +104,7 @@ func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, 
 	metas := make(map[string]symbolMeta, len(payload.Symbols))
 
 	for _, sym := range payload.Symbols {
-		if p.opts.isFuturesMarket() {
-			contract := strings.ToUpper(strings.TrimSpace(sym.ContractType))
-			if contract != "" && contract != "PERPETUAL" {
-				continue
-			}
-		}
 		status := strings.TrimSpace(sym.Status)
-		if status == "" {
-			status = strings.TrimSpace(sym.ContractStatus)
-		}
 		if !strings.EqualFold(status, "TRADING") {
 			continue
 		}
@@ -179,27 +132,12 @@ func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, 
 
 func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, symbolMeta, error) {
 	canonical := canonicalFromAssets(sym.BaseAsset, sym.QuoteAsset)
-	instType := schema.InstrumentTypeSpot
-	if p.opts.isFuturesMarket() {
-		instType = schema.InstrumentTypePerp
-	}
-	contractCurrency := ""
-	if p.opts.isFuturesUSDM() {
-		contractCurrency = strings.ToUpper(strings.TrimSpace(sym.QuoteAsset))
-	} else if p.opts.isFuturesCoinM() {
-		contractCurrency = strings.ToUpper(strings.TrimSpace(sym.BaseAsset))
-	}
 	inst := schema.Instrument{
 		Symbol:            canonical,
-		Type:              instType,
+		Type:              schema.InstrumentTypeSpot,
 		BaseCurrency:      strings.ToUpper(strings.TrimSpace(sym.BaseAsset)),
 		QuoteCurrency:     strings.ToUpper(strings.TrimSpace(sym.QuoteAsset)),
 		Venue:             p.opts.Venue,
-		Expiry:            "",
-		ContractValue:     nil,
-		ContractCurrency:  contractCurrency,
-		Strike:            nil,
-		OptionType:        "",
 		PriceIncrement:    "",
 		QuantityIncrement: "",
 		PricePrecision:    nil,
@@ -241,12 +179,6 @@ func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, s
 			if strings.TrimSpace(filter.MinNotional) != "" {
 				inst.MinNotional = filter.MinNotional
 			}
-		}
-	}
-
-	if value := strings.TrimSpace(sym.ContractSize.String()); value != "" {
-		if parsed, err := strconv.ParseFloat(value, 64); err == nil && parsed > 0 {
-			inst.ContractValue = &parsed
 		}
 	}
 
@@ -364,9 +296,6 @@ func (p *Provider) fetchAccountBalances(ctx context.Context) ([]accountBalance, 
 	if !p.hasTradingCredentials() {
 		return nil, errors.New("binance: missing api credentials for account balances")
 	}
-	if p.opts.isFuturesMarket() {
-		return p.fetchFuturesAccountBalances(ctx)
-	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, p.opts.httpTimeoutDuration())
 	defer cancel()
@@ -407,89 +336,6 @@ func (p *Provider) fetchAccountBalances(ctx context.Context) ([]accountBalance, 
 		return nil, fmt.Errorf("decode account: %w", err)
 	}
 	return payload.Balances, nil
-}
-
-func (p *Provider) fetchFuturesAccountBalances(ctx context.Context) ([]accountBalance, error) {
-	reqCtx, cancel := context.WithTimeout(ctx, p.opts.httpTimeoutDuration())
-	defer cancel()
-	params := url.Values{}
-	if p.opts.recvWindowDuration() > 0 {
-		params.Set("recvWindow", strconv.FormatInt(p.opts.recvWindowDuration().Milliseconds(), 10))
-	}
-	params.Set("timestamp", strconv.FormatInt(p.clock().UTC().UnixMilli(), 10))
-	query := params.Encode()
-	signature := signPayload(query, p.opts.APISecret)
-	if query != "" {
-		query += "&"
-	}
-	query += "signature=" + signature
-	endpoint := p.opts.accountInfoEndpoint()
-	if strings.TrimSpace(endpoint) == "" {
-		return nil, errors.New("binance: futures account endpoint not configured")
-	}
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint+"?"+query, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create futures account request: %w", err)
-	}
-	req.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
-	resp, err := p.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request futures account: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return nil, fmt.Errorf("futures account status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var payload []futuresBalanceEntry
-	decoder := json.NewDecoder(resp.Body)
-	if err := decoder.Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode futures account: %w", err)
-	}
-	out := make([]accountBalance, 0, len(payload))
-	for _, entry := range payload {
-		asset := strings.ToUpper(strings.TrimSpace(entry.Asset))
-		if asset == "" {
-			continue
-		}
-		total := firstNonEmpty(entry.WalletBalance, entry.Balance, entry.CrossWalletBalance)
-		free := firstNonEmpty(entry.AvailableBalance, entry.WithdrawAvailable)
-		if free == "" {
-			free = total
-		}
-		total = strings.TrimSpace(total)
-		free = strings.TrimSpace(free)
-		if total == "" && free == "" {
-			continue
-		}
-		locked := ""
-		totalDec, totalErr := decimal.NewFromString(total)
-		freeDec, freeErr := decimal.NewFromString(free)
-		if totalErr == nil && freeErr == nil {
-			lockedDec := totalDec.Sub(freeDec)
-			if lockedDec.Sign() < 0 {
-				lockedDec = decimal.Zero
-			}
-			locked = lockedDec.String()
-		}
-		out = append(out, accountBalance{
-			Asset:  asset,
-			Free:   free,
-			Locked: locked,
-		})
-	}
-	return out, nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func ptr[T any](v T) *T {
