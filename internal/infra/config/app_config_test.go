@@ -52,8 +52,10 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: test-lambda
-      providers: [fake]
-      symbol: BTC-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - BTC-USDT
       strategy: delay
       auto_start: false
 `
@@ -195,8 +197,10 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: test-lambda
-      providers: [fake]
-      symbol: BTC-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - BTC-USDT
       strategy: delay
       auto_start: false
 `, fanoutLine)
