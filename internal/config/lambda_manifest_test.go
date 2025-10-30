@@ -8,11 +8,14 @@ import (
 func TestLambdaManifestValidate(t *testing.T) {
 	manifest := LambdaManifest{
 		Lambdas: []LambdaSpec{{
-			ID:        "test-lambda",
-			Providers: []string{"fake"},
-			Symbol:    "BTC-USDT",
-			Strategy:  "delay",
-			Config:    map[string]any{"min_delay": "100ms"},
+			ID:       "test-lambda",
+			Strategy: "delay",
+			Config:   map[string]any{"min_delay": "100ms"},
+			ProviderSymbols: map[string]ProviderSymbols{
+				"fake": {
+					Symbols: []string{"BTC-USDT"},
+				},
+			},
 			AutoStart: true,
 		}},
 	}
@@ -31,10 +34,13 @@ func TestLambdaManifestValidateMissingEntries(t *testing.T) {
 func TestLambdaManifestValidateMissingFields(t *testing.T) {
 	manifest := LambdaManifest{
 		Lambdas: []LambdaSpec{{
-			ID:        "",
-			Providers: []string{"fake"},
-			Symbol:    "BTC-USDT",
-			Strategy:  "delay",
+			ID:       "",
+			Strategy: "delay",
+			ProviderSymbols: map[string]ProviderSymbols{
+				"fake": {
+					Symbols: []string{"BTC-USDT"},
+				},
+			},
 		}},
 	}
 	if err := manifest.Validate(); err == nil {
@@ -42,11 +48,12 @@ func TestLambdaManifestValidateMissingFields(t *testing.T) {
 	}
 }
 
-func TestLambdaManifestProviderAssignments(t *testing.T) {
+func TestLambdaManifestProviderSymbols(t *testing.T) {
 	spec := LambdaSpec{
-		ID:       "lambda-map",
-		Strategy: "delay",
-		ProviderAssignments: map[string]ProviderAssignment{
+		ID:        "lambda-map",
+		Strategy:  "delay",
+		AutoStart: true,
+		ProviderSymbols: map[string]ProviderSymbols{
 			"binance": {
 				Symbols: []string{"BTC-USDT", "eth-usdt"},
 			},
@@ -68,22 +75,23 @@ func TestLambdaManifestProviderAssignments(t *testing.T) {
 	if !reflect.DeepEqual(normalized.Providers, []string{"binance", "binance-futures", "binance-futures-coin"}) {
 		t.Fatalf("unexpected providers: %+v", normalized.Providers)
 	}
-	if !reflect.DeepEqual(normalized.ProviderSymbols("binance"), []string{"BTC-USDT", "ETH-USDT"}) {
-		t.Fatalf("unexpected symbols for binance: %+v", normalized.ProviderSymbols("binance"))
+	if !reflect.DeepEqual(normalized.SymbolsForProvider("binance"), []string{"BTC-USDT", "ETH-USDT"}) {
+		t.Fatalf("unexpected symbols for binance: %+v", normalized.SymbolsForProvider("binance"))
 	}
-	if !reflect.DeepEqual(normalized.ProviderSymbols("binance-futures"), []string{"BTC-USDT"}) {
-		t.Fatalf("unexpected symbols for binance-futures: %+v", normalized.ProviderSymbols("binance-futures"))
+	if !reflect.DeepEqual(normalized.SymbolsForProvider("binance-futures"), []string{"BTC-USDT"}) {
+		t.Fatalf("unexpected symbols for binance-futures: %+v", normalized.SymbolsForProvider("binance-futures"))
 	}
-	if !reflect.DeepEqual(normalized.ProviderSymbols("binance-futures-coin"), []string{"ETH-USDT"}) {
-		t.Fatalf("unexpected symbols for binance-futures-coin: %+v", normalized.ProviderSymbols("binance-futures-coin"))
+	if !reflect.DeepEqual(normalized.SymbolsForProvider("binance-futures-coin"), []string{"ETH-USDT"}) {
+		t.Fatalf("unexpected symbols for binance-futures-coin: %+v", normalized.SymbolsForProvider("binance-futures-coin"))
 	}
 }
 
 func TestLambdaManifestSingleSymbolAssignment(t *testing.T) {
 	spec := LambdaSpec{
-		ID:       "lambda-single",
-		Strategy: "delay",
-		ProviderAssignments: map[string]ProviderAssignment{
+		ID:        "lambda-single",
+		Strategy:  "delay",
+		AutoStart: true,
+		ProviderSymbols: map[string]ProviderSymbols{
 			"binance": {
 				Symbols: []string{"BTC-USDT"},
 			},
@@ -99,7 +107,7 @@ func TestLambdaManifestSingleSymbolAssignment(t *testing.T) {
 	if len(normalized.Providers) != 1 || normalized.Providers[0] != "binance" {
 		t.Fatalf("unexpected providers: %+v", normalized.Providers)
 	}
-	if !reflect.DeepEqual(normalized.ProviderSymbols("binance"), []string{"BTC-USDT"}) {
-		t.Fatalf("unexpected symbols for binance: %+v", normalized.ProviderSymbols("binance"))
+	if !reflect.DeepEqual(normalized.SymbolsForProvider("binance"), []string{"BTC-USDT"}) {
+		t.Fatalf("unexpected symbols for binance: %+v", normalized.SymbolsForProvider("binance"))
 	}
 }

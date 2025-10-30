@@ -473,8 +473,11 @@ func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaM
 // Create creates a new lambda instance from the specification.
 func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*lambda.BaseLambda, error) {
 	spec = sanitizeSpec(spec)
-	if spec.ID == "" || len(spec.Providers) == 0 || spec.Symbol == "" || spec.Strategy == "" {
-		return nil, fmt.Errorf("strategy instance requires id, providers, symbol, and strategy")
+	if spec.ID == "" || len(spec.Providers) == 0 || spec.Strategy == "" {
+		return nil, fmt.Errorf("strategy instance requires id, providers, and strategy")
+	}
+	if len(spec.AllSymbols()) == 0 {
+		return nil, fmt.Errorf("strategy %s: instrument symbols required", spec.ID)
 	}
 	if err := m.ensureSpec(spec, false); err != nil {
 		return nil, err
@@ -655,8 +658,8 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	if !equalStringSlices(current.Providers, spec.Providers) {
 		return fmt.Errorf("providers are immutable for %s", spec.ID)
 	}
-	if current.Symbol != spec.Symbol {
-		return fmt.Errorf("symbol is immutable for %s", spec.ID)
+	if !equalProviderSymbols(current.ProviderSymbols, spec.ProviderSymbols) {
+		return fmt.Errorf("provider symbol assignments are immutable for %s", spec.ID)
 	}
 	if current.Strategy != spec.Strategy {
 		return fmt.Errorf("strategy is immutable for %s", spec.ID)
@@ -678,13 +681,14 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 
 // InstanceSnapshot captures the current state of a lambda instance.
 type InstanceSnapshot struct {
-	ID        string         `json:"id"`
-	Strategy  string         `json:"strategy"`
-	Providers []string       `json:"providers"`
-	Symbol    string         `json:"symbol"`
-	Config    map[string]any `json:"config"`
-	AutoStart bool           `json:"autoStart"`
-	Running   bool           `json:"running"`
+	ID              string                            `json:"id"`
+	Strategy        string                            `json:"strategy"`
+	Providers       []string                          `json:"providers"`
+	ProviderSymbols map[string]config.ProviderSymbols `json:"provider_symbols"`
+	Symbols         []string                          `json:"symbols"`
+	Config          map[string]any                    `json:"config"`
+	AutoStart       bool                              `json:"autoStart"`
+	Running         bool                              `json:"running"`
 }
 
 // Instances returns snapshots of all lambda instances.
@@ -705,13 +709,14 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 	spec, err := m.specForID(id)
 	if err != nil {
 		return InstanceSnapshot{
-			ID:        "",
-			Strategy:  "",
-			Providers: []string{},
-			Symbol:    "",
-			Config:    map[string]any{},
-			AutoStart: false,
-			Running:   false,
+			ID:              "",
+			Strategy:        "",
+			Providers:       []string{},
+			ProviderSymbols: map[string]config.ProviderSymbols{},
+			Symbols:         []string{},
+			Config:          map[string]any{},
+			AutoStart:       false,
+			Running:         false,
 		}, false
 	}
 	m.mu.RLock()
@@ -723,14 +728,16 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
 	cfg := copyMap(spec.Config)
 	providers := append([]string(nil), spec.Providers...)
+	assignments := cloneProviderSymbols(spec.ProviderSymbols)
 	return InstanceSnapshot{
-		ID:        spec.ID,
-		Strategy:  spec.Strategy,
-		Providers: providers,
-		Symbol:    spec.Symbol,
-		Config:    cfg,
-		AutoStart: spec.AutoStart,
-		Running:   running,
+		ID:              spec.ID,
+		Strategy:        spec.Strategy,
+		Providers:       providers,
+		ProviderSymbols: assignments,
+		Symbols:         spec.AllSymbols(),
+		Config:          cfg,
+		AutoStart:       spec.AutoStart,
+		Running:         running,
 	}
 }
 
@@ -782,12 +789,14 @@ func (m *Manager) buildStrategy(name string, cfg map[string]any) (lambda.Trading
 
 func sanitizeSpec(spec config.LambdaSpec) config.LambdaSpec {
 	spec.ID = strings.TrimSpace(spec.ID)
-	spec.Symbol = strings.TrimSpace(spec.Symbol)
 	spec.Strategy = strings.TrimSpace(spec.Strategy)
 	spec.RefreshProviders()
 	spec.Providers = normalizeProviderList(spec.Providers)
 	if spec.Config == nil {
 		spec.Config = make(map[string]any)
+	}
+	if spec.ProviderSymbols == nil {
+		spec.ProviderSymbols = make(map[string]config.ProviderSymbols)
 	}
 	return spec
 }
@@ -796,17 +805,17 @@ func cloneSpec(spec config.LambdaSpec) config.LambdaSpec {
 	clone := spec
 	clone.Config = copyMap(spec.Config)
 	clone.Providers = append([]string(nil), spec.Providers...)
-	clone.ProviderAssignments = cloneProviderAssignments(spec.ProviderAssignments)
+	clone.ProviderSymbols = cloneProviderSymbols(spec.ProviderSymbols)
 	return clone
 }
 
-func cloneProviderAssignments(src map[string]config.ProviderAssignment) map[string]config.ProviderAssignment {
+func cloneProviderSymbols(src map[string]config.ProviderSymbols) map[string]config.ProviderSymbols {
 	if len(src) == 0 {
 		return nil
 	}
-	dst := make(map[string]config.ProviderAssignment, len(src))
+	dst := make(map[string]config.ProviderSymbols, len(src))
 	for name, assignment := range src {
-		cloned := config.ProviderAssignment{
+		cloned := config.ProviderSymbols{
 			Symbols: append([]string(nil), assignment.Symbols...),
 		}
 		dst[name] = cloned
@@ -865,6 +874,27 @@ func equalStringSlices(a, b []string) bool {
 	return true
 }
 
+func equalProviderSymbols(a, b map[string]config.ProviderSymbols) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for name, assignmentA := range a {
+		assignmentB, ok := b[name]
+		if !ok {
+			return false
+		}
+		if len(assignmentA.Symbols) != len(assignmentB.Symbols) {
+			return false
+		}
+		for i := range assignmentA.Symbols {
+			if assignmentA.Symbols[i] != assignmentB.Symbols[i] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaSpec) []dispatcher.RouteDeclaration {
 	if strategy == nil {
 		return nil
@@ -880,11 +910,6 @@ func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaS
 	quoteCurrency := ""
 	if len(allSymbols) == 1 {
 		if base, quote, err := schema.InstrumentCurrencies(allSymbols[0]); err == nil {
-			baseCurrency = base
-			quoteCurrency = quote
-		}
-	} else if strings.TrimSpace(spec.Symbol) != "" {
-		if base, quote, err := schema.InstrumentCurrencies(spec.Symbol); err == nil {
 			baseCurrency = base
 			quoteCurrency = quote
 		}
@@ -927,8 +952,6 @@ func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaS
 			routeFilters := make(map[string]any)
 			if len(allSymbols) > 0 {
 				routeFilters["instrument"] = allSymbols
-			} else if trimmed := strings.ToUpper(strings.TrimSpace(spec.Symbol)); trimmed != "" {
-				routeFilters["instrument"] = trimmed
 			}
 			for provider, symbols := range providerSymbols {
 				if len(symbols) == 0 {

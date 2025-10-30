@@ -62,7 +62,7 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: binance-logging-btc
-      providers:
+      provider_symbols:
         binance-1:
           symbols:
             - BTC-USDT

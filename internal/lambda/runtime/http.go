@@ -199,17 +199,19 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 		return spec, fmt.Errorf("decode payload: %w", err)
 	}
 	spec.ID = strings.TrimSpace(spec.ID)
-	spec.Symbol = strings.TrimSpace(spec.Symbol)
 	spec.Strategy = strings.TrimSpace(spec.Strategy)
-	normalizedProviders := make([]string, 0, len(spec.Providers))
-	for _, provider := range spec.Providers {
-		trimmed := strings.TrimSpace(provider)
-		if trimmed == "" {
-			continue
+	if len(spec.ProviderSymbols) > 0 {
+		normalizedAssignments := make(map[string]config.ProviderSymbols, len(spec.ProviderSymbols))
+		for name, assignment := range spec.ProviderSymbols {
+			trimmed := strings.TrimSpace(name)
+			if trimmed == "" {
+				continue
+			}
+			assignment.normalize()
+			normalizedAssignments[trimmed] = assignment
 		}
-		normalizedProviders = append(normalizedProviders, trimmed)
+		spec.ProviderSymbols = normalizedAssignments
 	}
-	spec.Providers = normalizedProviders
 	spec.RefreshProviders()
 	if spec.Config == nil {
 		spec.Config = make(map[string]any)
@@ -217,14 +219,18 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 	if spec.ID == "" {
 		return spec, fmt.Errorf("id required")
 	}
-	if len(spec.Providers) == 0 {
-		return spec, fmt.Errorf("providers required")
-	}
-	if spec.Symbol == "" {
-		return spec, fmt.Errorf("symbol required")
-	}
 	if spec.Strategy == "" {
 		return spec, fmt.Errorf("strategy required")
+	}
+	manifest := config.LambdaManifest{
+		Lambdas: []config.LambdaSpec{spec},
+	}
+	if err := manifest.Validate(); err != nil {
+		return spec, err
+	}
+	spec = manifest.Lambdas[0]
+	if len(spec.AllSymbols()) == 0 {
+		return spec, fmt.Errorf("symbols required")
 	}
 	return spec, nil
 }

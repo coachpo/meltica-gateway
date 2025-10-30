@@ -59,9 +59,10 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: binance-mm-btc
-      providers:
-        - binance
-      symbol: BTC-USDT
+      provider_symbols:
+        binance:
+          symbols:
+            - BTC-USDT
       strategy: marketmaking
       config:
         dry_run: true
@@ -70,10 +71,13 @@ lambdaManifest:
         max_open_orders: 2
       auto_start: false
     - id: binance-cross-momentum-eth
-      providers:
-        - binance
-        - binance-futures
-      symbol: ETH-USDT
+      provider_symbols:
+        binance:
+          symbols:
+            - ETH-USDT
+        binance-futures:
+          symbols:
+            - ETH-USDT
       strategy: momentum
       config:
         dry_run: true

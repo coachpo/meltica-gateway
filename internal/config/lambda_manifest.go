@@ -13,21 +13,21 @@ type LambdaManifest struct {
 	Lambdas []LambdaSpec `yaml:"lambdas"`
 }
 
-// ProviderAssignment defines the symbol scope supplied by a provider.
-type ProviderAssignment struct {
+// ProviderSymbols defines the symbol scope supplied by a provider.
+type ProviderSymbols struct {
 	Symbols []string `yaml:"symbols" json:"symbols"`
 }
 
-func (a *ProviderAssignment) normalize() {
-	if a == nil {
+func (p *ProviderSymbols) normalize() {
+	if p == nil {
 		return
 	}
-	if len(a.Symbols) == 0 {
+	if len(p.Symbols) == 0 {
 		return
 	}
-	seen := make(map[string]struct{}, len(a.Symbols))
-	out := make([]string, 0, len(a.Symbols))
-	for _, symbol := range a.Symbols {
+	seen := make(map[string]struct{}, len(p.Symbols))
+	out := make([]string, 0, len(p.Symbols))
+	for _, symbol := range p.Symbols {
 		normalized := strings.ToUpper(strings.TrimSpace(symbol))
 		if normalized == "" {
 			continue
@@ -38,18 +38,18 @@ func (a *ProviderAssignment) normalize() {
 		seen[normalized] = struct{}{}
 		out = append(out, normalized)
 	}
-	a.Symbols = out
+	p.Symbols = out
 }
 
-func (a ProviderAssignment) includes(symbol string) bool {
-	if len(a.Symbols) == 0 {
+func (p ProviderSymbols) includes(symbol string) bool {
+	if len(p.Symbols) == 0 {
 		return true
 	}
 	symbol = strings.ToUpper(strings.TrimSpace(symbol))
 	if symbol == "" {
 		return false
 	}
-	for _, candidate := range a.Symbols {
+	for _, candidate := range p.Symbols {
 		if strings.EqualFold(candidate, symbol) {
 			return true
 		}
@@ -59,21 +59,12 @@ func (a ProviderAssignment) includes(symbol string) bool {
 
 // LambdaSpec defines a lambda instance configuration.
 type LambdaSpec struct {
-	ID                  string                        `yaml:"id" json:"id"`
-	Providers           []string                      `yaml:"-" json:"providers"`
-	ProviderAssignments map[string]ProviderAssignment `yaml:"-" json:"provider_assignments,omitempty"`
-	Symbol              string                        `yaml:"symbol" json:"symbol"`
-	Strategy            string                        `yaml:"strategy" json:"strategy"`
-	Config              map[string]any                `yaml:"config" json:"config"`
-	AutoStart           bool                          `yaml:"auto_start" json:"auto_start"`
-}
-
-type lambdaSpecAlias struct {
-	ID        string         `yaml:"id"`
-	Symbol    string         `yaml:"symbol"`
-	Strategy  string         `yaml:"strategy"`
-	Config    map[string]any `yaml:"config"`
-	AutoStart bool           `yaml:"auto_start"`
+	ID              string                     `yaml:"id" json:"id"`
+	Strategy        string                     `yaml:"strategy" json:"strategy"`
+	Config          map[string]any             `yaml:"config" json:"config"`
+	AutoStart       bool                       `yaml:"auto_start" json:"auto_start"`
+	ProviderSymbols map[string]ProviderSymbols `yaml:"provider_symbols" json:"provider_symbols"`
+	Providers       []string                   `yaml:"-" json:"-"`
 }
 
 // UnmarshalYAML implements custom YAML decoding for LambdaSpec.
@@ -82,108 +73,92 @@ func (s *LambdaSpec) UnmarshalYAML(value *yaml.Node) error {
 		return nil
 	}
 
-	var aux lambdaSpecAlias
-	if err := value.Decode(&aux); err != nil {
+	var base struct {
+		ID        string         `yaml:"id"`
+		Strategy  string         `yaml:"strategy"`
+		Config    map[string]any `yaml:"config"`
+		AutoStart bool           `yaml:"auto_start"`
+	}
+	if err := value.Decode(&base); err != nil {
 		return fmt.Errorf("decode lambda spec: %w", err)
 	}
 
-	var providersNode yaml.Node
+	var providersNode *yaml.Node
 	for i := 0; i < len(value.Content)-1; i += 2 {
 		keyNode := value.Content[i]
 		if keyNode.Kind != yaml.ScalarNode {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(keyNode.Value), "providers") {
-			providersNode = *value.Content[i+1]
+		if strings.EqualFold(strings.TrimSpace(keyNode.Value), "provider_symbols") {
+			providersNode = value.Content[i+1]
 			break
 		}
 	}
-
-	var providerNames []string
-	providerAssignments := make(map[string]ProviderAssignment)
-
-	switch providersNode.Kind {
-	case 0:
-		// No providers field supplied. Leave empty and let validation catch it.
-		providerNames = nil
-	case yaml.SequenceNode:
-		var entries []string
-		if err := providersNode.Decode(&entries); err != nil {
-			return fmt.Errorf("providers: %w", err)
-		}
-		providerNames = normalizeProviderNames(entries)
-	case yaml.MappingNode:
-		raw := make(map[string]ProviderAssignment)
-		if err := providersNode.Decode(&raw); err != nil {
-			return fmt.Errorf("providers: %w", err)
-		}
-		for name, assignment := range raw {
-			trimmed := strings.TrimSpace(name)
-			if trimmed == "" {
-				continue
-			}
-			assignment.normalize()
-			providerAssignments[trimmed] = assignment
-		}
-		for name := range providerAssignments {
-			providerNames = append(providerNames, name)
-		}
-		providerNames = normalizeProviderNames(providerNames)
-	case yaml.DocumentNode, yaml.ScalarNode, yaml.AliasNode:
-		return fmt.Errorf("providers must be a sequence or mapping")
+	if providersNode == nil {
+		return fmt.Errorf("provider_symbols: mapping required")
+	}
+	if providersNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("provider_symbols must be a mapping")
 	}
 
-	s.ID = aux.ID
-	s.Symbol = aux.Symbol
-	s.Strategy = aux.Strategy
-	s.Config = aux.Config
-	s.AutoStart = aux.AutoStart
-	s.ProviderAssignments = providerAssignments
-	s.Providers = providerNames
-	s.refreshProviders()
+	assignments := make(map[string]ProviderSymbols, len(providersNode.Content)/2)
+	names := make([]string, 0, len(providersNode.Content)/2)
+	for i := 0; i < len(providersNode.Content)-1; i += 2 {
+		keyNode := providersNode.Content[i]
+		valNode := providersNode.Content[i+1]
+		if keyNode.Kind != yaml.ScalarNode {
+			return fmt.Errorf("provider_symbols[%d]: provider name must be a scalar", i/2)
+		}
+		name := strings.TrimSpace(keyNode.Value)
+		if name == "" {
+			return fmt.Errorf("provider_symbols[%d]: provider name required", i/2)
+		}
+		var assignment ProviderSymbols
+		if err := valNode.Decode(&assignment); err != nil {
+			return fmt.Errorf("provider_symbols[%s]: %w", name, err)
+		}
+		assignment.normalize()
+		if _, exists := assignments[name]; exists {
+			return fmt.Errorf("provider_symbols[%s]: duplicate provider entry", name)
+		}
+		assignments[name] = assignment
+		names = append(names, name)
+	}
+
+	s.ID = base.ID
+	s.Strategy = base.Strategy
+	s.Config = base.Config
+	s.AutoStart = base.AutoStart
+	s.ProviderSymbols = assignments
+	s.Providers = normalizeProviderNames(names)
 	return nil
 }
 
-// refreshProviders re-derives the provider list from assignments and symbol scope.
+// refreshProviders re-derives the provider list from assignments.
 func (s *LambdaSpec) refreshProviders() {
 	if s == nil {
 		return
 	}
-	if len(s.ProviderAssignments) == 0 {
+	if len(s.ProviderSymbols) == 0 {
 		s.Providers = normalizeProviderNames(s.Providers)
 		return
 	}
-	symbol := strings.ToUpper(strings.TrimSpace(s.Symbol))
-	providerNames := make([]string, 0, len(s.ProviderAssignments))
-	for name, assignment := range s.ProviderAssignments {
+	names := make([]string, 0, len(s.ProviderSymbols))
+	for name, assignment := range s.ProviderSymbols {
 		assignment.normalize()
-		s.ProviderAssignments[name] = assignment
-		if symbol == "" || assignment.includes(symbol) {
-			providerNames = append(providerNames, name)
-		}
+		s.ProviderSymbols[name] = assignment
+		names = append(names, name)
 	}
-	s.Providers = normalizeProviderNames(providerNames)
+	s.Providers = normalizeProviderNames(names)
 }
 
-// ProviderSymbols returns the symbol assignments for a provider, if any.
-func (s LambdaSpec) ProviderSymbols(provider string) []string {
+// SymbolsForProvider returns the symbol assignments for a provider, if any.
+func (s LambdaSpec) SymbolsForProvider(provider string) []string {
 	name := strings.TrimSpace(provider)
 	if name == "" {
 		return nil
 	}
-	if len(s.Providers) > 0 {
-		found := false
-		for _, entry := range s.Providers {
-			if strings.EqualFold(entry, name) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil
-		}
-	}
-	assignment, ok := s.ProviderAssignments[name]
+	assignment, ok := s.ProviderSymbols[name]
 	if !ok {
 		return nil
 	}
@@ -199,8 +174,8 @@ func (s *LambdaSpec) RefreshProviders() {
 
 // ProviderSymbolMap returns the provider-to-symbol mapping for this spec.
 func (s LambdaSpec) ProviderSymbolMap() map[string][]string {
-	out := make(map[string][]string, len(s.ProviderAssignments))
-	for name, assignment := range s.ProviderAssignments {
+	out := make(map[string][]string, len(s.ProviderSymbols))
+	for name, assignment := range s.ProviderSymbols {
 		normalizedName := strings.TrimSpace(name)
 		if normalizedName == "" {
 			continue
@@ -223,17 +198,6 @@ func (s LambdaSpec) ProviderSymbolMap() map[string][]string {
 		}
 		out[normalizedName] = symbols
 	}
-	if trimmed := strings.ToUpper(strings.TrimSpace(s.Symbol)); trimmed != "" {
-		for _, provider := range s.Providers {
-			name := strings.TrimSpace(provider)
-			if name == "" {
-				continue
-			}
-			if _, ok := out[name]; !ok {
-				out[name] = []string{trimmed}
-			}
-		}
-	}
 	return out
 }
 
@@ -247,9 +211,6 @@ func (s LambdaSpec) AllSymbols() []string {
 			}
 			unique[symbol] = struct{}{}
 		}
-	}
-	if trimmed := strings.ToUpper(strings.TrimSpace(s.Symbol)); trimmed != "" {
-		unique[trimmed] = struct{}{}
 	}
 	out := make([]string, 0, len(unique))
 	for symbol := range unique {
@@ -291,39 +252,30 @@ func (m LambdaManifest) Validate() error {
 		if strings.TrimSpace(spec.ID) == "" {
 			return fmt.Errorf("lambdas[%d]: id required", i)
 		}
-		if strings.TrimSpace(spec.Symbol) == "" {
-			if len(spec.ProviderAssignments) == 0 {
-				return fmt.Errorf("lambdas[%d]: symbol required when provider assignments absent", i)
-			}
-			hasSymbols := false
-			for _, assignment := range spec.ProviderAssignments {
-				if len(assignment.Symbols) > 0 {
-					hasSymbols = true
-					break
-				}
-			}
-			if !hasSymbols {
-				return fmt.Errorf("lambdas[%d]: at least one provider symbol required", i)
-			}
-		}
 		if strings.TrimSpace(spec.Strategy) == "" {
 			return fmt.Errorf("lambdas[%d]: strategy required", i)
 		}
 		if len(spec.Providers) == 0 {
 			return fmt.Errorf("lambdas[%d]: providers required", i)
 		}
+		if len(spec.ProviderSymbols) == 0 {
+			return fmt.Errorf("lambdas[%d]: provider_symbols mapping required", i)
+		}
 		for j, provider := range spec.Providers {
 			name := strings.TrimSpace(provider)
 			if name == "" {
 				return fmt.Errorf("lambdas[%d].providers[%d]: provider name required", i, j)
 			}
-			if strings.TrimSpace(spec.Symbol) != "" && len(spec.ProviderAssignments) > 0 {
-				if assignment, ok := spec.ProviderAssignments[name]; ok {
-					if len(assignment.Symbols) > 0 && !assignment.includes(spec.Symbol) {
-						return fmt.Errorf("lambdas[%d].providers[%q]: symbol %q not declared for provider", i, name, spec.Symbol)
-					}
-				}
+			assignment, ok := spec.ProviderSymbols[name]
+			if !ok {
+				return fmt.Errorf("lambdas[%d].providers[%q]: provider_symbols entry missing", i, name)
 			}
+			if len(assignment.Symbols) == 0 {
+				return fmt.Errorf("lambdas[%d].providers[%q]: at least one symbol required", i, name)
+			}
+		}
+		if len(spec.AllSymbols()) == 0 {
+			return fmt.Errorf("lambdas[%d]: at least one symbol required", i)
 		}
 	}
 	return nil

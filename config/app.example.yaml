@@ -84,9 +84,10 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: lambda-fake-btc
-      providers:
-        - fake
-      symbol: BTC-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - BTC-USDT
       strategy: delay
       config:
         dry_run: true
@@ -94,17 +95,19 @@ lambdaManifest:
         max_delay: "750ms"
       auto_start: true
     - id: lambda-fake-btc-logger
-      providers:
-        - fake
-      symbol: BTC-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - BTC-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-slow-eth
-      providers:
-        - fake-slow
-      symbol: ETH-USDT
+      provider_symbols:
+        fake-slow:
+          symbols:
+            - ETH-USDT
       strategy: delay
       config:
         dry_run: true
@@ -112,17 +115,19 @@ lambdaManifest:
         max_delay: "750ms"
       auto_start: true
     - id: lambda-fake-eth-noop
-      providers:
-        - fake
-      symbol: ETH-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - ETH-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-xrp
-      providers:
-        - fake
-      symbol: XRP-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - XRP-USDT
       strategy: delay
       config:
         dry_run: true
@@ -130,9 +135,10 @@ lambdaManifest:
         max_delay: "750ms"
       auto_start: true
     - id: lambda-fake-xrp-noop
-      providers:
-        - fake
-      symbol: XRP-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - XRP-USDT
       strategy: delay
       config:
         dry_run: true
@@ -146,9 +152,10 @@ lambdaManifest:
         dry_run: true
       auto_start: true
     - id: lambda-fake-sol-2
-      providers:
-        - fake
-      symbol: SOL-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - SOL-USDT
       strategy: delay
       config:
         dry_run: true
@@ -156,33 +163,37 @@ lambdaManifest:
         max_delay: "750ms"
       auto_start: true
     - id: lambda-fake-sol-3
-      providers:
-        - fake
-      symbol: SOL-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - SOL-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-sol-4
-      providers:
-        - fake
-      symbol: SOL-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - SOL-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-sol-logger
-      providers:
-        - fake
-      symbol: SOL-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - SOL-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-ada
-      providers:
-        - fake
-      symbol: ADA-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - ADA-USDT
       strategy: delay
       config:
         dry_run: true
@@ -190,89 +201,100 @@ lambdaManifest:
         max_delay: "750ms"
       auto_start: true
     - id: lambda-fake-ada-logger
-      providers:
-        - fake
-      symbol: ADA-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - ADA-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-doge
-      providers:
-        - fake
-      symbol: DOGE-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - DOGE-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-doge-logger
-      providers:
-        - fake
-      symbol: DOGE-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - DOGE-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-bnb
-      providers:
-        - fake
-      symbol: BNB-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - BNB-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-bnb-noop
-      providers:
-        - fake
-      symbol: BNB-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - BNB-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-ltc
-      providers:
-        - fake
-      symbol: LTC-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - LTC-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-ltc-logger
-      providers:
-        - fake
-      symbol: LTC-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - LTC-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-dot
-      providers:
-        - fake
-      symbol: DOT-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - DOT-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-dot-noop
-      providers:
-        - fake
-      symbol: DOT-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - DOT-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-avax
-      providers:
-        - fake
-      symbol: AVAX-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - AVAX-USDT
       strategy: delay
       config:
         dry_run: true
       auto_start: true
     - id: lambda-fake-avax-logger
-      providers:
-        - fake
-      symbol: AVAX-USDT
+      provider_symbols:
+        fake:
+          symbols:
+            - AVAX-USDT
       strategy: delay
       config:
         dry_run: true

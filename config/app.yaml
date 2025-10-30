@@ -403,9 +403,10 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: mm-btc
-      providers:
-        - fake-liquid
-      symbol: BTC-USDT
+      provider_symbols:
+        fake-liquid:
+          symbols:
+            - BTC-USDT
       strategy: marketmaking
       config:
         dry_run: true
@@ -414,9 +415,10 @@ lambdaManifest:
         max_open_orders: 3
       auto_start: true
     - id: grid-eth
-      providers:
-        - fake-volatile
-      symbol: ETH-USDT
+      provider_symbols:
+        fake-volatile:
+          symbols:
+            - ETH-USDT
       strategy: grid
       config:
         dry_run: true
@@ -425,9 +427,10 @@ lambdaManifest:
         order_size: "0.4"
       auto_start: true
     - id: momentum-sol
-      providers:
-        - fake-volatile
-      symbol: SOL-USDT
+      provider_symbols:
+        fake-volatile:
+          symbols:
+            - SOL-USDT
       strategy: momentum
       config:
         dry_run: true
@@ -437,9 +440,10 @@ lambdaManifest:
         cooldown: "4s"
       auto_start: true
     - id: meanrev-xrp
-      providers:
-        - fake-calm
-      symbol: XRP-USDT
+      provider_symbols:
+        fake-calm:
+          symbols:
+            - XRP-USDT
       strategy: meanreversion
       config:
         dry_run: true
@@ -448,18 +452,20 @@ lambdaManifest:
         order_size: "2500"
       auto_start: true
     - id: logging-ada
-      providers:
-        - fake-liquid
-      symbol: ADA-USDT
+      provider_symbols:
+        fake-liquid:
+          symbols:
+            - ADA-USDT
       strategy: logging
       config:
         dry_run: true
         logger_prefix: "[ADA-LOGGER] "
       auto_start: true
     - id: delay-doge
-      providers:
-        - fake-calm
-      symbol: DOGE-USDT
+      provider_symbols:
+        fake-calm:
+          symbols:
+            - DOGE-USDT
       strategy: delay
       config:
         dry_run: true
@@ -467,17 +473,19 @@ lambdaManifest:
         max_delay: "600ms"
       auto_start: true
     - id: noop-bnb
-      providers:
-        - fake-liquid
-      symbol: BNB-USDT
+      provider_symbols:
+        fake-liquid:
+          symbols:
+            - BNB-USDT
       strategy: noop
       config:
         dry_run: true
       auto_start: true
     - id: mm-eth-tight
-      providers:
-        - fake-liquid
-      symbol: ETH-USDT
+      provider_symbols:
+        fake-liquid:
+          symbols:
+            - ETH-USDT
       strategy: marketmaking
       config:
         dry_run: true
@@ -486,9 +494,10 @@ lambdaManifest:
         max_open_orders: 2
       auto_start: true
     - id: grid-avax-wide
-      providers:
-        - fake-calm
-      symbol: AVAX-USDT
+      provider_symbols:
+        fake-calm:
+          symbols:
+            - AVAX-USDT
       strategy: grid
       config:
         dry_run: true
@@ -498,9 +507,10 @@ lambdaManifest:
         base_price: 38.5
       auto_start: true
     - id: momentum-doge-fast
-      providers:
-        - fake-volatile
-      symbol: DOGE-USDT
+      provider_symbols:
+        fake-volatile:
+          symbols:
+            - DOGE-USDT
       strategy: momentum
       config:
         dry_run: true
@@ -510,9 +520,10 @@ lambdaManifest:
         cooldown: "2s"
       auto_start: false
     - id: meanrev-btc-calm
-      providers:
-        - fake-calm
-      symbol: BTC-USDT
+      provider_symbols:
+        fake-calm:
+          symbols:
+            - BTC-USDT
       strategy: meanreversion
       config:
         dry_run: true
@@ -521,18 +532,20 @@ lambdaManifest:
         order_size: "0.02"
       auto_start: false
     - id: logging-portfolio
-      providers:
-        - fake-volatile
-      symbol: ETH-USDT
+      provider_symbols:
+        fake-volatile:
+          symbols:
+            - ETH-USDT
       strategy: logging
       config:
         dry_run: true
         logger_prefix: "[VOLATILE-LOGGER] "
       auto_start: true
     - id: delay-dot-sweeper
-      providers:
-        - fake-liquid
-      symbol: DOT-USDT
+      provider_symbols:
+        fake-liquid:
+          symbols:
+            - DOT-USDT
       strategy: delay
       config:
         dry_run: true
@@ -540,9 +553,10 @@ lambdaManifest:
         max_delay: "400ms"
       auto_start: true
     - id: mm-avax-volatile
-      providers:
-        - fake-volatile
-      symbol: AVAX-USDT
+      provider_symbols:
+        fake-volatile:
+          symbols:
+            - AVAX-USDT
       strategy: marketmaking
       config:
         dry_run: true
@@ -551,9 +565,10 @@ lambdaManifest:
         max_open_orders: 4
       auto_start: false
     - id: mm-sol-calm
-      providers:
-        - fake-calm
-      symbol: SOL-USDT
+      provider_symbols:
+        fake-calm:
+          symbols:
+            - SOL-USDT
       strategy: marketmaking
       config:
         dry_run: true
@@ -562,9 +577,10 @@ lambdaManifest:
         max_open_orders: 1
       auto_start: false
     - id: grid-ltc-liquid
-      providers:
-        - fake-liquid
-      symbol: LTC-USDT
+      provider_symbols:
+        fake-liquid:
+          symbols:
+            - LTC-USDT
       strategy: grid
       config:
         dry_run: true
@@ -573,9 +589,10 @@ lambdaManifest:
         order_size: "0.3"
       auto_start: true
     - id: momentum-bnb-liquid
-      providers:
-        - fake-liquid
-      symbol: BNB-USDT
+      provider_symbols:
+        fake-liquid:
+          symbols:
+            - BNB-USDT
       strategy: momentum
       config:
         dry_run: true
@@ -585,9 +602,10 @@ lambdaManifest:
         cooldown: "3s"
       auto_start: false
     - id: momentum-ada-calm
-      providers:
-        - fake-calm
-      symbol: ADA-USDT
+      provider_symbols:
+        fake-calm:
+          symbols:
+            - ADA-USDT
       strategy: momentum
       config:
         dry_run: true
@@ -597,9 +615,10 @@ lambdaManifest:
         cooldown: "6s"
       auto_start: true
     - id: meanrev-sol-liquid
-      providers:
-        - fake-liquid
-      symbol: SOL-USDT
+      provider_symbols:
+        fake-liquid:
+          symbols:
+            - SOL-USDT
       strategy: meanreversion
       config:
         dry_run: true
@@ -608,9 +627,10 @@ lambdaManifest:
         order_size: "8"
       auto_start: false
     - id: meanrev-avax-volatile
-      providers:
-        - fake-volatile
-      symbol: AVAX-USDT
+      provider_symbols:
+        fake-volatile:
+          symbols:
+            - AVAX-USDT
       strategy: meanreversion
       config:
         dry_run: true
@@ -619,18 +639,20 @@ lambdaManifest:
         order_size: "0.9"
       auto_start: true
     - id: logging-calm-hub
-      providers:
-        - fake-calm
-      symbol: BTC-USDT
+      provider_symbols:
+        fake-calm:
+          symbols:
+            - BTC-USDT
       strategy: logging
       config:
         dry_run: true
         logger_prefix: "[CALM-LOGGER] "
       auto_start: true
     - id: delay-eth-volatile
-      providers:
-        - fake-volatile
-      symbol: ETH-USDT
+      provider_symbols:
+        fake-volatile:
+          symbols:
+            - ETH-USDT
       strategy: delay
       config:
         dry_run: true
@@ -638,25 +660,28 @@ lambdaManifest:
         max_delay: "320ms"
       auto_start: true
     - id: noop-avax-volatile
-      providers:
-        - fake-volatile
-      symbol: AVAX-USDT
+      provider_symbols:
+        fake-volatile:
+          symbols:
+            - AVAX-USDT
       strategy: noop
       config:
         dry_run: true
       auto_start: false
     - id: noop-ada-calm
-      providers:
-        - fake-calm
-      symbol: ADA-USDT
+      provider_symbols:
+        fake-calm:
+          symbols:
+            - ADA-USDT
       strategy: noop
       config:
         dry_run: true
       auto_start: false
     - id: mm-matic-ultra
-      providers:
-        - fake-ultra-low-latency
-      symbol: MATIC-USDT
+      provider_symbols:
+        fake-ultra-low-latency:
+          symbols:
+            - MATIC-USDT
       strategy: marketmaking
       config:
         dry_run: true
@@ -665,9 +690,10 @@ lambdaManifest:
         max_open_orders: 5
       auto_start: true
     - id: grid-btc-deep
-      providers:
-        - fake-deep-liquidity
-      symbol: BTC-USDT
+      provider_symbols:
+        fake-deep-liquidity:
+          symbols:
+            - BTC-USDT
       strategy: grid
       config:
         dry_run: true
@@ -677,9 +703,10 @@ lambdaManifest:
         base_price: 67350
       auto_start: false
     - id: momentum-uni-asia
-      providers:
-        - fake-asia-session
-      symbol: UNI-USDT
+      provider_symbols:
+        fake-asia-session:
+          symbols:
+            - UNI-USDT
       strategy: momentum
       config:
         dry_run: true
@@ -689,9 +716,10 @@ lambdaManifest:
         cooldown: "1500ms"
       auto_start: true
     - id: meanrev-link-europe
-      providers:
-        - fake-europe-open
-      symbol: LINK-USDT
+      provider_symbols:
+        fake-europe-open:
+          symbols:
+            - LINK-USDT
       strategy: meanreversion
       config:
         dry_run: true
@@ -700,18 +728,20 @@ lambdaManifest:
         order_size: "520"
       auto_start: true
     - id: logging-night-audit
-      providers:
-        - fake-night-owl
-      symbol: BTC-USDT
+      provider_symbols:
+        fake-night-owl:
+          symbols:
+            - BTC-USDT
       strategy: logging
       config:
         dry_run: true
         logger_prefix: "[NIGHT-AUDIT] "
       auto_start: true
     - id: delay-microcap-retry
-      providers:
-        - fake-microcap
-      symbol: PEPE-USDT
+      provider_symbols:
+        fake-microcap:
+          symbols:
+            - PEPE-USDT
       strategy: delay
       config:
         dry_run: true
@@ -719,17 +749,19 @@ lambdaManifest:
         max_delay: "900ms"
       auto_start: false
     - id: noop-rangebound-monitor
-      providers:
-        - fake-rangebound
-      symbol: BCH-USDT
+      provider_symbols:
+        fake-rangebound:
+          symbols:
+            - BCH-USDT
       strategy: noop
       config:
         dry_run: true
       auto_start: true
     - id: mm-noise-burst
-      providers:
-        - fake-noise-burst
-      symbol: LTC-USDT
+      provider_symbols:
+        fake-noise-burst:
+          symbols:
+            - LTC-USDT
       strategy: marketmaking
       config:
         dry_run: true
@@ -738,9 +770,10 @@ lambdaManifest:
         max_open_orders: 4
       auto_start: false
     - id: momentum-shib-ultra
-      providers:
-        - fake-ultra-low-latency
-      symbol: SHIB-USDT
+      provider_symbols:
+        fake-ultra-low-latency:
+          symbols:
+            - SHIB-USDT
       strategy: momentum
       config:
         dry_run: true
@@ -750,9 +783,10 @@ lambdaManifest:
         cooldown: "800ms"
       auto_start: true
     - id: grid-ton-swing
-      providers:
-        - fake-swing
-      symbol: TON-USDT
+      provider_symbols:
+        fake-swing:
+          symbols:
+            - TON-USDT
       strategy: grid
       config:
         dry_run: true
@@ -762,9 +796,10 @@ lambdaManifest:
         base_price: 6.1
       auto_start: false
     - id: meanrev-xlm-night
-      providers:
-        - fake-night-owl
-      symbol: XLM-USDT
+      provider_symbols:
+        fake-night-owl:
+          symbols:
+            - XLM-USDT
       strategy: meanreversion
       config:
         dry_run: true
@@ -773,18 +808,20 @@ lambdaManifest:
         order_size: "1800"
       auto_start: false
     - id: logging-fragile-monitor
-      providers:
-        - fake-fragile
-      symbol: ETH-USDT
+      provider_symbols:
+        fake-fragile:
+          symbols:
+            - ETH-USDT
       strategy: logging
       config:
         dry_run: true
         logger_prefix: "[FRAGILE-WATCH] "
       auto_start: true
     - id: delay-europe-circuit
-      providers:
-        - fake-europe-open
-      symbol: SOL-USDT
+      provider_symbols:
+        fake-europe-open:
+          symbols:
+            - SOL-USDT
       strategy: delay
       config:
         dry_run: true
@@ -792,9 +829,10 @@ lambdaManifest:
         max_delay: "520ms"
       auto_start: false
     - id: mm-asia-tight
-      providers:
-        - fake-asia-session
-      symbol: XRP-USDT
+      provider_symbols:
+        fake-asia-session:
+          symbols:
+            - XRP-USDT
       strategy: marketmaking
       config:
         dry_run: true
@@ -803,9 +841,10 @@ lambdaManifest:
         max_open_orders: 3
       auto_start: true
     - id: momentum-deep-breakout
-      providers:
-        - fake-deep-liquidity
-      symbol: ETH-USDT
+      provider_symbols:
+        fake-deep-liquidity:
+          symbols:
+            - ETH-USDT
       strategy: momentum
       config:
         dry_run: true
@@ -815,9 +854,10 @@ lambdaManifest:
         cooldown: "2500ms"
       auto_start: false
     - id: grid-microcap-ladder
-      providers:
-        - fake-microcap
-      symbol: FLOKI-USDT
+      provider_symbols:
+        fake-microcap:
+          symbols:
+            - FLOKI-USDT
       strategy: grid
       config:
         dry_run: true
@@ -827,9 +867,10 @@ lambdaManifest:
         base_price: 0.00028
       auto_start: false
     - id: meanrev-rangebound
-      providers:
-        - fake-rangebound
-      symbol: TRX-USDT
+      provider_symbols:
+        fake-rangebound:
+          symbols:
+            - TRX-USDT
       strategy: meanreversion
       config:
         dry_run: true
@@ -838,9 +879,10 @@ lambdaManifest:
         order_size: "15000"
       auto_start: true
     - id: momentum-fragile-break
-      providers:
-        - fake-fragile
-      symbol: DOGE-USDT
+      provider_symbols:
+        fake-fragile:
+          symbols:
+            - DOGE-USDT
       strategy: momentum
       config:
         dry_run: true
@@ -850,9 +892,10 @@ lambdaManifest:
         cooldown: "5s"
       auto_start: false
     - id: mm-night-gold
-      providers:
-        - fake-night-owl
-      symbol: XAU-USDT
+      provider_symbols:
+        fake-night-owl:
+          symbols:
+            - XAU-USDT
       strategy: marketmaking
       config:
         dry_run: true
@@ -861,9 +904,10 @@ lambdaManifest:
         max_open_orders: 2
       auto_start: false
     - id: delay-noise-throttle
-      providers:
-        - fake-noise-burst
-      symbol: ADA-USDT
+      provider_symbols:
+        fake-noise-burst:
+          symbols:
+            - ADA-USDT
       strategy: delay
       config:
         dry_run: true
@@ -871,18 +915,20 @@ lambdaManifest:
         max_delay: "360ms"
       auto_start: true
     - id: logging-microcap-stream
-      providers:
-        - fake-microcap
-      symbol: DOGE-USDT
+      provider_symbols:
+        fake-microcap:
+          symbols:
+            - DOGE-USDT
       strategy: logging
       config:
         dry_run: true
         logger_prefix: "[MICROCAP] "
       auto_start: false
     - id: noop-ultra-hold
-      providers:
-        - fake-ultra-low-latency
-      symbol: BTC-USDT
+      provider_symbols:
+        fake-ultra-low-latency:
+          symbols:
+            - BTC-USDT
       strategy: noop
       config:
         dry_run: true
