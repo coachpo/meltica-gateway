@@ -22,31 +22,38 @@ func RegisterFactory(reg *provider.Registry) {
 		opts.Pools = pools
 
 		if alias, ok := stringFromConfig(cfg, "provider_name"); ok {
-			opts.Name = alias
+			opts.Config.Name = alias
 		} else if raw, ok := stringFromConfig(cfg, "name"); ok {
-			opts.Name = raw
+			opts.Config.Name = raw
 		}
-		if raw, ok := stringFromConfig(cfg, "api_key"); ok {
-			opts.APIKey = raw
+
+		userCfg := cfg
+		if nested, ok := mapFromConfig(cfg, "config"); ok {
+			userCfg = nested
 		}
-		if raw, ok := stringFromConfig(cfg, "api_secret"); ok {
-			opts.APISecret = raw
+
+		if raw, ok := stringFromConfig(userCfg, "api_key"); ok {
+			opts.Config.APIKey = raw
 		}
-		if depth, ok := intFromConfig(cfg, "snapshot_depth"); ok {
-			opts.SnapshotDepth = depth
+		if raw, ok := stringFromConfig(userCfg, "api_secret"); ok {
+			opts.Config.APISecret = raw
 		}
-		if timeout, ok := durationFromConfig(cfg, "http_timeout"); ok {
-			opts.httpTimeout = timeout
+		if depth, ok := intFromConfig(userCfg, "snapshot_depth"); ok {
+			opts.Config.SnapshotDepth = depth
 		}
-		if refresh, ok := durationFromConfig(cfg, "instrument_refresh_interval"); ok {
-			opts.instrumentRefresh = refresh
+		if timeout, ok := durationFromConfig(userCfg, "http_timeout"); ok {
+			opts.Config.HTTPTimeout = timeout
 		}
-		if recvWindow, ok := durationFromConfig(cfg, "recv_window"); ok {
-			opts.recvWindow = recvWindow
+		if refresh, ok := durationFromConfig(userCfg, "instrument_refresh_interval"); ok {
+			opts.Config.InstrumentRefresh = refresh
 		}
-		if keepAlive, ok := durationFromConfig(cfg, "user_stream_keepalive"); ok {
-			opts.userStreamKeepAlive = keepAlive
+		if recvWindow, ok := durationFromConfig(userCfg, "recv_window"); ok {
+			opts.Config.RecvWindow = recvWindow
 		}
+		if keepAlive, ok := durationFromConfig(userCfg, "user_stream_keepalive"); ok {
+			opts.Config.UserStreamKeepAlive = keepAlive
+		}
+
 		provider := NewProvider(opts)
 		if err := provider.Start(ctx); err != nil {
 			return nil, fmt.Errorf("start binance provider: %w", err)
@@ -122,4 +129,16 @@ func durationFromConfig(cfg map[string]any, key string) (time.Duration, bool) {
 		return time.Duration(v) * time.Second, true
 	}
 	return 0, false
+}
+
+func mapFromConfig(cfg map[string]any, key string) (map[string]any, bool) {
+	raw, ok := cfg[key]
+	if !ok {
+		return nil, false
+	}
+	out, ok := raw.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	return out, true
 }

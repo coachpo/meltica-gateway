@@ -4,19 +4,20 @@ import "testing"
 
 func TestBuildProviderSpecs(t *testing.T) {
 	configs := map[Exchange]map[string]any{
-		"fake": {
+		"binanceSpot": {
 			"exchange": map[string]any{
-				"name":              "fake",
-				"ticker_interval":   "500ms",
-				"book_snapshot":     "5s",
-				"custom_param":      42,
-				"another_parameter": true,
+				"identifier": "binance",
+				"config": map[string]any{
+					"rest_timeout": "5s",
+				},
 			},
 		},
-		"BINANCE": {
+		"COINBASE": {
 			"exchange": map[string]any{
-				"name":  "Binance",
-				"venue": "spot",
+				"identifier": "Coinbase",
+				"config": map[string]any{
+					"ws_url": "wss://stream.exchange",
+				},
 			},
 		},
 	}
@@ -34,29 +35,31 @@ func TestBuildProviderSpecs(t *testing.T) {
 		lookup[spec.Name] = spec
 	}
 
-	fakeSpec, ok := lookup["fake"]
+	primary, ok := lookup["binanceSpot"]
 	if !ok {
-		t.Fatalf("expected fake spec present")
+		t.Fatalf("expected binanceSpot spec present")
 	}
-	if fakeSpec.Exchange != "fake" {
-		t.Fatalf("expected exchange fake, got %s", fakeSpec.Exchange)
+	if primary.Exchange != "binance" {
+		t.Fatalf("expected exchange binance, got %s", primary.Exchange)
 	}
-	if _, ok := fakeSpec.Config["ticker_interval"]; !ok {
-		t.Fatalf("expected config to include ticker_interval")
+	nestedRaw, _ := primary.Config["config"]
+	nestedCfg, _ := nestedRaw.(map[string]any)
+	if _, ok := nestedCfg["rest_timeout"]; !ok {
+		t.Fatalf("expected nested config to include rest_timeout")
 	}
-	if fakeSpec.Config["name"] != "fake" {
-		t.Fatalf("expected config name to be fake, got %v", fakeSpec.Config["name"])
+	if primary.Config["identifier"] != "binance" {
+		t.Fatalf("expected identifier to be binance, got %v", primary.Config["identifier"])
 	}
-	if fakeSpec.Config["provider_name"] != "fake" {
-		t.Fatalf("expected provider_name to be fake, got %v", fakeSpec.Config["provider_name"])
+	if primary.Config["provider_name"] != "binanceSpot" {
+		t.Fatalf("expected provider_name to be binanceSpot, got %v", primary.Config["provider_name"])
 	}
 
-	binanceSpec, ok := lookup["BINANCE"]
+	secondary, ok := lookup["COINBASE"]
 	if !ok {
-		t.Fatalf("expected BINANCE spec present")
+		t.Fatalf("expected COINBASE spec present")
 	}
-	if binanceSpec.Exchange != "binance" {
-		t.Fatalf("expected canonical exchange binance, got %s", binanceSpec.Exchange)
+	if secondary.Exchange != "coinbase" {
+		t.Fatalf("expected canonical exchange coinbase, got %s", secondary.Exchange)
 	}
 }
 
@@ -87,14 +90,14 @@ func TestBuildProviderSpecsErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("missing exchange name", func(t *testing.T) {
+	t.Run("missing exchange identifier", func(t *testing.T) {
 		_, err := BuildProviderSpecs(map[Exchange]map[string]any{
 			"binance": {
 				"exchange": map[string]any{},
 			},
 		})
 		if err == nil {
-			t.Fatal("expected error for missing exchange.name")
+			t.Fatal("expected error for missing exchange.identifier")
 		}
 	})
 }

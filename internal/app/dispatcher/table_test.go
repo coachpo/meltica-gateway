@@ -24,7 +24,7 @@ func TestTableUpsert(t *testing.T) {
 	table := NewTable()
 
 	route := Route{
-		Provider: "fake",
+		Provider: "binance-spot",
 		Type:     schema.RouteTypeTicker,
 		WSTopics: []string{"ticker@btcusd"},
 		Filters:  []FilterRule{{Field: "instrument", Op: "eq", Value: "BTC-USD"}},
@@ -35,7 +35,7 @@ func TestTableUpsert(t *testing.T) {
 		t.Fatalf("Upsert() error = %v", err)
 	}
 
-	retrieved, ok := table.Lookup("fake", schema.RouteTypeTicker)
+	retrieved, ok := table.Lookup("binance-spot", schema.RouteTypeTicker)
 	if !ok {
 		t.Fatal("expected to find route")
 	}
@@ -49,7 +49,7 @@ func TestTableUpsertInvalidType(t *testing.T) {
 	table := NewTable()
 
 	route := Route{
-		Provider: "fake",
+		Provider: "binance-spot",
 		Type:     schema.RouteType(""), // Invalid
 	}
 
@@ -63,15 +63,15 @@ func TestTableRemove(t *testing.T) {
 	table := NewTable()
 
 	route := Route{
-		Provider: "fake",
+		Provider: "binance-spot",
 		Type:     schema.RouteTypeTicker,
 	}
 
 	_ = table.Upsert(route)
 
-	table.Remove("fake", schema.RouteTypeTicker)
+	table.Remove("binance-spot", schema.RouteTypeTicker)
 
-	_, ok := table.Lookup("fake", schema.RouteTypeTicker)
+	_, ok := table.Lookup("binance-spot", schema.RouteTypeTicker)
 	if ok {
 		t.Error("expected route to be removed")
 	}
@@ -80,7 +80,7 @@ func TestTableRemove(t *testing.T) {
 func TestTableLookup(t *testing.T) {
 	table := NewTable()
 
-	_, ok := table.Lookup("fake", schema.RouteType("NONEXISTENT"))
+	_, ok := table.Lookup("binance-spot", schema.RouteType("NONEXISTENT"))
 	if ok {
 		t.Error("expected lookup to fail for nonexistent route")
 	}
@@ -103,7 +103,7 @@ func TestTableVersion(t *testing.T) {
 func TestTableRoutes(t *testing.T) {
 	table := NewTable()
 
-	route1 := Route{Provider: "fake", Type: schema.RouteTypeTicker}
+	route1 := Route{Provider: "binance-spot", Type: schema.RouteTypeTicker}
 	route2 := Route{Provider: "binance", Type: schema.RouteTypeTrade}
 
 	_ = table.Upsert(route1)

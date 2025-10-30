@@ -1,7 +1,7 @@
 # Exchange Onboarding Guide
 
 ## Overview
-This guide distills the fake provider workflow into practical steps for integrating real exchanges. It covers provider responsibilities, event emission patterns, and how to hydrate order books from snapshot plus diff streams.
+This guide distills the Binance adapter workflow into practical steps for integrating additional exchanges. It covers provider responsibilities, event emission patterns, and how to hydrate order books from snapshot plus diff streams.
 
 ## WebSocket Stream Management (MANDATORY)
 
@@ -52,12 +52,12 @@ All exchange adapters **MUST** implement WebSocket stream management using the *
 
 ### Configuration & Options
 
-- **Configuration Parsing:** Your provider's `manifest.go` should include a factory function that parses a `map[string]any` configuration into a strongly-typed `Options` struct. Use helper functions like `durationFromConfig`, `floatFromConfig`, and `intFromConfig` (see `fake/manifest.go`) to robustly handle different data types.
+- **Configuration Parsing:** Your provider's `manifest.go` should include a factory function that parses a `map[string]any` configuration into a strongly-typed `Options` struct. Use helper functions like `durationFromConfig`, `floatFromConfig`, and `intFromConfig` (see `binance/manifest.go`) to robustly handle different data types.
 - **Default Values:** Establish sensible default values for all options in your `options.go` file. This ensures the provider can run with minimal configuration.
 
 ### State Management
 
-- **Instrument State:** The `symbolMarketState` struct (see `fake/state.go`) is central to managing all data related to a specific instrument, including its order book, last price, and Kline data. Your provider should maintain a map of these states.
+- **Instrument State:** The `symbolMeta` and order-book management code in `binance/provider.go` demonstrate how to manage venue metadata, cached instruments, and diff replay. Your provider should maintain comparable structures tailored to the target venue.
 - **Kline/Candlestick Data:** Implement logic to handle Kline data. This typically involves:
     - A `klineWindow` struct to represent a single candlestick.
     - An `updateKline` function to update the current Kline window with new trades.
@@ -68,7 +68,7 @@ All exchange adapters **MUST** implement WebSocket stream management using the *
 - **Order Management:** If the exchange supports trading, you'll need to manage the lifecycle of orders. This includes:
     - An `activeOrder` struct to represent an order on the exchange.
     - Logic to handle different time-in-force (TIF) modes like GTC, IOC, and FOK.
-- **Instrument Constraints:** Implement robust handling of instrument constraints (see `fake/constraints.go`). This includes logic for:
+- **Instrument Constraints:** Implement robust handling of instrument constraints (see the Binance adapter's `buildInstrument` logic). This includes logic for:
     - Price and quantity increments.
     - Minimum and maximum order sizes.
     - Minimum notional value.

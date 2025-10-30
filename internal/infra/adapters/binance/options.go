@@ -7,91 +7,83 @@ import (
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
 
+type metadata struct {
+	apiBaseURL       string
+	websocketBaseURL string
+	identifier       string
+	venue            string
+	exchangeInfoPath string
+	depthPath        string
+	listenKeyPath    string
+	accountInfoPath  string
+	orderPath        string
+}
+
+var binanceMetadata = metadata{
+	apiBaseURL:       "https://api.binance.com",
+	websocketBaseURL: "wss://stream.binance.com/ws",
+	identifier:       "binance",
+	venue:            "BINANCE",
+	exchangeInfoPath: "/api/v3/exchangeInfo",
+	depthPath:        "/api/v3/depth",
+	listenKeyPath:    "/api/v3/userDataStream",
+	accountInfoPath:  "/api/v3/account",
+	orderPath:        "/api/v3/order",
+}
+
 const (
-	defaultAPIBaseURL          = "https://api.binance.com"
-	defaultWebsocketBaseURL    = "wss://stream.binance.com"
-	defaultProviderName        = "binance"
-	defaultVenue               = "BINANCE"
 	defaultSnapshotDepth       = 1000
 	defaultHTTPTimeout         = 10 * time.Second
 	defaultInstrumentRefresh   = 30 * time.Minute
 	defaultRecvWindow          = 5 * time.Second
 	defaultUserStreamKeepAlive = 15 * time.Minute
-
-	exchangeInfoPath = "/api/v3/exchangeInfo"
-	depthPath        = "/api/v3/depth"
-	listenKeyPath    = "/api/v3/userDataStream"
-	accountInfoPath  = "/api/v3/account"
-	orderPath        = "/api/v3/order"
 )
+
+// Config captures user-overridable Binance settings.
+type Config struct {
+	Name                string
+	APIKey              string
+	APISecret           string
+	SnapshotDepth       int
+	HTTPTimeout         time.Duration
+	InstrumentRefresh   time.Duration
+	RecvWindow          time.Duration
+	UserStreamKeepAlive time.Duration
+}
 
 // Options configure the Binance adapter.
 type Options struct {
-	// User-controlled configuration.
-	Name          string
-	SnapshotDepth int
-	APIKey        string
-	APISecret     string
+	Config Config
+	Pools  *pool.PoolManager
 
-	httpTimeout         time.Duration
-	instrumentRefresh   time.Duration
-	recvWindow          time.Duration
-	userStreamKeepAlive time.Duration
-
-	// Application-assigned internals.
-	Pools            *pool.PoolManager
-	apiBaseURL       string
-	websocketBaseURL string
-}
-
-func normalizeWebsocketBase(raw string) string {
-	base := strings.TrimSpace(raw)
-	if base == "" {
-		return base
-	}
-	base = strings.TrimSuffix(base, "/")
-	base = strings.TrimSuffix(base, "/ws")
-	base = strings.TrimSuffix(base, "/")
-	return base
+	metadata metadata
 }
 
 func withDefaults(in Options) Options {
-	if strings.TrimSpace(in.Name) == "" {
-		in.Name = defaultProviderName
+	in.metadata = binanceMetadata
+	if strings.TrimSpace(in.Config.Name) == "" {
+		in.Config.Name = in.metadata.identifier
 	}
-
-	baseURL := strings.TrimSpace(in.apiBaseURL)
-	if baseURL == "" {
-		baseURL = defaultAPIBaseURL
+	if in.Config.SnapshotDepth <= 0 {
+		in.Config.SnapshotDepth = defaultSnapshotDepth
 	}
-	in.apiBaseURL = baseURL
-
-	wsBase := strings.TrimSpace(in.websocketBaseURL)
-	if wsBase == "" {
-		wsBase = defaultWebsocketBaseURL
+	if in.Config.HTTPTimeout <= 0 {
+		in.Config.HTTPTimeout = defaultHTTPTimeout
 	}
-	in.websocketBaseURL = normalizeWebsocketBase(wsBase)
-
-	if in.SnapshotDepth <= 0 {
-		in.SnapshotDepth = defaultSnapshotDepth
+	if in.Config.InstrumentRefresh <= 0 {
+		in.Config.InstrumentRefresh = defaultInstrumentRefresh
 	}
-	if in.httpTimeout <= 0 {
-		in.httpTimeout = defaultHTTPTimeout
+	if in.Config.RecvWindow <= 0 {
+		in.Config.RecvWindow = defaultRecvWindow
 	}
-	if in.instrumentRefresh <= 0 {
-		in.instrumentRefresh = defaultInstrumentRefresh
-	}
-	if in.recvWindow <= 0 {
-		in.recvWindow = defaultRecvWindow
-	}
-	if in.userStreamKeepAlive <= 0 {
-		in.userStreamKeepAlive = defaultUserStreamKeepAlive
+	if in.Config.UserStreamKeepAlive <= 0 {
+		in.Config.UserStreamKeepAlive = defaultUserStreamKeepAlive
 	}
 	return in
 }
 
 func (o Options) restEndpoint(path string) string {
-	base := strings.TrimSuffix(strings.TrimSpace(o.apiBaseURL), "/")
+	base := strings.TrimSuffix(strings.TrimSpace(o.metadata.apiBaseURL), "/")
 	if base == "" {
 		return ""
 	}
@@ -105,41 +97,41 @@ func (o Options) restEndpoint(path string) string {
 }
 
 func (o Options) exchangeInfoEndpoint() string {
-	return o.restEndpoint(exchangeInfoPath)
+	return o.restEndpoint(o.metadata.exchangeInfoPath)
 }
 
 func (o Options) depthEndpoint() string {
-	return o.restEndpoint(depthPath)
+	return o.restEndpoint(o.metadata.depthPath)
 }
 
 func (o Options) listenKeyEndpoint() string {
-	return o.restEndpoint(listenKeyPath)
+	return o.restEndpoint(o.metadata.listenKeyPath)
 }
 
 func (o Options) accountInfoEndpoint() string {
-	return o.restEndpoint(accountInfoPath)
+	return o.restEndpoint(o.metadata.accountInfoPath)
 }
 
 func (o Options) orderEndpoint() string {
-	return o.restEndpoint(orderPath)
+	return o.restEndpoint(o.metadata.orderPath)
 }
 
 func (o Options) httpTimeoutDuration() time.Duration {
-	return o.httpTimeout
+	return o.Config.HTTPTimeout
 }
 
 func (o Options) instrumentRefreshDuration() time.Duration {
-	return o.instrumentRefresh
+	return o.Config.InstrumentRefresh
 }
 
 func (o Options) recvWindowDuration() time.Duration {
-	return o.recvWindow
+	return o.Config.RecvWindow
 }
 
 func (o Options) userStreamKeepAliveDuration() time.Duration {
-	return o.userStreamKeepAlive
+	return o.Config.UserStreamKeepAlive
 }
 
 func (o Options) websocketURL() string {
-	return o.websocketBaseURL
+	return o.metadata.websocketBaseURL
 }

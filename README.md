@@ -22,7 +22,7 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
 ## Architecture Overview
 
 1. `cmd/gateway` is the entrypoint. It loads `config/app.yaml`, wires pools, the event bus, the dispatcher table, and HTTP control server, then blocks on OS signals.
-2. `internal/app/provider` hosts the registry/manager that instantiates adapters registered via `internal/infra/adapters`. The `fake` adapter ships with the repo; additional adapters register through the same hook.
+2. `internal/app/provider` hosts the registry/manager that instantiates adapters registered via `internal/infra/adapters`. Built-in adapters register through the same hook.
 3. `internal/app/dispatcher` maintains routing tables that map provider events into downstream fan-outs and strategy queues.
 4. `internal/app/lambda/core` supplies the reusable lambda primitives, and `internal/app/lambda/runtime` spins strategies declared in the manifest or via the REST API, consuming events from the dispatcher and publishing responses back onto the bus.
 5. `internal/infra/telemetry` configures OpenTelemetry exporters and propagates tracing/metrics context through the pipeline.

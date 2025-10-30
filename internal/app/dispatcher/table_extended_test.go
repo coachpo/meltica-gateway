@@ -37,7 +37,7 @@ func TestTableRemoveRoute(t *testing.T) {
 
 	// Add a route
 	route := Route{
-		Provider: "fake",
+		Provider: "binance-spot",
 		Type:     schema.RouteTypeTrade,
 		WSTopics: []string{"trade@btcusd"},
 	}
@@ -48,16 +48,16 @@ func TestTableRemoveRoute(t *testing.T) {
 	}
 
 	// Verify it exists
-	_, ok := table.Lookup("fake", schema.RouteTypeTrade)
+	_, ok := table.Lookup("binance-spot", schema.RouteTypeTrade)
 	if !ok {
 		t.Fatal("expected route to exist")
 	}
 
 	// Remove it
-	table.Remove("fake", schema.RouteTypeTrade)
+	table.Remove("binance-spot", schema.RouteTypeTrade)
 
 	// Verify it's gone
-	_, ok = table.Lookup("fake", schema.RouteTypeTrade)
+	_, ok = table.Lookup("binance-spot", schema.RouteTypeTrade)
 	if ok {
 		t.Error("expected route to be removed")
 	}
@@ -67,7 +67,7 @@ func TestTableRemoveNonExistent(t *testing.T) {
 	table := NewTable()
 
 	// Removing non-existent route should not panic
-	table.Remove("fake", schema.RouteType("NON_EXISTENT"))
+	table.Remove("binance-spot", schema.RouteType("NON_EXISTENT"))
 }
 
 func TestValidateRestFn(t *testing.T) {
@@ -138,7 +138,7 @@ func TestRouteWithRestFns(t *testing.T) {
 	table := NewTable()
 
 	route := Route{
-		Provider: "fake",
+		Provider: "binance-spot",
 		Type:     schema.RouteTypeTicker,
 		WSTopics: []string{"ticker@btcusd"},
 		RestFns: []RestFn{
@@ -156,7 +156,7 @@ func TestRouteWithRestFns(t *testing.T) {
 		t.Fatalf("Upsert with RestFns failed: %v", err)
 	}
 
-	retrieved, ok := table.Lookup("fake", schema.RouteTypeTicker)
+	retrieved, ok := table.Lookup("binance-spot", schema.RouteTypeTicker)
 	if !ok {
 		t.Fatal("expected to find route")
 	}
@@ -174,7 +174,7 @@ func TestRouteWithInvalidRestFn(t *testing.T) {
 	table := NewTable()
 
 	route := Route{
-		Provider: "fake",
+		Provider: "binance-spot",
 		Type:     schema.RouteTypeTicker,
 		WSTopics: []string{"ticker@btcusd"},
 		RestFns: []RestFn{
@@ -251,7 +251,7 @@ func TestRouteWithInvalidFilter(t *testing.T) {
 	table := NewTable()
 
 	route := Route{
-		Provider: "fake",
+		Provider: "binance-spot",
 		Type:     schema.RouteTypeTicker,
 		WSTopics: []string{"ticker@btcusd"},
 		Filters: []FilterRule{

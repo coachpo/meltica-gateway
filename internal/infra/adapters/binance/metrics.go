@@ -38,7 +38,7 @@ func newProviderMetrics(p *Provider) *providerMetrics {
 	env := telemetry.Environment()
 	providerName := strings.TrimSpace(p.name)
 	if providerName == "" {
-		providerName = defaultProviderName
+		providerName = binanceMetadata.identifier
 	}
 
 	pm := &providerMetrics{
@@ -225,7 +225,7 @@ func newStreamMetrics(provider, stream string) *streamMetrics {
 	env := telemetry.Environment()
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
-		provider = defaultProviderName
+		provider = binanceMetadata.identifier
 	}
 
 	sm := &streamMetrics{

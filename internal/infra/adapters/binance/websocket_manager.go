@@ -78,7 +78,7 @@ func newStreamManager(ctx context.Context, baseURL string, handler func([]byte) 
 	managerCtx, cancel := context.WithCancel(ctx)
 	normalizedProvider := strings.TrimSpace(providerName)
 	if normalizedProvider == "" {
-		normalizedProvider = defaultProviderName
+		normalizedProvider = binanceMetadata.identifier
 	}
 	return &streamManager{
 		baseURL:         baseURL,

@@ -119,7 +119,7 @@ func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, s
 		Type:              schema.InstrumentTypeSpot,
 		BaseCurrency:      strings.ToUpper(strings.TrimSpace(sym.BaseAsset)),
 		QuoteCurrency:     strings.ToUpper(strings.TrimSpace(sym.QuoteAsset)),
-		Venue:             defaultVenue,
+		Venue:             p.opts.metadata.venue,
 		Expiry:            "",
 		ContractValue:     nil,
 		ContractCurrency:  "",
@@ -181,7 +181,7 @@ func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, s
 func (p *Provider) fetchDepthSnapshot(ctx context.Context, symbol string) (depthSnapshotResponse, error) {
 	params := url.Values{}
 	params.Set("symbol", symbol)
-	params.Set("limit", fmt.Sprintf("%d", p.opts.SnapshotDepth))
+	params.Set("limit", fmt.Sprintf("%d", p.opts.Config.SnapshotDepth))
 	endpoint := p.opts.depthEndpoint()
 	if strings.TrimSpace(endpoint) == "" {
 		return depthSnapshotResponse{}, errors.New("binance: depth endpoint not configured")
@@ -224,7 +224,7 @@ func (p *Provider) createListenKey(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create listen key request: %w", err)
 	}
-	req.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
+	req.Header.Set("X-MBX-APIKEY", p.opts.Config.APIKey)
 	resp, err := p.httpClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("request listen key: %w", err)
@@ -264,7 +264,7 @@ func (p *Provider) keepAliveListenKey(ctx context.Context, listenKey string) err
 	if err != nil {
 		return fmt.Errorf("create keepalive request: %w", err)
 	}
-	req.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
+	req.Header.Set("X-MBX-APIKEY", p.opts.Config.APIKey)
 	resp, err := p.httpClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("keepalive listen key: %w", err)
@@ -292,7 +292,7 @@ func (p *Provider) fetchAccountBalances(ctx context.Context) ([]accountBalance, 
 	}
 	params.Set("timestamp", strconv.FormatInt(p.clock().UTC().UnixMilli(), 10))
 	query := params.Encode()
-	signature := signPayload(query, p.opts.APISecret)
+	signature := signPayload(query, p.opts.Config.APISecret)
 	if query != "" {
 		query += "&"
 	}
@@ -305,7 +305,7 @@ func (p *Provider) fetchAccountBalances(ctx context.Context) ([]accountBalance, 
 	if err != nil {
 		return nil, fmt.Errorf("create account request: %w", err)
 	}
-	req.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
+	req.Header.Set("X-MBX-APIKEY", p.opts.Config.APIKey)
 	resp, err := p.httpClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request account: %w", err)

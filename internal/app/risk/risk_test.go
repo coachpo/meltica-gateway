@@ -23,7 +23,7 @@ func TestManager_CheckOrder_Throttle(t *testing.T) {
 
 	price := "1"
 	req := &schema.OrderRequest{
-		Provider:      "fake",
+		Provider:      "binance-spot",
 		Symbol:        "BTC-USDT",
 		Side:          schema.TradeSideBuy,
 		OrderType:     schema.OrderTypeLimit,
@@ -67,7 +67,7 @@ func TestManager_CheckOrder_PositionAndNotionalLimits(t *testing.T) {
 
 	price := "10"
 	firstOrder := &schema.OrderRequest{
-		Provider:      "fake",
+		Provider:      "binance-spot",
 		Symbol:        "ETH-USDT",
 		Side:          schema.TradeSideBuy,
 		OrderType:     schema.OrderTypeLimit,
@@ -89,7 +89,7 @@ func TestManager_CheckOrder_PositionAndNotionalLimits(t *testing.T) {
 	})
 
 	overPosition := &schema.OrderRequest{
-		Provider:      "fake",
+		Provider:      "binance-spot",
 		Symbol:        "ETH-USDT",
 		Side:          schema.TradeSideBuy,
 		OrderType:     schema.OrderTypeLimit,
@@ -111,7 +111,7 @@ func TestManager_CheckOrder_PositionAndNotionalLimits(t *testing.T) {
 
 	highPrice := "40"
 	overNotional := &schema.OrderRequest{
-		Provider:      "fake",
+		Provider:      "binance-spot",
 		Symbol:        "ETH-USDT",
 		Side:          schema.TradeSideBuy,
 		OrderType:     schema.OrderTypeLimit,
@@ -145,7 +145,7 @@ func TestManager_KillSwitchEngagesAfterBreaches(t *testing.T) {
 
 	price := "10"
 	req := &schema.OrderRequest{
-		Provider:      "fake",
+		Provider:      "binance-spot",
 		Symbol:        "SOL-USDT",
 		Side:          schema.TradeSideBuy,
 		OrderType:     schema.OrderTypeLimit,

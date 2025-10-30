@@ -48,7 +48,7 @@ go test ./internal/infra/pool -bench BenchmarkPoolManager -benchmem
 
 Meltica uses a four-layer pipeline architecture:
 
-1. **Providers (`internal/app/provider`, `internal/infra/adapters`)**: Manage exchange connections and emit normalized events. Each adapter (e.g., `fake`, `binance`) implements the `Provider` interface. The registry allows multiple provider aliases to map to a single adapter implementation.
+1. **Providers (`internal/app/provider`, `internal/infra/adapters`)**: Manage exchange connections and emit normalized events. Each adapter implements the `Provider` interface. The registry allows multiple provider aliases to map to a single adapter implementation.
 
 2. **Event Bus (`internal/infra/bus/eventbus`)**: In-memory fan-out system that distributes events from providers to dispatcher routes and strategy instances. Configured via `eventbus.bufferSize` and `eventbus.fanoutWorkers` in `config/app.yaml`.
 

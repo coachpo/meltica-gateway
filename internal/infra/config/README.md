@@ -52,7 +52,7 @@ func main() {
 See `config/app.example.yaml` for a complete sample. Key sections include:
 
 - `environment`: Deployment environment string (`dev`, `staging`, `prod`).
-- `providers`: Arbitrary blobs forwarded to each exchange adapter; each entry must include an `exchange` block referencing a registered provider type (aliases map to the same exchange by using the same `exchange.name` value).
+- `providers`: Arbitrary blobs forwarded to each exchange adapter; each entry must include an `exchange` block referencing a registered provider type (aliases map to the same exchange by using the same `exchange.identifier` value).
 - `eventbus`: In-memory event bus sizing.
 - `pools`: Object pool capacities.
 - `apiServer`: Control API bind address.

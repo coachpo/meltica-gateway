@@ -22,10 +22,11 @@ func TestLoadFromYAML(t *testing.T) {
 	yaml := `
 environment: DEV
 providers:
-  Fake:
+  BinanceSpot:
     exchange:
-      name: fake
-      option: value
+      identifier: binance
+      config:
+        option: value
 eventbus:
   bufferSize: 128
   fanoutWorkers: 4
@@ -53,7 +54,7 @@ lambdaManifest:
   lambdas:
     - id: test-lambda
       provider_symbols:
-        fake:
+        binance-spot:
           symbols:
             - BTC-USDT
       strategy: delay
@@ -72,16 +73,24 @@ lambdaManifest:
 		t.Fatalf("expected environment %s, got %s", EnvDev, cfg.Environment)
 	}
 
-	ex, ok := cfg.Providers[Exchange("fake")]
+	ex, ok := cfg.Providers[Exchange("binanceSpot")]
 	if !ok {
-		t.Fatalf("expected fake exchange config")
+		t.Fatalf("expected binance exchange config")
 	}
 	rawExchange := ex["exchange"]
 	exchangeCfg, ok := rawExchange.(map[string]any)
 	if !ok {
 		t.Fatalf("expected exchange config map, got %T", rawExchange)
 	}
-	if got := exchangeCfg["option"]; got != "value" {
+	if id := exchangeCfg["identifier"]; id != "binance" {
+		t.Fatalf("expected identifier binance, got %v", id)
+	}
+	rawNested := exchangeCfg["config"]
+	nestedCfg, ok := rawNested.(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested config map, got %T", rawNested)
+	}
+	if got := nestedCfg["option"]; got != "value" {
 		t.Fatalf("expected exchange option value, got %v", got)
 	}
 
@@ -126,7 +135,7 @@ lambdaManifest:
 	if manifest.AutoStart {
 		t.Fatalf("expected test-lambda autostart disabled")
 	}
-	if len(manifest.Providers) != 1 || manifest.Providers[0] != "fake" {
+	if len(manifest.Providers) != 1 || manifest.Providers[0] != "binance-spot" {
 		t.Fatalf("unexpected providers: %+v", manifest.Providers)
 	}
 
@@ -170,10 +179,11 @@ func loadConfigWithFanout(t *testing.T, fanoutLine string) AppConfig {
 	yaml := fmt.Sprintf(`
 environment: dev
 providers:
-  fake:
+  binance-spot:
     exchange:
-      name: fake
-      option: value
+      identifier: binance
+      config:
+        option: value
 eventbus:
   bufferSize: 128
 %spools:
@@ -198,7 +208,7 @@ lambdaManifest:
   lambdas:
     - id: test-lambda
       provider_symbols:
-        fake:
+        binance-spot:
           symbols:
             - BTC-USDT
       strategy: delay

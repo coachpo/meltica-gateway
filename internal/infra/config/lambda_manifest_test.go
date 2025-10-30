@@ -12,7 +12,7 @@ func TestLambdaManifestValidate(t *testing.T) {
 			Strategy: "delay",
 			Config:   map[string]any{"min_delay": "100ms"},
 			ProviderSymbols: map[string]ProviderSymbols{
-				"fake": {
+				"binance-spot": {
 					Symbols: []string{"BTC-USDT"},
 				},
 			},
@@ -37,7 +37,7 @@ func TestLambdaManifestValidateMissingFields(t *testing.T) {
 			ID:       "",
 			Strategy: "delay",
 			ProviderSymbols: map[string]ProviderSymbols{
-				"fake": {
+				"binance-spot": {
 					Symbols: []string{"BTC-USDT"},
 				},
 			},

@@ -38,16 +38,16 @@ func BuildProviderSpecs(providers map[Exchange]map[string]any) ([]ProviderSpec, 
 			return nil, fmt.Errorf("provider %q exchange block must be a map", alias)
 		}
 
-		rawName, ok := exchangeConfig["name"]
+		rawIdentifier, ok := exchangeConfig["identifier"]
 		if !ok {
-			return nil, fmt.Errorf("provider %q exchange.name required", alias)
+			return nil, fmt.Errorf("provider %q exchange.identifier required", alias)
 		}
-		nameStr, ok := rawName.(string)
-		if !ok || strings.TrimSpace(nameStr) == "" {
-			return nil, fmt.Errorf("provider %q exchange.name must be non-empty string", alias)
+		identifierStr, ok := rawIdentifier.(string)
+		if !ok || strings.TrimSpace(identifierStr) == "" {
+			return nil, fmt.Errorf("provider %q exchange.identifier must be non-empty string", alias)
 		}
 
-		canonical := normalizeExchangeName(nameStr)
+		canonical := normalizeExchangeName(identifierStr)
 
 		config := make(map[string]any, len(exchangeConfig)+1)
 		for k, v := range exchangeConfig {

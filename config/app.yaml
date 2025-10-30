@@ -2,47 +2,19 @@
 environment: dev
 
 providers:
-  # Local deterministic simulator used for offline development and CI.
-  fake-sandbox:
-    exchange:
-      name: fake
-      enabled: true
-      ticker_interval: 600ms
-      trade_interval: 1s
-      book_snapshot_interval: 5s
-      balance_update_interval: 3s
-
-  # Higher-volatility profile for load and routing stress tests.
-  fake-volatile:
-    exchange:
-      name: fake
-      enabled: true
-      ticker_interval: 120ms
-      trade_interval: 90ms
-      book_snapshot_interval: 300ms
-      kline_interval: 20s
-      balance_update_interval: 1500ms
-      price_model:
-        drift: 0.00025
-        volatility: 0.02
-        shock_probability: 0.05
-        shock_magnitude: 0.05
-      order_book:
-        levels: 18
-        max_mutation_width: 8
-
   # Real exchange wiring example; inject credentials via environment or config secrets.
   binance-spot:
     exchange:
-      name: binance
+      identifier: binance
       enabled: true
-      api_key: "${BINANCE_API_KEY}"
-      api_secret: "${BINANCE_API_SECRET}"
-      snapshot_depth: 1000
-      http_timeout: 10s
-      instrument_refresh_interval: 30m
-      recv_window: 5s
-      user_stream_keepalive: 15m
+      config:
+        api_key: "${BINANCE_API_KEY}"
+        api_secret: "${BINANCE_API_SECRET}"
+        snapshot_depth: 1000
+        http_timeout: 10s
+        instrument_refresh_interval: 30m
+        recv_window: 5s
+        user_stream_keepalive: 15m
 
 # eventbus: in-memory event bus sizing
 eventbus:
@@ -90,32 +62,6 @@ telemetry:
 # lambdaManifest: inline lambda definitions that will be materialised at startup
 lambdaManifest:
   lambdas:
-    - id: mm-btc-fake
-      provider_symbols:
-        fake-sandbox:
-          symbols:
-            - BTC-USDT
-      strategy: marketmaking
-      config:
-        dry_run: true
-        spread_bps: 30
-        order_size: "0.05"
-        max_open_orders: 3
-      auto_start: true
-
-    - id: grid-eth-fake
-      provider_symbols:
-        fake-volatile:
-          symbols:
-            - ETH-USDT
-      strategy: grid
-      config:
-        dry_run: true
-        grid_levels: 5
-        grid_spacing: 0.75
-        order_size: "0.4"
-      auto_start: true
-
     - id: latency-probe-btc
       provider_symbols:
         binance-spot:

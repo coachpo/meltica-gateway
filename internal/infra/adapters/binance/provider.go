@@ -142,7 +142,7 @@ func (h *bookHandle) currentSeq() uint64 {
 func NewProvider(opts Options) *Provider {
 	opts = withDefaults(opts)
 	p := &Provider{
-		name:             opts.Name,
+		name:             opts.Config.Name,
 		opts:             opts,
 		pools:            opts.Pools,
 		clock:            time.Now,
@@ -245,7 +245,7 @@ func (p *Provider) SubmitOrder(ctx context.Context, req schema.OrderRequest) err
 	if !ok {
 		return fmt.Errorf("binance: instrument %s not found", strings.TrimSpace(req.Symbol))
 	}
-	if strings.TrimSpace(p.opts.APIKey) == "" || strings.TrimSpace(p.opts.APISecret) == "" {
+	if strings.TrimSpace(p.opts.Config.APIKey) == "" || strings.TrimSpace(p.opts.Config.APISecret) == "" {
 		return fmt.Errorf("binance: trading disabled (api credentials missing)")
 	}
 	if ctx == nil {
@@ -566,7 +566,7 @@ func (p *Provider) configureOrderBookStreams(instruments []string) error {
 		// Create book handle if not exists
 		if _, exists := p.bookHandles[meta.canonical]; !exists {
 			handle := &bookHandle{
-				assembler: shared.NewOrderBookAssembler(p.opts.SnapshotDepth),
+				assembler: shared.NewOrderBookAssembler(p.opts.Config.SnapshotDepth),
 				seqMu:     sync.Mutex{},
 				lastSeq:   0,
 				seeded:    atomic.Bool{},
@@ -690,7 +690,7 @@ func (p *Provider) initStreamManagers(ctx context.Context) error {
 		handle, exists := p.bookHandles[meta.canonical]
 		if !exists {
 			handle = &bookHandle{
-				assembler: shared.NewOrderBookAssembler(p.opts.SnapshotDepth),
+				assembler: shared.NewOrderBookAssembler(p.opts.Config.SnapshotDepth),
 				seqMu:     sync.Mutex{},
 				lastSeq:   0,
 				seeded:    atomic.Bool{},
@@ -742,7 +742,7 @@ func (p *Provider) initStreamManagers(ctx context.Context) error {
 }
 
 func (p *Provider) hasTradingCredentials() bool {
-	return strings.TrimSpace(p.opts.APIKey) != "" && strings.TrimSpace(p.opts.APISecret) != ""
+	return strings.TrimSpace(p.opts.Config.APIKey) != "" && strings.TrimSpace(p.opts.Config.APISecret) != ""
 }
 
 func (p *Provider) startUserDataStream() {
@@ -1267,7 +1267,7 @@ func (p *Provider) submitOrder(ctx context.Context, meta symbolMeta, req schema.
 	}
 	params.Set("timestamp", strconv.FormatInt(p.clock().UTC().UnixMilli(), 10))
 	basePayload := params.Encode()
-	signature := signPayload(basePayload, p.opts.APISecret)
+	signature := signPayload(basePayload, p.opts.Config.APISecret)
 	params.Set("signature", signature)
 	body := params.Encode()
 	endpoint := p.opts.orderEndpoint()
@@ -1278,7 +1278,7 @@ func (p *Provider) submitOrder(ctx context.Context, meta symbolMeta, req schema.
 	if err != nil {
 		return fmt.Errorf("create order request: %w", err)
 	}
-	httpReq.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
+	httpReq.Header.Set("X-MBX-APIKEY", p.opts.Config.APIKey)
 	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := p.httpClient().Do(httpReq)
 	if err != nil {

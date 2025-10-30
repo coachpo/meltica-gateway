@@ -37,8 +37,8 @@ Lists all known instances (running or stopped).
 {
   "instances": [
     {
-      "id": "lambda-fake-btc",
-      "provider": "fake",
+      "id": "lambda-binance-btc",
+      "provider": "binance-spot",
       "symbol": "BTC-USDT",
       "strategy": "noop",
       "config": {},
@@ -55,8 +55,8 @@ Creates and starts a new instance.
 Request body (minimum fields):
 ```json
 {
-  "id": "lambda-fake-eth",
-  "provider": "fake",
+  "id": "lambda-binance-eth",
+  "provider": "binance-spot",
   "symbol": "ETH-USDT",
   "strategy": "logging",
   "config": { "logger_prefix": "[eth-strat] " }

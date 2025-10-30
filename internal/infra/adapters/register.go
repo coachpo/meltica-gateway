@@ -4,7 +4,6 @@ package adapters
 import (
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/infra/adapters/binance"
-	"github.com/coachpo/meltica/internal/infra/adapters/fake"
 )
 
 // RegisterAll installs every built-in adapter into the provided registry.
@@ -12,6 +11,5 @@ func RegisterAll(reg *provider.Registry) {
 	if reg == nil {
 		return
 	}
-	fake.RegisterFactory(reg)
 	binance.RegisterFactory(reg)
 }

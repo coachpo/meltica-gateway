@@ -19,7 +19,13 @@ func newTestProvider(t *testing.T) *Provider {
 	if err := pm.RegisterPool("Event", 16, 0, func() any { return &schema.Event{} }); err != nil {
 		t.Fatalf("register pool: %v", err)
 	}
-	prov := NewProvider(Options{Pools: pm, APIKey: "key", APISecret: "secret"})
+	prov := NewProvider(Options{
+		Pools: pm,
+		Config: Config{
+			APIKey:    "key",
+			APISecret: "secret",
+		},
+	})
 	prov.ctx = context.Background()
 	return prov
 }
