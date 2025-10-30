@@ -1,7 +1,19 @@
 environment: prod
 
 providers:
-  binance:
+  binance-1:
+    exchange:
+      name: binance
+      venue: spot
+      enabled: true
+      snapshot_depth: 100
+  binance-2:
+    exchange:
+      name: binance
+      venue: spot
+      enabled: true
+      snapshot_depth: 100
+  binance-3:
     exchange:
       name: binance
       venue: spot
@@ -51,13 +63,13 @@ lambdaManifest:
   lambdas:
     - id: binance-logging-btc
       providers:
-        binance:
+        binance-1:
           symbols:
             - BTC-USDT
-        binance:
+        binance-2:
           symbols:
             - BTC-USDT
-        binance:
+        binance-3:
           symbols:
             - ETH-USDT
       strategy: logging
