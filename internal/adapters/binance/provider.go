@@ -21,7 +21,7 @@ import (
 
 	"github.com/cenkalti/backoff/v5"
 	"github.com/coder/websocket"
-	json "github.com/goccy/go-json"
+	"github.com/goccy/go-json"
 	"github.com/shopspring/decimal"
 
 	"github.com/coachpo/meltica/internal/adapters/shared"
@@ -1037,7 +1037,7 @@ func (p *Provider) seedOrderBook(ctx context.Context, meta symbolMeta, handle *b
 			return empty, errors.New("binance: missing context for seeding orderbook")
 		}
 
-		snapshotCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
+		snapshotCtx, cancel := context.WithTimeout(ctx, p.opts.httpTimeoutDuration())
 		snapshot, err := p.fetchDepthSnapshot(snapshotCtx, meta.rest)
 		cancel()
 		if err != nil {
