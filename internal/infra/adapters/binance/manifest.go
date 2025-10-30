@@ -26,12 +26,6 @@ func RegisterFactory(reg *provider.Registry) {
 		} else if raw, ok := stringFromConfig(cfg, "name"); ok {
 			opts.Name = raw
 		}
-		if raw, ok := stringFromConfig(cfg, "venue"); ok {
-			opts.Venue = strings.ToUpper(strings.TrimSpace(raw))
-		}
-		if raw, ok := stringSliceFromConfig(cfg, "symbols"); ok {
-			opts.Symbols = raw
-		}
 		if raw, ok := stringFromConfig(cfg, "api_key"); ok {
 			opts.APIKey = raw
 		}
@@ -53,7 +47,6 @@ func RegisterFactory(reg *provider.Registry) {
 		if keepAlive, ok := durationFromConfig(cfg, "user_stream_keepalive"); ok {
 			opts.userStreamKeepAlive = keepAlive
 		}
-
 		provider := NewProvider(opts)
 		if err := provider.Start(ctx); err != nil {
 			return nil, fmt.Errorf("start binance provider: %w", err)
@@ -78,38 +71,6 @@ func stringFromConfig(cfg map[string]any, key string) (string, bool) {
 		return trimmed, true
 	}
 	return "", false
-}
-
-func stringSliceFromConfig(cfg map[string]any, key string) ([]string, bool) {
-	raw, ok := cfg[key]
-	if !ok {
-		return nil, false
-	}
-	switch v := raw.(type) {
-	case []string:
-		return v, true
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, entry := range v {
-			out = append(out, fmt.Sprint(entry))
-		}
-		return out, true
-	case string:
-		parts := strings.Split(v, ",")
-		out := make([]string, 0, len(parts))
-		for _, part := range parts {
-			trimmed := strings.TrimSpace(part)
-			if trimmed != "" {
-				out = append(out, trimmed)
-			}
-		}
-		if len(out) == 0 {
-			return nil, false
-		}
-		return out, true
-	default:
-		return nil, false
-	}
 }
 
 func intFromConfig(cfg map[string]any, key string) (int, bool) {

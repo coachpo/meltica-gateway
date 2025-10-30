@@ -93,13 +93,6 @@ func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, 
 		return nil, nil, fmt.Errorf("decode exchangeInfo: %w", err)
 	}
 
-	permitted := make(map[string]struct{})
-	if len(p.opts.Symbols) > 0 {
-		for _, symbol := range p.opts.Symbols {
-			permitted[symbol] = struct{}{}
-		}
-	}
-
 	instruments := make([]schema.Instrument, 0, len(payload.Symbols))
 	metas := make(map[string]symbolMeta, len(payload.Symbols))
 
@@ -108,20 +101,9 @@ func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, 
 		if !strings.EqualFold(status, "TRADING") {
 			continue
 		}
-		if len(permitted) > 0 {
-			canonical := canonicalFromAssets(sym.BaseAsset, sym.QuoteAsset)
-			if _, ok := permitted[canonical]; !ok {
-				continue
-			}
-		}
 		instrument, meta, err := p.buildInstrument(sym)
 		if err != nil {
 			continue
-		}
-		if len(permitted) > 0 {
-			if _, ok := permitted[instrument.Symbol]; !ok {
-				continue
-			}
 		}
 		instruments = append(instruments, instrument)
 		metas[instrument.Symbol] = meta
@@ -137,7 +119,7 @@ func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, s
 		Type:              schema.InstrumentTypeSpot,
 		BaseCurrency:      strings.ToUpper(strings.TrimSpace(sym.BaseAsset)),
 		QuoteCurrency:     strings.ToUpper(strings.TrimSpace(sym.QuoteAsset)),
-		Venue:             p.opts.Venue,
+		Venue:             defaultVenue,
 		Expiry:            "",
 		ContractValue:     nil,
 		ContractCurrency:  "",

@@ -27,22 +27,21 @@ const (
 
 // Options configure the Binance adapter.
 type Options struct {
-	Name             string
-	Venue            string
-	APIBaseURL       string
-	WebsocketBaseURL string
-	Symbols          []string
-	SnapshotDepth    int
-	Pools            *pool.PoolManager
-	APIKey           string
-	APISecret        string
+	// User-controlled configuration.
+	Name          string
+	SnapshotDepth int
+	APIKey        string
+	APISecret     string
 
-	apiBaseURL          string
-	websocketBaseURL    string
-	instrumentRefresh   time.Duration
 	httpTimeout         time.Duration
+	instrumentRefresh   time.Duration
 	recvWindow          time.Duration
 	userStreamKeepAlive time.Duration
+
+	// Application-assigned internals.
+	Pools            *pool.PoolManager
+	apiBaseURL       string
+	websocketBaseURL string
 }
 
 func normalizeWebsocketBase(raw string) string {
@@ -60,17 +59,14 @@ func withDefaults(in Options) Options {
 	if strings.TrimSpace(in.Name) == "" {
 		in.Name = defaultProviderName
 	}
-	if strings.TrimSpace(in.Venue) == "" {
-		in.Venue = defaultVenue
-	}
 
-	baseURL := strings.TrimSpace(in.APIBaseURL)
+	baseURL := strings.TrimSpace(in.apiBaseURL)
 	if baseURL == "" {
 		baseURL = defaultAPIBaseURL
 	}
 	in.apiBaseURL = baseURL
 
-	wsBase := strings.TrimSpace(in.WebsocketBaseURL)
+	wsBase := strings.TrimSpace(in.websocketBaseURL)
 	if wsBase == "" {
 		wsBase = defaultWebsocketBaseURL
 	}
@@ -91,21 +87,6 @@ func withDefaults(in Options) Options {
 	if in.userStreamKeepAlive <= 0 {
 		in.userStreamKeepAlive = defaultUserStreamKeepAlive
 	}
-
-	normalized := make([]string, 0, len(in.Symbols))
-	seen := make(map[string]struct{}, len(in.Symbols))
-	for _, symbol := range in.Symbols {
-		trimmed := strings.ToUpper(strings.TrimSpace(symbol))
-		if trimmed == "" {
-			continue
-		}
-		if _, exists := seen[trimmed]; exists {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		normalized = append(normalized, trimmed)
-	}
-	in.Symbols = normalized
 	return in
 }
 
