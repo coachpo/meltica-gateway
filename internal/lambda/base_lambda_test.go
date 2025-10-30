@@ -3,7 +3,14 @@ package lambda
 import "testing"
 
 func TestSelectProviderDeterministic(t *testing.T) {
-	cfg := Config{Symbol: "BTC-USDT", Providers: []string{"alpha", "beta", "gamma"}}
+	cfg := Config{
+		Providers: []string{"alpha", "beta", "gamma"},
+		ProviderSymbols: map[string][]string{
+			"alpha": []string{"BTC-USDT"},
+			"beta":  []string{"BTC-USDT"},
+			"gamma": []string{"BTC-USDT"},
+		},
+	}
 	base := NewBaseLambda("lambda-select", cfg, nil, nil, nil, nil, nil)
 
 	testCases := []struct {

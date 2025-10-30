@@ -65,17 +65,22 @@ type MarketState struct {
 // BaseLambda provides the core infrastructure for trading lambdas.
 // Extend this by embedding it in your custom lambda and providing a TradingStrategy.
 type BaseLambda struct {
-	id             string
-	config         Config
-	bus            eventbus.Bus
-	orderSubmitter OrderSubmitter
-	pools          *pool.PoolManager
-	logger         *log.Logger
-	strategy       TradingStrategy
-	riskManager    *risk.Manager
-	baseCurrency   string
-	quoteCurrency  string
-	providerSet    map[string]struct{}
+	id                string
+	config            Config
+	bus               eventbus.Bus
+	orderSubmitter    OrderSubmitter
+	pools             *pool.PoolManager
+	logger            *log.Logger
+	strategy          TradingStrategy
+	riskManager       *risk.Manager
+	baseCurrency      string
+	quoteCurrency     string
+	providerSet       map[string]struct{}
+	providerSymbols   map[string]map[string]struct{}
+	defaultSymbols    map[string]string
+	allSymbols        map[string]struct{}
+	globalPrimary     string
+	balanceCurrencies map[string]struct{}
 
 	// Market state (thread-safe via atomic)
 	lastPrice atomic.Value // float64
@@ -90,9 +95,9 @@ type BaseLambda struct {
 
 // Config defines configuration for a lambda trading bot instance.
 type Config struct {
-	Symbol    string
-	Providers []string
-	DryRun    bool
+	Providers       []string
+	ProviderSymbols map[string][]string
+	DryRun          bool
 }
 
 // OrderSubmitter defines the interface for submitting orders to a provider.
@@ -103,40 +108,86 @@ type OrderSubmitter interface {
 // NewBaseLambda creates a new base lambda with the provided strategy.
 func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter OrderSubmitter, pools *pool.PoolManager, strategy TradingStrategy, riskManager *risk.Manager) *BaseLambda {
 	config.Providers = normalizeProviders(config.Providers)
+	config.ProviderSymbols = normalizeProviderSymbols(config.ProviderSymbols)
 	providerSet := make(map[string]struct{}, len(config.Providers))
 	for _, provider := range config.Providers {
 		providerSet[provider] = struct{}{}
 	}
-
+	globalPrimary := primarySymbolFromConfig(config.Providers, config.ProviderSymbols)
 	if id == "" {
-		id = buildLambdaID(config.Symbol, config.Providers)
+		id = buildLambdaID(config.Providers, config.ProviderSymbols)
+	}
+	var providerSymbolSets map[string]map[string]struct{}
+	defaultSymbols := make(map[string]string, len(config.ProviderSymbols))
+	allSymbols := make(map[string]struct{})
+	if len(config.ProviderSymbols) > 0 {
+		providerSymbolSets = make(map[string]map[string]struct{}, len(config.ProviderSymbols))
+		for provider, symbols := range config.ProviderSymbols {
+			set := make(map[string]struct{}, len(symbols))
+			for _, sym := range symbols {
+				set[sym] = struct{}{}
+				allSymbols[sym] = struct{}{}
+			}
+			providerSymbolSets[provider] = set
+			if len(symbols) > 0 {
+				defaultSymbols[provider] = symbols[0]
+			}
+		}
+		for _, provider := range config.Providers {
+			if _, ok := providerSymbolSets[provider]; !ok {
+				providerSymbolSets[provider] = make(map[string]struct{})
+			}
+		}
+	}
+	if globalPrimary == "" {
+		for sym := range allSymbols {
+			globalPrimary = sym
+			break
+		}
 	}
 
 	lambda := &BaseLambda{
-		id:             id,
-		config:         config,
-		bus:            bus,
-		orderSubmitter: orderSubmitter,
-		pools:          pools,
-		logger:         log.New(os.Stdout, "", log.LstdFlags),
-		strategy:       strategy,
-		riskManager:    riskManager,
-		baseCurrency:   "",
-		quoteCurrency:  "",
-		providerSet:    providerSet,
-		lastPrice:      atomic.Value{},
-		bidPrice:       atomic.Value{},
-		askPrice:       atomic.Value{},
-		tradingActive:  atomic.Bool{},
-		orderCount:     atomic.Int64{},
-		dryRun:         atomic.Bool{},
+		id:                id,
+		config:            config,
+		bus:               bus,
+		orderSubmitter:    orderSubmitter,
+		pools:             pools,
+		logger:            log.New(os.Stdout, "", log.LstdFlags),
+		strategy:          strategy,
+		riskManager:       riskManager,
+		baseCurrency:      "",
+		quoteCurrency:     "",
+		providerSet:       providerSet,
+		providerSymbols:   providerSymbolSets,
+		defaultSymbols:    defaultSymbols,
+		allSymbols:        allSymbols,
+		globalPrimary:     globalPrimary,
+		balanceCurrencies: make(map[string]struct{}),
+		lastPrice:         atomic.Value{},
+		bidPrice:          atomic.Value{},
+		askPrice:          atomic.Value{},
+		tradingActive:     atomic.Bool{},
+		orderCount:        atomic.Int64{},
+		dryRun:            atomic.Bool{},
 	}
 
-	if base, quote, err := schema.InstrumentCurrencies(config.Symbol); err == nil {
-		lambda.baseCurrency = strings.ToUpper(base)
-		lambda.quoteCurrency = strings.ToUpper(quote)
-	} else if config.Symbol != "" {
-		lambda.logger.Printf("[%s] unable to derive currencies from symbol %q: %v", lambda.id, config.Symbol, err)
+	if lambda.globalPrimary != "" {
+		if base, quote, err := schema.InstrumentCurrencies(lambda.globalPrimary); err == nil {
+			lambda.baseCurrency = strings.ToUpper(base)
+			lambda.quoteCurrency = strings.ToUpper(quote)
+		} else {
+			lambda.logger.Printf("[%s] unable to derive currencies from symbol %q: %v", lambda.id, lambda.globalPrimary, err)
+		}
+	}
+	for sym := range lambda.allSymbols {
+		if base, quote, err := schema.InstrumentCurrencies(sym); err == nil {
+			if trimmed := strings.ToUpper(strings.TrimSpace(base)); trimmed != "" {
+				lambda.balanceCurrencies[trimmed] = struct{}{}
+			}
+			if trimmed := strings.ToUpper(strings.TrimSpace(quote)); trimmed != "" {
+				lambda.balanceCurrencies[trimmed] = struct{}{}
+			}
+		}
 	}
 
 	lambda.lastPrice.Store(float64(0))
@@ -148,19 +199,19 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 	return lambda
 }
 
-func buildLambdaID(symbol string, providers []string) string {
-	symbol = strings.TrimSpace(symbol)
+func buildLambdaID(providers []string, providerSymbols map[string][]string) string {
+	primary := strings.TrimSpace(primarySymbolFromConfig(providers, providerSymbols))
 	if len(providers) == 0 {
-		if symbol == "" {
+		if primary == "" {
 			return "lambda-unassigned"
 		}
-		return fmt.Sprintf("lambda-%s", symbol)
+		return fmt.Sprintf("lambda-%s", primary)
 	}
 	joined := strings.Join(providers, "-")
-	if symbol == "" {
+	if primary == "" {
 		return fmt.Sprintf("lambda-%s", joined)
 	}
-	return fmt.Sprintf("lambda-%s-%s", symbol, joined)
+	return fmt.Sprintf("lambda-%s-%s", primary, joined)
 }
 
 func normalizeProviders(providers []string) []string {
@@ -181,6 +232,77 @@ func normalizeProviders(providers []string) []string {
 		out = append(out, candidate)
 	}
 	return out
+}
+
+func normalizeProviderSymbols(input map[string][]string) map[string][]string {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(input))
+	for rawProvider, symbols := range input {
+		provider := strings.TrimSpace(rawProvider)
+		if provider == "" {
+			continue
+		}
+		if len(symbols) == 0 {
+			out[provider] = nil
+			continue
+		}
+		seen := make(map[string]struct{}, len(symbols))
+		normalized := make([]string, 0, len(symbols))
+		for _, raw := range symbols {
+			symbol := strings.ToUpper(strings.TrimSpace(raw))
+			if symbol == "" {
+				continue
+			}
+			if _, exists := seen[symbol]; exists {
+				continue
+			}
+			seen[symbol] = struct{}{}
+			normalized = append(normalized, symbol)
+		}
+		if len(normalized) == 0 {
+			out[provider] = nil
+		} else {
+			out[provider] = normalized
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func copyProviderSymbolMap(src map[string][]string) map[string][]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string][]string, len(src))
+	for provider, symbols := range src {
+		if len(symbols) == 0 {
+			dst[provider] = nil
+			continue
+		}
+		copied := make([]string, len(symbols))
+		copy(copied, symbols)
+		dst[provider] = copied
+	}
+	return dst
+}
+
+func primarySymbolFromConfig(providers []string, providerSymbols map[string][]string) string {
+	for _, provider := range providers {
+		symbols := providerSymbols[provider]
+		if len(symbols) > 0 {
+			return symbols[0]
+		}
+	}
+	for _, symbols := range providerSymbols {
+		if len(symbols) > 0 {
+			return symbols[0]
+		}
+	}
+	return ""
 }
 
 // Start begins consuming market data and executing trading logic.
@@ -220,7 +342,7 @@ func (l *BaseLambda) Start(ctx context.Context) (<-chan error, error) {
 
 	go l.consume(ctx, subs, errs)
 
-	l.logger.Printf("[%s] started for symbol=%s providers=%v", l.id, l.config.Symbol, l.config.Providers)
+	l.logger.Printf("[%s] started for providers=%v provider_symbols=%v", l.id, l.config.Providers, l.config.ProviderSymbols)
 	return errs, nil
 }
 
@@ -535,7 +657,7 @@ func (l *BaseLambda) SubmitOrder(ctx context.Context, provider string, side sche
 	orderReq.ClientOrderID = orderID
 	orderReq.ConsumerID = l.id
 	orderReq.Provider = provider
-	orderReq.Symbol = l.config.Symbol
+	orderReq.Symbol = l.symbolForProvider(provider)
 	orderReq.Side = side
 	orderReq.OrderType = schema.OrderTypeLimit
 	orderReq.Price = price
@@ -593,7 +715,7 @@ func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, provider string, sid
 	orderReq.ClientOrderID = orderID
 	orderReq.ConsumerID = l.id
 	orderReq.Provider = provider
-	orderReq.Symbol = l.config.Symbol
+	orderReq.Symbol = l.symbolForProvider(provider)
 	orderReq.Side = side
 	orderReq.OrderType = schema.OrderTypeMarket
 	orderReq.Quantity = quantity
@@ -625,9 +747,9 @@ func (l *BaseLambda) ID() string {
 // Config returns the lambda configuration.
 func (l *BaseLambda) Config() Config {
 	copyCfg := Config{
-		Symbol:    l.config.Symbol,
-		Providers: make([]string, len(l.config.Providers)),
-		DryRun:    l.config.DryRun,
+		Providers:       make([]string, len(l.config.Providers)),
+		ProviderSymbols: copyProviderSymbolMap(l.config.ProviderSymbols),
+		DryRun:          l.config.DryRun,
 	}
 	copy(copyCfg.Providers, l.config.Providers)
 	return copyCfg
@@ -704,6 +826,22 @@ func (l *BaseLambda) Providers() []string {
 	return providers
 }
 
+func (l *BaseLambda) symbolForProvider(provider string) string {
+	provider = strings.TrimSpace(provider)
+	if provider != "" {
+		if sym, ok := l.defaultSymbols[provider]; ok && sym != "" {
+			return sym
+		}
+	}
+	if l.globalPrimary != "" {
+		return l.globalPrimary
+	}
+	for sym := range l.allSymbols {
+		return sym
+	}
+	return ""
+}
+
 // SelectProvider chooses a provider based on the supplied seed.
 func (l *BaseLambda) SelectProvider(seed uint64) (string, error) {
 	if len(l.config.Providers) == 0 {
@@ -746,7 +884,30 @@ func (l *BaseLambda) IsMyOrder(clientOrderID string) bool {
 // Private helper methods
 
 func (l *BaseLambda) matchesSymbol(evt *schema.Event) bool {
-	return evt.Symbol == l.config.Symbol
+	if evt == nil {
+		return false
+	}
+	symbol := strings.ToUpper(strings.TrimSpace(evt.Symbol))
+	if symbol == "" {
+		return false
+	}
+	if len(l.providerSymbols) == 0 {
+		if len(l.allSymbols) == 0 {
+			return true
+		}
+		_, ok := l.allSymbols[symbol]
+		return ok
+	}
+	provider := strings.TrimSpace(evt.Provider)
+	if provider == "" {
+		return false
+	}
+	allowed, ok := l.providerSymbols[provider]
+	if !ok || len(allowed) == 0 {
+		return false
+	}
+	_, ok = allowed[symbol]
+	return ok
 }
 
 func (l *BaseLambda) matchesProvider(evt *schema.Event) bool {
@@ -786,6 +947,10 @@ func (l *BaseLambda) matchesBalanceCurrency(symbol string) bool {
 	if l.quoteCurrency != "" && currency == l.quoteCurrency {
 		return true
 	}
+	if len(l.balanceCurrencies) > 0 {
+		_, ok := l.balanceCurrencies[currency]
+		return ok
+	}
 	return false
 }
 
@@ -794,10 +959,11 @@ func (l *BaseLambda) buildRiskControlPayload(provider string, err error) schema.
 	if provider == "" && len(l.config.Providers) == 1 {
 		provider = l.config.Providers[0]
 	}
+	primarySymbol := l.symbolForProvider(provider)
 	payload := schema.RiskControlPayload{
 		StrategyID:         l.id,
 		Provider:           provider,
-		Symbol:             l.config.Symbol,
+		Symbol:             primarySymbol,
 		Status:             schema.RiskControlStatusTriggered,
 		Reason:             err.Error(),
 		BreachType:         "UNKNOWN",
@@ -858,7 +1024,11 @@ func (l *BaseLambda) emitRiskControlEvent(ctx context.Context, payload schema.Ri
 	} else if len(l.config.Providers) == 1 {
 		evt.Provider = l.config.Providers[0]
 	}
-	evt.Symbol = l.config.Symbol
+	if payload.Symbol != "" {
+		evt.Symbol = payload.Symbol
+	} else {
+		evt.Symbol = l.symbolForProvider(evt.Provider)
+	}
 	evt.Type = schema.EventTypeRiskControl
 	evt.IngestTS = payload.Timestamp
 	evt.EmitTS = payload.Timestamp

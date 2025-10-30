@@ -564,7 +564,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 
 	orderRouter := &providerOrderRouter{catalog: m.providers}
 	dryRun := boolValue(spec.Config, "dry_run", true)
-	baseCfg := lambda.Config{Symbol: spec.Symbol, Providers: resolvedProviders, DryRun: dryRun}
+	baseCfg := lambda.Config{Providers: resolvedProviders, ProviderSymbols: spec.ProviderSymbolMap(), DryRun: dryRun}
 	base := lambda.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
 

@@ -74,7 +74,7 @@ func main() {
 			BasePrice:   0,
 			DryRun:      true,
 		}
-		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{Symbol: "", Providers: []string{"backtest"}, DryRun: true}, nil, nil, nil, gridStrategy, nil)
+		baseLambda := lambda.NewBaseLambda("backtest", lambda.Config{Providers: []string{"backtest"}, ProviderSymbols: nil, DryRun: true}, nil, nil, nil, gridStrategy, nil)
 		gridStrategy.Lambda = &orderStrategyAdapter{base: baseLambda}
 		strategy = gridStrategy
 	default:
