@@ -80,7 +80,8 @@ lambdaManifest:
         binance-spot:
           symbols:
             - BTC-USDT
-      strategy: delay
+      strategy:
+        identifier: delay
       auto_start: false
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
@@ -154,6 +155,9 @@ lambdaManifest:
 	manifest := cfg.LambdaManifest.Lambdas[0]
 	if manifest.ID != "test-lambda" {
 		t.Fatalf("unexpected lambda id %s", manifest.ID)
+	}
+	if manifest.Strategy.Identifier != "delay" {
+		t.Fatalf("unexpected strategy identifier %s", manifest.Strategy.Identifier)
 	}
 	if manifest.AutoStart {
 		t.Fatalf("expected test-lambda autostart disabled")
@@ -234,7 +238,8 @@ lambdaManifest:
         binance-spot:
           symbols:
             - BTC-USDT
-      strategy: delay
+      strategy:
+        identifier: delay
       auto_start: false
 `, fanoutLine)
 

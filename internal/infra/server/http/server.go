@@ -199,7 +199,7 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 		return spec, fmt.Errorf("decode payload: %w", err)
 	}
 	spec.ID = strings.TrimSpace(spec.ID)
-	spec.Strategy = strings.TrimSpace(spec.Strategy)
+	spec.Strategy.Normalize()
 	if len(spec.ProviderSymbols) > 0 {
 		symbolSets := make(map[string]config.ProviderSymbols, len(spec.ProviderSymbols))
 		for name, symbolSpec := range spec.ProviderSymbols {
@@ -213,13 +213,10 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 		spec.ProviderSymbols = symbolSets
 	}
 	spec.RefreshProviders()
-	if spec.Config == nil {
-		spec.Config = make(map[string]any)
-	}
 	if spec.ID == "" {
 		return spec, fmt.Errorf("id required")
 	}
-	if spec.Strategy == "" {
+	if spec.Strategy.Identifier == "" {
 		return spec, fmt.Errorf("strategy required")
 	}
 	manifest := config.LambdaManifest{

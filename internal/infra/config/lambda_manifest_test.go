@@ -8,9 +8,11 @@ import (
 func TestLambdaManifestValidate(t *testing.T) {
 	manifest := LambdaManifest{
 		Lambdas: []LambdaSpec{{
-			ID:       "test-lambda",
-			Strategy: "delay",
-			Config:   map[string]any{"min_delay": "100ms"},
+			ID: "test-lambda",
+			Strategy: LambdaStrategySpec{
+				Identifier: "delay",
+				Config:     map[string]any{"min_delay": "100ms"},
+			},
 			ProviderSymbols: map[string]ProviderSymbols{
 				"binance-spot": {
 					Symbols: []string{"BTC-USDT"},
@@ -35,7 +37,7 @@ func TestLambdaManifestValidateMissingFields(t *testing.T) {
 	manifest := LambdaManifest{
 		Lambdas: []LambdaSpec{{
 			ID:       "",
-			Strategy: "delay",
+			Strategy: LambdaStrategySpec{Identifier: "delay"},
 			ProviderSymbols: map[string]ProviderSymbols{
 				"binance-spot": {
 					Symbols: []string{"BTC-USDT"},
@@ -51,7 +53,7 @@ func TestLambdaManifestValidateMissingFields(t *testing.T) {
 func TestLambdaManifestProviderSymbols(t *testing.T) {
 	spec := LambdaSpec{
 		ID:        "lambda-map",
-		Strategy:  "delay",
+		Strategy:  LambdaStrategySpec{Identifier: "delay"},
 		AutoStart: true,
 		ProviderSymbols: map[string]ProviderSymbols{
 			"binance": {
@@ -89,7 +91,7 @@ func TestLambdaManifestProviderSymbols(t *testing.T) {
 func TestLambdaManifestSingleSymbolAssignment(t *testing.T) {
 	spec := LambdaSpec{
 		ID:        "lambda-single",
-		Strategy:  "delay",
+		Strategy:  LambdaStrategySpec{Identifier: "delay"},
 		AutoStart: true,
 		ProviderSymbols: map[string]ProviderSymbols{
 			"binance": {

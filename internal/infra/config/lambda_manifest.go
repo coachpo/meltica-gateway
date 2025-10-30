@@ -13,6 +13,27 @@ type LambdaManifest struct {
 	Lambdas []LambdaSpec `yaml:"lambdas"`
 }
 
+// LambdaStrategySpec defines the strategy identifier and associated configuration payload.
+type LambdaStrategySpec struct {
+	Identifier string         `yaml:"identifier" json:"identifier"`
+	Config     map[string]any `yaml:"config" json:"config"`
+}
+
+func (s *LambdaStrategySpec) normalize() {
+	if s == nil {
+		return
+	}
+	s.Identifier = strings.TrimSpace(s.Identifier)
+	if s.Config == nil {
+		s.Config = make(map[string]any)
+	}
+}
+
+// Normalize applies canonical formatting to the strategy definition.
+func (s *LambdaStrategySpec) Normalize() {
+	s.normalize()
+}
+
 // ProviderSymbols defines the symbol scope supplied by a provider.
 type ProviderSymbols struct {
 	Symbols []string `yaml:"symbols" json:"symbols"`
@@ -49,8 +70,7 @@ func (p *ProviderSymbols) Normalize() {
 // LambdaSpec defines a lambda instance configuration.
 type LambdaSpec struct {
 	ID              string                     `yaml:"id" json:"id"`
-	Strategy        string                     `yaml:"strategy" json:"strategy"`
-	Config          map[string]any             `yaml:"config" json:"config"`
+	Strategy        LambdaStrategySpec         `yaml:"strategy" json:"strategy"`
 	AutoStart       bool                       `yaml:"auto_start" json:"auto_start"`
 	ProviderSymbols map[string]ProviderSymbols `yaml:"provider_symbols" json:"provider_symbols"`
 	Providers       []string                   `yaml:"-" json:"-"`
@@ -63,10 +83,9 @@ func (s *LambdaSpec) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	var base struct {
-		ID        string         `yaml:"id"`
-		Strategy  string         `yaml:"strategy"`
-		Config    map[string]any `yaml:"config"`
-		AutoStart bool           `yaml:"auto_start"`
+		ID        string             `yaml:"id"`
+		Strategy  LambdaStrategySpec `yaml:"strategy"`
+		AutoStart bool               `yaml:"auto_start"`
 	}
 	if err := value.Decode(&base); err != nil {
 		return fmt.Errorf("decode lambda spec: %w", err)
@@ -115,8 +134,8 @@ func (s *LambdaSpec) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	s.ID = base.ID
+	base.Strategy.normalize()
 	s.Strategy = base.Strategy
-	s.Config = base.Config
 	s.AutoStart = base.AutoStart
 	s.ProviderSymbols = assignments
 	s.Providers = normalizeProviderNames(names)
@@ -128,6 +147,7 @@ func (s *LambdaSpec) refreshProviders() {
 	if s == nil {
 		return
 	}
+	s.Strategy.normalize()
 	if len(s.ProviderSymbols) == 0 {
 		s.Providers = normalizeProviderNames(s.Providers)
 		return
@@ -241,7 +261,7 @@ func (m LambdaManifest) Validate() error {
 		if strings.TrimSpace(spec.ID) == "" {
 			return fmt.Errorf("lambdas[%d]: id required", i)
 		}
-		if strings.TrimSpace(spec.Strategy) == "" {
+		if strings.TrimSpace(spec.Strategy.Identifier) == "" {
 			return fmt.Errorf("lambdas[%d]: strategy required", i)
 		}
 		if len(spec.Providers) == 0 {

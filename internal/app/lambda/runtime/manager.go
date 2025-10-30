@@ -482,7 +482,7 @@ func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaM
 // Create creates a new lambda instance from the specification.
 func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*core.BaseLambda, error) {
 	spec = sanitizeSpec(spec)
-	if spec.ID == "" || len(spec.Providers) == 0 || spec.Strategy == "" {
+	if spec.ID == "" || len(spec.Providers) == 0 || spec.Strategy.Identifier == "" {
 		return nil, fmt.Errorf("strategy instance requires id, providers, and strategy")
 	}
 	if len(spec.AllSymbols()) == 0 {
@@ -504,11 +504,12 @@ func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*core.Bas
 }
 
 func (m *Manager) ensureSpec(spec config.LambdaSpec, allowReplace bool) error {
-	if spec.Config == nil {
-		spec.Config = make(map[string]any)
+	if spec.Strategy.Config == nil {
+		spec.Strategy.Config = make(map[string]any)
 	}
-	if _, ok := m.strategies[strings.ToLower(spec.Strategy)]; !ok {
-		return fmt.Errorf("strategy %q not registered", spec.Strategy)
+	name := strings.ToLower(strings.TrimSpace(spec.Strategy.Identifier))
+	if _, ok := m.strategies[name]; !ok {
+		return fmt.Errorf("strategy %q not registered", spec.Strategy.Identifier)
 	}
 
 	m.mu.Lock()
@@ -557,12 +558,12 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 		return nil, nil, nil, fmt.Errorf("strategy %s: no valid providers resolved", spec.ID)
 	}
 
-	strategy, err := m.buildStrategy(spec.Strategy, spec.Config)
+	strategy, err := m.buildStrategy(spec.Strategy.Identifier, spec.Strategy.Config)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("strategy %s: %w", spec.ID, err)
 	}
 	if strategy != nil && len(resolvedProviders) > 1 && !strategy.WantsCrossProviderEvents() {
-		return nil, nil, nil, fmt.Errorf("strategy %s does not support cross-provider feeds", spec.Strategy)
+		return nil, nil, nil, fmt.Errorf("strategy %s does not support cross-provider feeds", spec.Strategy.Identifier)
 	}
 
 	routes := buildRouteDeclarations(strategy, spec)
@@ -575,7 +576,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 	}
 
 	orderRouter := &providerOrderRouter{catalog: m.providers}
-	dryRun := boolValue(spec.Config, "dry_run", true)
+	dryRun := boolValue(spec.Strategy.Config, "dry_run", true)
 	baseCfg := core.Config{Providers: resolvedProviders, ProviderSymbols: spec.ProviderSymbolMap(), DryRun: dryRun}
 	base := core.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
@@ -670,7 +671,7 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	if !equalProviderSymbols(current.ProviderSymbols, spec.ProviderSymbols) {
 		return fmt.Errorf("provider symbol assignments are immutable for %s", spec.ID)
 	}
-	if current.Strategy != spec.Strategy {
+	if current.Strategy.Identifier != spec.Strategy.Identifier {
 		return fmt.Errorf("strategy is immutable for %s", spec.ID)
 	}
 
@@ -691,11 +692,10 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 // InstanceSnapshot captures the current state of a lambda instance.
 type InstanceSnapshot struct {
 	ID              string                            `json:"id"`
-	Strategy        string                            `json:"strategy"`
+	Strategy        config.LambdaStrategySpec         `json:"strategy"`
 	Providers       []string                          `json:"providers"`
 	ProviderSymbols map[string]config.ProviderSymbols `json:"provider_symbols"`
 	Symbols         []string                          `json:"symbols"`
-	Config          map[string]any                    `json:"config"`
 	AutoStart       bool                              `json:"autoStart"`
 	Running         bool                              `json:"running"`
 }
@@ -719,11 +719,10 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 	if err != nil {
 		return InstanceSnapshot{
 			ID:              "",
-			Strategy:        "",
+			Strategy:        config.LambdaStrategySpec{Identifier: "", Config: map[string]any{}},
 			Providers:       []string{},
 			ProviderSymbols: map[string]config.ProviderSymbols{},
 			Symbols:         []string{},
-			Config:          map[string]any{},
 			AutoStart:       false,
 			Running:         false,
 		}, false
@@ -735,16 +734,15 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 }
 
 func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
-	cfg := copyMap(spec.Config)
+	strategyConfig := copyMap(spec.Strategy.Config)
 	providers := append([]string(nil), spec.Providers...)
 	assignments := cloneProviderSymbols(spec.ProviderSymbols)
 	return InstanceSnapshot{
 		ID:              spec.ID,
-		Strategy:        spec.Strategy,
+		Strategy:        config.LambdaStrategySpec{Identifier: spec.Strategy.Identifier, Config: strategyConfig},
 		Providers:       providers,
 		ProviderSymbols: assignments,
 		Symbols:         spec.AllSymbols(),
-		Config:          cfg,
 		AutoStart:       spec.AutoStart,
 		Running:         running,
 	}
@@ -798,12 +796,9 @@ func (m *Manager) buildStrategy(name string, cfg map[string]any) (core.TradingSt
 
 func sanitizeSpec(spec config.LambdaSpec) config.LambdaSpec {
 	spec.ID = strings.TrimSpace(spec.ID)
-	spec.Strategy = strings.TrimSpace(spec.Strategy)
+	spec.Strategy.Normalize()
 	spec.RefreshProviders()
 	spec.Providers = normalizeProviderList(spec.Providers)
-	if spec.Config == nil {
-		spec.Config = make(map[string]any)
-	}
 	if spec.ProviderSymbols == nil {
 		spec.ProviderSymbols = make(map[string]config.ProviderSymbols)
 	}
@@ -812,7 +807,7 @@ func sanitizeSpec(spec config.LambdaSpec) config.LambdaSpec {
 
 func cloneSpec(spec config.LambdaSpec) config.LambdaSpec {
 	clone := spec
-	clone.Config = copyMap(spec.Config)
+	clone.Strategy.Config = copyMap(spec.Strategy.Config)
 	clone.Providers = append([]string(nil), spec.Providers...)
 	clone.ProviderSymbols = cloneProviderSymbols(spec.ProviderSymbols)
 	return clone
