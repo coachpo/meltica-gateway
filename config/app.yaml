@@ -66,9 +66,8 @@ lambdaManifest:
         binance-spot:
           symbols:
             - BTC-USDT
-      strategy: delay
+      strategy: logging
       config:
         dry_run: true
-        min_delay: "250ms"
-        max_delay: "750ms"
-      auto_start: false
+        logger_prefix: "[LatencyProbe] "
+      auto_start: true
