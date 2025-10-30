@@ -6,10 +6,9 @@ providers:
   binance-spot:
     exchange:
       identifier: binance
-      enabled: true
       config:
-        api_key: "${BINANCE_API_KEY}"
-        api_secret: "${BINANCE_API_SECRET}"
+        # api_key: "${BINANCE_API_KEY}"
+        # api_secret: "${BINANCE_API_SECRET}"
         snapshot_depth: 1000
         http_timeout: 10s
         instrument_refresh_interval: 30m
@@ -54,7 +53,7 @@ apiServer:
 
 # telemetry: OTLP exporter configuration
 telemetry:
-  otlpEndpoint: http://localhost:4318
+  otlpEndpoint: http://capy.lan:4318
   serviceName: meltica-gateway
   otlpInsecure: true
   enableMetrics: true
