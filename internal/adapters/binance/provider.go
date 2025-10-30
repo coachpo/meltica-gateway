@@ -270,7 +270,7 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 	if err := p.ensureRunning(); err != nil {
 		return err
 	}
-	instruments := extractInstruments(route.Filters)
+	instruments := extractInstruments(route.Filters, p.name)
 	switch route.Type {
 	case schema.RouteTypeTrade:
 		return p.configureTradeStreams(instruments)
@@ -295,7 +295,7 @@ func (p *Provider) UnsubscribeRoute(route dispatcher.Route) error {
 	if err := p.ensureRunning(); err != nil {
 		return err
 	}
-	instruments := extractInstruments(route.Filters)
+	instruments := extractInstruments(route.Filters, p.name)
 	switch route.Type {
 	case schema.RouteTypeTrade:
 		return p.unsubscribeTradeStreams(instruments)
@@ -385,31 +385,59 @@ func (p *Provider) publishInstrumentUpdates() {
 	}
 }
 
-func extractInstruments(filters []dispatcher.FilterRule) []string {
-	symbols := make(map[string]struct{})
-	for _, filter := range filters {
-		if !strings.EqualFold(filter.Field, "instrument") {
-			continue
-		}
-		switch v := filter.Value.(type) {
+func providerInstrumentField(provider string) string {
+	trimmed := strings.TrimSpace(provider)
+	if trimmed == "" {
+		return "instrument"
+	}
+	return "instrument@" + strings.ToLower(trimmed)
+}
+
+func extractInstruments(filters []dispatcher.FilterRule, provider string) []string {
+	global := make(map[string]struct{})
+	specific := make(map[string]struct{})
+	providerField := providerInstrumentField(provider)
+	addValues := func(target map[string]struct{}, value any) {
+		switch v := value.(type) {
 		case string:
 			if trimmed := strings.ToUpper(strings.TrimSpace(v)); trimmed != "" {
-				symbols[trimmed] = struct{}{}
+				target[trimmed] = struct{}{}
 			}
 		case []string:
 			for _, entry := range v {
 				if trimmed := strings.ToUpper(strings.TrimSpace(entry)); trimmed != "" {
-					symbols[trimmed] = struct{}{}
+					target[trimmed] = struct{}{}
+				}
+			}
+		case []any:
+			for _, entry := range v {
+				if trimmed := strings.ToUpper(strings.TrimSpace(fmt.Sprint(entry))); trimmed != "" {
+					target[trimmed] = struct{}{}
 				}
 			}
 		}
 	}
-	out := make([]string, 0, len(symbols))
-	for symbol := range symbols {
+
+	for _, filter := range filters {
+		field := strings.TrimSpace(filter.Field)
+		switch {
+		case strings.EqualFold(field, providerField):
+			addValues(specific, filter.Value)
+		case strings.EqualFold(field, "instrument"):
+			addValues(global, filter.Value)
+		}
+	}
+
+	source := specific
+	if len(source) == 0 {
+		source = global
+	}
+
+	out := make([]string, 0, len(source))
+	for symbol := range source {
 		out = append(out, symbol)
 	}
 	if len(out) == 0 {
-		// Ensure we don't accidentally activate every instrument.
 		return nil
 	}
 	return out

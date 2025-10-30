@@ -1,6 +1,7 @@
 package binance
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -23,9 +24,10 @@ type exchangeInfoResponse struct {
 type exchangeInfoSymbol struct {
 	Symbol                 string               `json:"symbol"`
 	Status                 string               `json:"status"`
+	ContractStatus         string               `json:"contractStatus"`
 	BaseAsset              string               `json:"baseAsset"`
 	QuoteAsset             string               `json:"quoteAsset"`
-	ContractSize           string               `json:"contractSize"`
+	ContractSize           stringOrNumber       `json:"contractSize"`
 	ContractType           string               `json:"contractType"`
 	BaseAssetPrecision     int                  `json:"baseAssetPrecision"`
 	QuoteAssetPrecision    int                  `json:"quotePrecision"`
@@ -48,6 +50,30 @@ type exchangeInfoFilter struct {
 	MaxQty      string `json:"maxQty"`
 	StepSize    string `json:"stepSize"`
 	MinNotional string `json:"minNotional"`
+}
+
+type stringOrNumber string
+
+func (val *stringOrNumber) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*val = ""
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var str string
+		if err := json.Unmarshal(trimmed, &str); err != nil {
+			return fmt.Errorf("stringOrNumber: unmarshal string: %w", err)
+		}
+		*val = stringOrNumber(str)
+		return nil
+	}
+	*val = stringOrNumber(string(trimmed))
+	return nil
+}
+
+func (val stringOrNumber) String() string {
+	return string(val)
 }
 
 type depthSnapshotResponse struct {
@@ -122,7 +148,11 @@ func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, 
 				continue
 			}
 		}
-		if !strings.EqualFold(sym.Status, "TRADING") {
+		status := strings.TrimSpace(sym.Status)
+		if status == "" {
+			status = strings.TrimSpace(sym.ContractStatus)
+		}
+		if !strings.EqualFold(status, "TRADING") {
 			continue
 		}
 		if len(permitted) > 0 {
@@ -214,7 +244,7 @@ func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, s
 		}
 	}
 
-	if value := strings.TrimSpace(sym.ContractSize); value != "" {
+	if value := strings.TrimSpace(sym.ContractSize.String()); value != "" {
 		if parsed, err := strconv.ParseFloat(value, 64); err == nil && parsed > 0 {
 			inst.ContractValue = &parsed
 		}

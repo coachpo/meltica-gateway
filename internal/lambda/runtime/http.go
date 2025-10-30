@@ -210,6 +210,7 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 		normalizedProviders = append(normalizedProviders, trimmed)
 	}
 	spec.Providers = normalizedProviders
+	spec.RefreshProviders()
 	if spec.Config == nil {
 		spec.Config = make(map[string]any)
 	}

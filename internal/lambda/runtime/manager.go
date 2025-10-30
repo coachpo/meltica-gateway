@@ -784,6 +784,7 @@ func sanitizeSpec(spec config.LambdaSpec) config.LambdaSpec {
 	spec.ID = strings.TrimSpace(spec.ID)
 	spec.Symbol = strings.TrimSpace(spec.Symbol)
 	spec.Strategy = strings.TrimSpace(spec.Strategy)
+	spec.RefreshProviders()
 	spec.Providers = normalizeProviderList(spec.Providers)
 	if spec.Config == nil {
 		spec.Config = make(map[string]any)
@@ -795,7 +796,22 @@ func cloneSpec(spec config.LambdaSpec) config.LambdaSpec {
 	clone := spec
 	clone.Config = copyMap(spec.Config)
 	clone.Providers = append([]string(nil), spec.Providers...)
+	clone.ProviderAssignments = cloneProviderAssignments(spec.ProviderAssignments)
 	return clone
+}
+
+func cloneProviderAssignments(src map[string]config.ProviderAssignment) map[string]config.ProviderAssignment {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]config.ProviderAssignment, len(src))
+	for name, assignment := range src {
+		cloned := config.ProviderAssignment{
+			Symbols: append([]string(nil), assignment.Symbols...),
+		}
+		dst[name] = cloned
+	}
+	return dst
 }
 
 func copyMap(src map[string]any) map[string]any {
@@ -807,6 +823,14 @@ func copyMap(src map[string]any) map[string]any {
 		dst[k] = v
 	}
 	return dst
+}
+
+func providerInstrumentField(provider string) string {
+	trimmed := strings.TrimSpace(provider)
+	if trimmed == "" {
+		return "instrument"
+	}
+	return "instrument@" + strings.ToLower(trimmed)
 }
 
 func normalizeProviderList(providers []string) []string {
@@ -850,10 +874,24 @@ func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaS
 		return nil
 	}
 	routes := make([]dispatcher.RouteDeclaration, 0, len(events))
-	baseCurrency, quoteCurrency, err := schema.InstrumentCurrencies(spec.Symbol)
-	if err != nil {
-		baseCurrency, quoteCurrency = "", ""
+	providerSymbols := spec.ProviderSymbolMap()
+	allSymbols := spec.AllSymbols()
+	baseCurrency := ""
+	quoteCurrency := ""
+	if len(allSymbols) == 1 {
+		if base, quote, err := schema.InstrumentCurrencies(allSymbols[0]); err == nil {
+			baseCurrency = base
+			quoteCurrency = quote
+		}
+	} else if strings.TrimSpace(spec.Symbol) != "" {
+		if base, quote, err := schema.InstrumentCurrencies(spec.Symbol); err == nil {
+			baseCurrency = base
+			quoteCurrency = quote
+		}
 	}
+	baseCurrency = strings.ToUpper(strings.TrimSpace(baseCurrency))
+	quoteCurrency = strings.ToUpper(strings.TrimSpace(quoteCurrency))
+
 	seenCurrencies := make(map[string]struct{}, 2)
 	seenRoutes := make(map[schema.RouteType]struct{})
 	for _, evtType := range events {
@@ -874,11 +912,10 @@ func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaS
 						continue
 					}
 					seenCurrencies[currency] = struct{}{}
+					routeFilters := map[string]any{"currency": currency}
 					routes = append(routes, dispatcher.RouteDeclaration{
-						Type: routeName,
-						Filters: map[string]any{
-							"currency": currency,
-						},
+						Type:    routeName,
+						Filters: copyMap(routeFilters),
 					})
 				}
 				continue
@@ -887,11 +924,22 @@ func buildRouteDeclarations(strategy lambda.TradingStrategy, spec config.LambdaS
 				continue
 			}
 			seenRoutes[routeName] = struct{}{}
+			routeFilters := make(map[string]any)
+			if len(allSymbols) > 0 {
+				routeFilters["instrument"] = allSymbols
+			} else if trimmed := strings.ToUpper(strings.TrimSpace(spec.Symbol)); trimmed != "" {
+				routeFilters["instrument"] = trimmed
+			}
+			for provider, symbols := range providerSymbols {
+				if len(symbols) == 0 {
+					continue
+				}
+				key := providerInstrumentField(provider)
+				routeFilters[key] = symbols
+			}
 			routes = append(routes, dispatcher.RouteDeclaration{
-				Type: routeName,
-				Filters: map[string]any{
-					"instrument": spec.Symbol,
-				},
+				Type:    routeName,
+				Filters: copyMap(routeFilters),
 			})
 		}
 	}
