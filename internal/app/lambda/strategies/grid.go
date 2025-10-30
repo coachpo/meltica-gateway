@@ -44,6 +44,20 @@ var gridSubscribedEvents = []schema.EventType{
 	schema.EventTypeRiskControl,
 }
 
+// GridMetadata describes the grid strategy.
+var GridMetadata = Metadata{
+	Name:        "grid",
+	DisplayName: "Grid",
+	Description: "Places a symmetric buy/sell grid around the reference price.",
+	Config: WithDryRunField([]ConfigField{
+		{Name: "grid_levels", Type: "int", Description: "Number of grid levels on each side", Default: 3, Required: false},
+		{Name: "grid_spacing", Type: "float", Description: "Grid spacing expressed as percent", Default: 0.5, Required: false},
+		{Name: "order_size", Type: "string", Description: "Order size per level", Default: "1", Required: false},
+		{Name: "base_price", Type: "float", Description: "Optional base price for the grid", Default: 0.0, Required: false},
+	}),
+	Events: gridSubscribedEvents,
+}
+
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *Grid) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), gridSubscribedEvents...)

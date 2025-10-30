@@ -62,7 +62,7 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: latency-probe-btc
-      provider_symbols:
+      scope:
         binance-spot:
           symbols:
             - BTC-USDT

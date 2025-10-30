@@ -44,6 +44,20 @@ var momentumSubscribedEvents = []schema.EventType{
 	schema.EventTypeRiskControl,
 }
 
+// MomentumMetadata describes the momentum strategy.
+var MomentumMetadata = Metadata{
+	Name:        "momentum",
+	DisplayName: "Momentum",
+	Description: "Trades in the direction of recent price momentum.",
+	Config: WithDryRunField([]ConfigField{
+		{Name: "lookback_period", Type: "int", Description: "Number of recent trades used to compute momentum", Default: 20, Required: false},
+		{Name: "momentum_threshold", Type: "float", Description: "Minimum momentum (in percent) required to trigger trades", Default: 0.5, Required: false},
+		{Name: "order_size", Type: "string", Description: "Quantity for each market order", Default: "1", Required: false},
+		{Name: "cooldown", Type: "duration", Description: "Minimum time between trades", Default: "5s", Required: false},
+	}),
+	Events: momentumSubscribedEvents,
+}
+
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *Momentum) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), momentumSubscribedEvents...)

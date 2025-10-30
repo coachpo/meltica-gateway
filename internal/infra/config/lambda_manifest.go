@@ -72,7 +72,7 @@ type LambdaSpec struct {
 	ID              string                     `yaml:"id" json:"id"`
 	Strategy        LambdaStrategySpec         `yaml:"strategy" json:"strategy"`
 	AutoStart       bool                       `yaml:"auto_start" json:"auto_start"`
-	ProviderSymbols map[string]ProviderSymbols `yaml:"provider_symbols" json:"provider_symbols"`
+	ProviderSymbols map[string]ProviderSymbols `yaml:"scope" json:"scope"`
 	Providers       []string                   `yaml:"-" json:"-"`
 }
 
@@ -97,16 +97,16 @@ func (s *LambdaSpec) UnmarshalYAML(value *yaml.Node) error {
 		if keyNode.Kind != yaml.ScalarNode {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(keyNode.Value), "provider_symbols") {
+		if strings.EqualFold(strings.TrimSpace(keyNode.Value), "scope") {
 			providersNode = value.Content[i+1]
 			break
 		}
 	}
 	if providersNode == nil {
-		return fmt.Errorf("provider_symbols: mapping required")
+		return fmt.Errorf("scope: mapping required")
 	}
 	if providersNode.Kind != yaml.MappingNode {
-		return fmt.Errorf("provider_symbols must be a mapping")
+		return fmt.Errorf("scope must be a mapping")
 	}
 
 	assignments := make(map[string]ProviderSymbols, len(providersNode.Content)/2)
@@ -115,19 +115,19 @@ func (s *LambdaSpec) UnmarshalYAML(value *yaml.Node) error {
 		keyNode := providersNode.Content[i]
 		valNode := providersNode.Content[i+1]
 		if keyNode.Kind != yaml.ScalarNode {
-			return fmt.Errorf("provider_symbols[%d]: provider name must be a scalar", i/2)
+			return fmt.Errorf("scope[%d]: provider name must be a scalar", i/2)
 		}
 		name := strings.TrimSpace(keyNode.Value)
 		if name == "" {
-			return fmt.Errorf("provider_symbols[%d]: provider name required", i/2)
+			return fmt.Errorf("scope[%d]: provider name required", i/2)
 		}
 		var assignment ProviderSymbols
 		if err := valNode.Decode(&assignment); err != nil {
-			return fmt.Errorf("provider_symbols[%s]: %w", name, err)
+			return fmt.Errorf("scope[%s]: %w", name, err)
 		}
 		assignment.normalize()
 		if _, exists := assignments[name]; exists {
-			return fmt.Errorf("provider_symbols[%s]: duplicate provider entry", name)
+			return fmt.Errorf("scope[%s]: duplicate provider entry", name)
 		}
 		assignments[name] = assignment
 		names = append(names, name)
@@ -268,7 +268,7 @@ func (m LambdaManifest) Validate() error {
 			return fmt.Errorf("lambdas[%d]: providers required", i)
 		}
 		if len(spec.ProviderSymbols) == 0 {
-			return fmt.Errorf("lambdas[%d]: provider_symbols mapping required", i)
+			return fmt.Errorf("lambdas[%d]: scope mapping required", i)
 		}
 		for j, provider := range spec.Providers {
 			name := strings.TrimSpace(provider)
@@ -277,7 +277,7 @@ func (m LambdaManifest) Validate() error {
 			}
 			assignment, ok := spec.ProviderSymbols[name]
 			if !ok {
-				return fmt.Errorf("lambdas[%d].providers[%q]: provider_symbols entry missing", i, name)
+				return fmt.Errorf("lambdas[%d].providers[%q]: scope entry missing", i, name)
 			}
 			if len(assignment.Symbols) == 0 {
 				return fmt.Errorf("lambdas[%d].providers[%q]: at least one symbol required", i, name)

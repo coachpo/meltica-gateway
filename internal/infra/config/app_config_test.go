@@ -76,7 +76,7 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: test-lambda
-      provider_symbols:
+      scope:
         binance-spot:
           symbols:
             - BTC-USDT
@@ -234,7 +234,7 @@ telemetry:
 lambdaManifest:
   lambdas:
     - id: test-lambda
-      provider_symbols:
+      scope:
         binance-spot:
           symbols:
             - BTC-USDT

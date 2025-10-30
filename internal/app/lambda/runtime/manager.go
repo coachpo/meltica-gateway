@@ -87,48 +87,15 @@ func buildRiskLimits(cfg config.RiskConfig, logger *log.Logger) risk.Limits {
 // StrategyFactory creates trading strategy instances from configuration.
 type StrategyFactory func(config map[string]any) (core.TradingStrategy, error)
 
-// StrategyConfigField describes a configurable parameter for a strategy.
-type StrategyConfigField struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-	Default     any    `json:"default,omitempty"`
-	Required    bool   `json:"required"`
-}
-
-// StrategyMetadata describes a trading strategy's interface and configuration.
-type StrategyMetadata struct {
-	Name        string                `json:"name"`
-	DisplayName string                `json:"displayName"`
-	Description string                `json:"description,omitempty"`
-	Config      []StrategyConfigField `json:"config"`
-	Events      []schema.EventType    `json:"events"`
-}
-
 // StrategyDefinition combines strategy metadata with a factory function.
 type StrategyDefinition struct {
-	meta    StrategyMetadata
+	meta    strategies.Metadata
 	factory StrategyFactory
 }
 
-var dryRunConfigField = StrategyConfigField{
-	Name:        "dry_run",
-	Type:        "bool",
-	Description: "When true, strategy logs intended orders without submitting them",
-	Default:     true,
-	Required:    false,
-}
-
 // Metadata returns the strategy metadata.
-func (d StrategyDefinition) Metadata() StrategyMetadata {
-	fields := make([]StrategyConfigField, len(d.meta.Config))
-	copy(fields, d.meta.Config)
-	events := make([]schema.EventType, len(d.meta.Events))
-	copy(events, d.meta.Events)
-	meta := d.meta
-	meta.Config = fields
-	meta.Events = events
-	return meta
+func (d StrategyDefinition) Metadata() strategies.Metadata {
+	return strategies.CloneMetadata(d.meta)
 }
 
 // ProviderCatalog provides access to available providers.
@@ -191,29 +158,14 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 
 func (m *Manager) registerDefaults() {
 	m.registerStrategy(StrategyDefinition{
-		meta: StrategyMetadata{
-			Name:        "noop",
-			DisplayName: "No-Op",
-			Description: "Pass-through strategy that performs no actions.",
-			Config:      withDryRunField(nil),
-			Events:      []schema.EventType{},
-		},
+		meta: strategies.CloneMetadata(strategies.NoOpMetadata),
 		factory: func(_ map[string]any) (core.TradingStrategy, error) {
 			return &strategies.NoOp{}, nil
 		},
 	})
 
 	m.registerStrategy(StrategyDefinition{
-		meta: StrategyMetadata{
-			Name:        "delay",
-			DisplayName: "Delay",
-			Description: "Simulates processing latency with a configurable random delay window.",
-			Config: withDryRunField([]StrategyConfigField{
-				{Name: "min_delay", Type: "duration", Description: "Lower bound for the random delay interval", Default: "100ms", Required: false},
-				{Name: "max_delay", Type: "duration", Description: "Upper bound for the random delay interval", Default: "500ms", Required: false},
-			}),
-			Events: []schema.EventType{},
-		},
+		meta: strategies.CloneMetadata(strategies.DelayMetadata),
 		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			minDelay := durationValue(cfg, "min_delay", strategies.DefaultMinDelay)
 			maxDelay := durationValue(cfg, "max_delay", strategies.DefaultMaxDelay)
@@ -230,19 +182,7 @@ func (m *Manager) registerDefaults() {
 	})
 
 	m.registerStrategy(StrategyDefinition{
-		meta: StrategyMetadata{
-			Name:        "logging",
-			DisplayName: "Logging",
-			Description: "Emits detailed logs for all inbound events.",
-			Config: withDryRunField([]StrategyConfigField{{
-				Name:        "logger_prefix",
-				Type:        "string",
-				Description: "Prefix prepended to each log message",
-				Default:     "[Logging] ",
-				Required:    false,
-			}}),
-			Events: []schema.EventType{},
-		},
+		meta: strategies.CloneMetadata(strategies.LoggingMetadata),
 		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			return &strategies.Logging{
 				Logger:       nil,
@@ -252,18 +192,7 @@ func (m *Manager) registerDefaults() {
 	})
 
 	m.registerStrategy(StrategyDefinition{
-		meta: StrategyMetadata{
-			Name:        "momentum",
-			DisplayName: "Momentum",
-			Description: "Trades in the direction of recent price momentum.",
-			Config: withDryRunField([]StrategyConfigField{
-				{Name: "lookback_period", Type: "int", Description: "Number of recent trades used to compute momentum", Default: 20, Required: false},
-				{Name: "momentum_threshold", Type: "float", Description: "Minimum momentum (in percent) required to trigger trades", Default: 0.5, Required: false},
-				{Name: "order_size", Type: "string", Description: "Quantity for each market order", Default: "1", Required: false},
-				{Name: "cooldown", Type: "duration", Description: "Minimum time between trades", Default: "5s", Required: false},
-			}),
-			Events: []schema.EventType{},
-		},
+		meta: strategies.CloneMetadata(strategies.MomentumMetadata),
 		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			return &strategies.Momentum{
 				Lambda:            nil,
@@ -277,17 +206,7 @@ func (m *Manager) registerDefaults() {
 	})
 
 	m.registerStrategy(StrategyDefinition{
-		meta: StrategyMetadata{
-			Name:        "meanreversion",
-			DisplayName: "Mean Reversion",
-			Description: "Trades when price deviates from its moving average.",
-			Config: withDryRunField([]StrategyConfigField{
-				{Name: "window_size", Type: "int", Description: "Moving average window size", Default: 20, Required: false},
-				{Name: "deviation_threshold", Type: "float", Description: "Deviation percentage required to open a position", Default: 0.5, Required: false},
-				{Name: "order_size", Type: "string", Description: "Order size when entering a position", Default: "1", Required: false},
-			}),
-			Events: []schema.EventType{},
-		},
+		meta: strategies.CloneMetadata(strategies.MeanReversionMetadata),
 		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			return &strategies.MeanReversion{
 				Lambda:             nil,
@@ -300,18 +219,7 @@ func (m *Manager) registerDefaults() {
 	})
 
 	m.registerStrategy(StrategyDefinition{
-		meta: StrategyMetadata{
-			Name:        "grid",
-			DisplayName: "Grid",
-			Description: "Places a symmetric buy/sell grid around the reference price.",
-			Config: withDryRunField([]StrategyConfigField{
-				{Name: "grid_levels", Type: "int", Description: "Number of grid levels on each side", Default: 3, Required: false},
-				{Name: "grid_spacing", Type: "float", Description: "Grid spacing expressed as percent", Default: 0.5, Required: false},
-				{Name: "order_size", Type: "string", Description: "Order size per level", Default: "1", Required: false},
-				{Name: "base_price", Type: "float", Description: "Optional base price for the grid", Default: 0.0, Required: false},
-			}),
-			Events: []schema.EventType{},
-		},
+		meta: strategies.CloneMetadata(strategies.GridMetadata),
 		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			return &strategies.Grid{
 				Lambda:      nil,
@@ -325,17 +233,7 @@ func (m *Manager) registerDefaults() {
 	})
 
 	m.registerStrategy(StrategyDefinition{
-		meta: StrategyMetadata{
-			Name:        "marketmaking",
-			DisplayName: "Market Making",
-			Description: "Quotes bid/ask orders around the mid price to capture spread.",
-			Config: withDryRunField([]StrategyConfigField{
-				{Name: "spread_bps", Type: "float", Description: "Spread in basis points", Default: 25.0, Required: false},
-				{Name: "order_size", Type: "string", Description: "Quoted order size", Default: "1", Required: false},
-				{Name: "max_open_orders", Type: "int", Description: "Maximum concurrent orders per side", Default: 2, Required: false},
-			}),
-			Events: []schema.EventType{},
-		},
+		meta: strategies.CloneMetadata(strategies.MarketMakingMetadata),
 		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
 			maxOrders := intValue(cfg, "max_open_orders", 2)
 			if maxOrders > int(^uint32(0)>>1) {
@@ -391,7 +289,7 @@ func (m *Manager) registerStrategy(def StrategyDefinition) {
 	}
 	def.meta.Events = append([]schema.EventType(nil), def.meta.Events...)
 
-	fields := make([]StrategyConfigField, len(def.meta.Config))
+	fields := make([]strategies.ConfigField, len(def.meta.Config))
 	copy(fields, def.meta.Config)
 	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
 	def.meta.Config = fields
@@ -400,10 +298,10 @@ func (m *Manager) registerStrategy(def StrategyDefinition) {
 }
 
 // StrategyCatalog returns all available strategy metadata.
-func (m *Manager) StrategyCatalog() []StrategyMetadata {
+func (m *Manager) StrategyCatalog() []strategies.Metadata {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]StrategyMetadata, 0, len(m.strategies))
+	out := make([]strategies.Metadata, 0, len(m.strategies))
 	for _, def := range m.strategies {
 		out = append(out, def.Metadata())
 	}
@@ -412,18 +310,12 @@ func (m *Manager) StrategyCatalog() []StrategyMetadata {
 }
 
 // StrategyDetail returns metadata for a specific strategy by name.
-func (m *Manager) StrategyDetail(name string) (StrategyMetadata, bool) {
+func (m *Manager) StrategyDetail(name string) (strategies.Metadata, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	def, ok := m.strategies[strings.ToLower(strings.TrimSpace(name))]
 	if !ok {
-		return StrategyMetadata{
-			Name:        "",
-			DisplayName: "",
-			Description: "",
-			Config:      []StrategyConfigField{},
-			Events:      []schema.EventType{},
-		}, false
+		return strategies.Metadata{}, false
 	}
 	return def.Metadata(), true
 }
@@ -669,7 +561,7 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 		return fmt.Errorf("providers are immutable for %s", spec.ID)
 	}
 	if !equalProviderSymbols(current.ProviderSymbols, spec.ProviderSymbols) {
-		return fmt.Errorf("provider symbol assignments are immutable for %s", spec.ID)
+		return fmt.Errorf("scope assignments are immutable for %s", spec.ID)
 	}
 	if current.Strategy.Identifier != spec.Strategy.Identifier {
 		return fmt.Errorf("strategy is immutable for %s", spec.ID)
@@ -694,7 +586,7 @@ type InstanceSnapshot struct {
 	ID              string                            `json:"id"`
 	Strategy        config.LambdaStrategySpec         `json:"strategy"`
 	Providers       []string                          `json:"providers"`
-	ProviderSymbols map[string]config.ProviderSymbols `json:"provider_symbols"`
+	ProviderSymbols map[string]config.ProviderSymbols `json:"scope"`
 	Symbols         []string                          `json:"symbols"`
 	AutoStart       bool                              `json:"autoStart"`
 	Running         bool                              `json:"running"`
@@ -984,13 +876,6 @@ func bindStrategy(strategy core.TradingStrategy, base *core.BaseLambda, _ *log.L
 	case *strategies.MarketMaking:
 		s.Lambda = &marketMakingAdapter{base: base}
 	}
-}
-
-func withDryRunField(fields []StrategyConfigField) []StrategyConfigField {
-	out := make([]StrategyConfigField, 0, len(fields)+1)
-	out = append(out, fields...)
-	out = append(out, dryRunConfigField)
-	return out
 }
 
 func stringValue(cfg map[string]any, key, def string) string {

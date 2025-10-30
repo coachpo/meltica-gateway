@@ -36,6 +36,18 @@ var (
 	delayRandMu sync.Mutex
 )
 
+// DelayMetadata describes the delay strategy.
+var DelayMetadata = Metadata{
+	Name:        "delay",
+	DisplayName: "Delay",
+	Description: "Simulates processing latency with a configurable random delay window.",
+	Config: WithDryRunField([]ConfigField{
+		{Name: "min_delay", Type: "duration", Description: "Lower bound for the random delay interval", Default: DefaultMinDelay.String(), Required: false},
+		{Name: "max_delay", Type: "duration", Description: "Upper bound for the random delay interval", Default: DefaultMaxDelay.String(), Required: false},
+	}),
+	Events: delaySubscribedEvents,
+}
+
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *Delay) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), delaySubscribedEvents...)

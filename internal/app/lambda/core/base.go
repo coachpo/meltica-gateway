@@ -343,7 +343,7 @@ func (l *BaseLambda) Start(ctx context.Context) (<-chan error, error) {
 
 	go l.consume(ctx, subs, errs)
 
-	l.logger.Printf("[%s] started for providers=%v provider_symbols=%v", l.id, l.config.Providers, l.config.ProviderSymbols)
+	l.logger.Printf("[%s] started for providers=%v scope=%v", l.id, l.config.Providers, l.config.ProviderSymbols)
 	return errs, nil
 }
 

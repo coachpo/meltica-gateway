@@ -43,6 +43,19 @@ var meanReversionSubscribedEvents = []schema.EventType{
 	schema.EventTypeRiskControl,
 }
 
+// MeanReversionMetadata describes the mean reversion strategy.
+var MeanReversionMetadata = Metadata{
+	Name:        "meanreversion",
+	DisplayName: "Mean Reversion",
+	Description: "Trades when price deviates from its moving average.",
+	Config: WithDryRunField([]ConfigField{
+		{Name: "window_size", Type: "int", Description: "Moving average window size", Default: 20, Required: false},
+		{Name: "deviation_threshold", Type: "float", Description: "Deviation percentage required to open a position", Default: 0.5, Required: false},
+		{Name: "order_size", Type: "string", Description: "Order size when entering a position", Default: "1", Required: false},
+	}),
+	Events: meanReversionSubscribedEvents,
+}
+
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *MeanReversion) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), meanReversionSubscribedEvents...)

@@ -17,6 +17,15 @@ var noopSubscribedEvents = []schema.EventType{
 	schema.EventTypeRiskControl,
 }
 
+// NoOpMetadata describes the noop strategy.
+var NoOpMetadata = Metadata{
+	Name:        "noop",
+	DisplayName: "No-Op",
+	Description: "Pass-through strategy that performs no actions.",
+	Config:      WithDryRunField(nil),
+	Events:      noopSubscribedEvents,
+}
+
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *NoOp) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), noopSubscribedEvents...)

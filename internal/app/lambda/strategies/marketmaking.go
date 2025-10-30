@@ -47,6 +47,19 @@ var marketMakingSubscribedEvents = []schema.EventType{
 	schema.EventTypeRiskControl,
 }
 
+// MarketMakingMetadata describes the market making strategy.
+var MarketMakingMetadata = Metadata{
+	Name:        "marketmaking",
+	DisplayName: "Market Making",
+	Description: "Quotes bid/ask orders around the mid price to capture spread.",
+	Config: WithDryRunField([]ConfigField{
+		{Name: "spread_bps", Type: "float", Description: "Spread in basis points", Default: 25.0, Required: false},
+		{Name: "order_size", Type: "string", Description: "Quoted order size", Default: "1", Required: false},
+		{Name: "max_open_orders", Type: "int", Description: "Maximum concurrent orders per side", Default: 2, Required: false},
+	}),
+	Events: marketMakingSubscribedEvents,
+}
+
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *MarketMaking) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), marketMakingSubscribedEvents...)

@@ -25,6 +25,17 @@ var loggingSubscribedEvents = []schema.EventType{
 	schema.EventTypeRiskControl,
 }
 
+// LoggingMetadata describes the logging strategy.
+var LoggingMetadata = Metadata{
+	Name:        "logging",
+	DisplayName: "Logging",
+	Description: "Emits detailed logs for all inbound events.",
+	Config: WithDryRunField([]ConfigField{
+		{Name: "logger_prefix", Type: "string", Description: "Prefix prepended to each log message", Default: "[Logging] ", Required: false},
+	}),
+	Events: loggingSubscribedEvents,
+}
+
 // SubscribedEvents returns the list of event types this strategy subscribes to.
 func (s *Logging) SubscribedEvents() []schema.EventType {
 	return append([]schema.EventType(nil), loggingSubscribedEvents...)
