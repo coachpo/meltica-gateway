@@ -355,11 +355,75 @@ providers:
         transient_error: 0.0012
         disconnect_chance: 0.0001
         disconnect_for: 3s
+  # Simple fake providers used by quick-start templates
+  fake:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 500ms
+      trade_interval: 1s
+      book_snapshot_interval: 5s
+      balance_update_interval: 3s
+  fake-slow:
+    exchange:
+      name: fake
+      enabled: true
+      ticker_interval: 750ms
+      trade_interval: 2s
+      book_snapshot_interval: 10s
+      balance_update_interval: 6s
+  # Binance aliases showcase real exchange wiring
+  bnx:
+    exchange:
+      name: binance
+      venue: spot
+      enabled: true
+  binance:
+    exchange:
+      name: binance
+      venue: spot
+      enabled: true
+  BINANCE:
+    exchange:
+      name: binance
+      venue: futures
+      enabled: true
+  binance-futures:
+    exchange:
+      name: binance
+      venue: futures
+      enabled: true
+  binance-futures-coin:
+    exchange:
+      name: binance
+      venue: coin
+      enabled: true
+  binance-1:
+    exchange:
+      name: binance
+      venue: spot
+      enabled: true
+      snapshot_depth: 100
+  binance-2:
+    exchange:
+      name: binance
+      venue: spot
+      enabled: true
+      snapshot_depth: 100
+  binance-3:
+    exchange:
+      name: binance
+      venue: spot
+      enabled: true
+      snapshot_depth: 100
 
 # eventbus: in-memory event bus sizing
 eventbus:
   bufferSize: 25000
   fanoutWorkers: 8
+  # Example low-latency profile:
+  # bufferSize: 8192
+  # fanoutWorkers: auto
 
 # pools: object pool capacities
 pools:
@@ -369,6 +433,13 @@ pools:
   orderRequest:
     size: 25000
     waitQueueSize: 25000
+  # Binance delay template used:
+  # event:
+  #   size: 60000
+  #   waitQueueSize: 60000
+  # orderRequest:
+  #   size: 20000
+  #   waitQueueSize: 20000
 
 risk:
   maxPositionSize: "1000"
@@ -387,6 +458,17 @@ risk:
     enabled: true
     threshold: 5
     cooldown: 2m
+  # Example tighter profile used by Binance templates:
+  # maxPositionSize: "100"
+  # maxNotionalValue: "25000"
+  # orderThrottle: 2.5
+  # orderBurst: 2
+  # maxConcurrentOrders: 5
+  # priceBandPercent: 0.8
+  # circuitBreaker:
+  #   enabled: true
+  #   threshold: 4
+  #   cooldown: 60s
 
 # apiServer: control API bind address (host:port or :port)
 apiServer:
@@ -398,6 +480,8 @@ telemetry:
   serviceName: meltica-gateway
   otlpInsecure: true
   enableMetrics: true
+  # For Binance deployments you may prefer:
+  # serviceName: meltica-gateway-binance
 
 # lambdaManifest: inline lambda definitions that will be materialised at startup
 lambdaManifest:
@@ -933,3 +1017,263 @@ lambdaManifest:
       config:
         dry_run: true
       auto_start: false
+    - id: binance-logging-btc
+      provider_symbols:
+        binance-1:
+          symbols:
+            - BTC-USDT
+        binance-2:
+          symbols:
+            - BTC-USDT
+        binance-3:
+          symbols:
+            - ETH-USDT
+      strategy: logging
+      config:
+        dry_run: true
+      auto_start: true
+    - id: binance-mm-btc
+      provider_symbols:
+        binance:
+          symbols:
+            - BTC-USDT
+      strategy: marketmaking
+      config:
+        dry_run: true
+        spread_bps: 18
+        order_size: "0.02"
+        max_open_orders: 2
+      auto_start: false
+    - id: binance-cross-momentum-eth
+      provider_symbols:
+        binance:
+          symbols:
+            - ETH-USDT
+        binance-futures:
+          symbols:
+            - ETH-USDT
+      strategy: momentum
+      config:
+        dry_run: true
+        lookback_period: 20
+        momentum_threshold: 0.65
+        order_size: "3"
+        cooldown: "5s"
+      auto_start: false
+    - id: lambda-fake-btc
+      provider_symbols:
+        fake:
+          symbols:
+            - BTC-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-btc-logger
+      provider_symbols:
+        fake:
+          symbols:
+            - BTC-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-slow-eth
+      provider_symbols:
+        fake-slow:
+          symbols:
+            - ETH-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-eth-noop
+      provider_symbols:
+        fake:
+          symbols:
+            - ETH-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-xrp
+      provider_symbols:
+        fake:
+          symbols:
+            - XRP-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-xrp-noop
+      provider_symbols:
+        fake:
+          symbols:
+            - XRP-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-sol-1
+      provider_symbols:
+        fake:
+          symbols:
+            - SOL-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-sol-2
+      provider_symbols:
+        fake:
+          symbols:
+            - SOL-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-sol-3
+      provider_symbols:
+        fake:
+          symbols:
+            - SOL-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-sol-4
+      provider_symbols:
+        fake:
+          symbols:
+            - SOL-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-sol-logger
+      provider_symbols:
+        fake:
+          symbols:
+            - SOL-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-ada
+      provider_symbols:
+        fake:
+          symbols:
+            - ADA-USDT
+      strategy: delay
+      config:
+        dry_run: true
+        min_delay: "250ms"
+        max_delay: "750ms"
+      auto_start: true
+    - id: lambda-fake-ada-logger
+      provider_symbols:
+        fake:
+          symbols:
+            - ADA-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-doge
+      provider_symbols:
+        fake:
+          symbols:
+            - DOGE-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-doge-logger
+      provider_symbols:
+        fake:
+          symbols:
+            - DOGE-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-bnb
+      provider_symbols:
+        fake:
+          symbols:
+            - BNB-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-bnb-noop
+      provider_symbols:
+        fake:
+          symbols:
+            - BNB-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-ltc
+      provider_symbols:
+        fake:
+          symbols:
+            - LTC-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-ltc-logger
+      provider_symbols:
+        fake:
+          symbols:
+            - LTC-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-dot
+      provider_symbols:
+        fake:
+          symbols:
+            - DOT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-dot-noop
+      provider_symbols:
+        fake:
+          symbols:
+            - DOT-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-avax
+      provider_symbols:
+        fake:
+          symbols:
+            - AVAX-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
+    - id: lambda-fake-avax-logger
+      provider_symbols:
+        fake:
+          symbols:
+            - AVAX-USDT
+      strategy: delay
+      config:
+        dry_run: true
+      auto_start: true
