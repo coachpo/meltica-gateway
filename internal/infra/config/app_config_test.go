@@ -17,7 +17,7 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 }
 
-func TestLoadDuplicateProviderAlias(t *testing.T) {
+func TestLoadDuplicateProviderName(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "app.yaml")
 	yaml := `
@@ -32,10 +32,10 @@ providers:
 
 	_, err := Load(context.Background(), path)
 	if err == nil {
-		t.Fatalf("expected error when duplicate provider aliases supplied")
+		t.Fatalf("expected error when duplicate provider names supplied")
 	}
-	if !strings.Contains(err.Error(), `duplicate provider alias "binanceSpot"`) {
-		t.Fatalf("expected duplicate alias error, got %v", err)
+	if !strings.Contains(err.Error(), `duplicate provider name "binanceSpot"`) {
+		t.Fatalf("expected duplicate provider name error, got %v", err)
 	}
 }
 

@@ -20,43 +20,43 @@ func BuildProviderSpecs(providers map[Provider]map[string]any) ([]ProviderSpec, 
 
 	specs := make([]ProviderSpec, 0, len(providers))
 	for key, data := range providers {
-		alias := strings.TrimSpace(string(key))
-		if alias == "" {
-			return nil, fmt.Errorf("provider alias required")
+		name := strings.TrimSpace(string(key))
+		if name == "" {
+			return nil, fmt.Errorf("provider name required")
 		}
 		if data == nil {
-			return nil, fmt.Errorf("provider %q configuration required", alias)
+			return nil, fmt.Errorf("provider %q configuration required", name)
 		}
 
 		rawExchange, ok := data["exchange"]
 		if !ok {
-			return nil, fmt.Errorf("provider %q missing exchange block", alias)
+			return nil, fmt.Errorf("provider %q missing exchange block", name)
 		}
 
 		exchangeConfig, ok := rawExchange.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("provider %q exchange block must be a map", alias)
+			return nil, fmt.Errorf("provider %q exchange block must be a map", name)
 		}
 
 		rawIdentifier, ok := exchangeConfig["identifier"]
 		if !ok {
-			return nil, fmt.Errorf("provider %q exchange.identifier required", alias)
+			return nil, fmt.Errorf("provider %q exchange.identifier required", name)
 		}
 		identifierStr, ok := rawIdentifier.(string)
 		if !ok || strings.TrimSpace(identifierStr) == "" {
-			return nil, fmt.Errorf("provider %q exchange.identifier must be non-empty string", alias)
+			return nil, fmt.Errorf("provider %q exchange.identifier must be non-empty string", name)
 		}
 
-		canonical := normalizeExchangeName(identifierStr)
+		canonical := normalizeExchangeIdentifier(identifierStr)
 
 		config := make(map[string]any, len(exchangeConfig)+1)
 		for k, v := range exchangeConfig {
 			config[k] = v
 		}
-		config["provider_name"] = alias
+		config["provider_name"] = name
 
 		specs = append(specs, ProviderSpec{
-			Name:     alias,
+			Name:     name,
 			Exchange: canonical,
 			Config:   config,
 		})

@@ -199,15 +199,15 @@ func Load(ctx context.Context, configPath string) (AppConfig, error) {
 func (c *AppConfig) normalise() error {
 	normalised := make(map[Provider]map[string]any, len(c.Providers))
 	for key, value := range c.Providers {
-		normalizedKey := Provider(normalizeProviderAlias(string(key)))
+		normalizedKey := Provider(normalizeProviderName(string(key)))
 		if _, exists := normalised[normalizedKey]; exists {
-			return fmt.Errorf("duplicate provider alias %q", normalizedKey)
+			return fmt.Errorf("duplicate provider name %q", normalizedKey)
 		}
 		normalised[normalizedKey] = value
 	}
 	c.Providers = normalised
 
-	c.Environment = Environment(normalizeExchangeName(string(c.Environment)))
+	c.Environment = Environment(strings.ToLower(strings.TrimSpace(string(c.Environment))))
 	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
 	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
 	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
