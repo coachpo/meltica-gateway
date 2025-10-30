@@ -327,7 +327,7 @@ func (p *Provider) httpClient() *http.Client {
 			Transport:     nil,
 			CheckRedirect: nil,
 			Jar:           nil,
-			Timeout:       p.opts.HTTPTimeout,
+			Timeout:       p.opts.httpTimeoutDuration(),
 		}
 		p.client = client
 	}
@@ -335,7 +335,7 @@ func (p *Provider) httpClient() *http.Client {
 }
 
 func (p *Provider) refreshInstruments(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
+	ctx, cancel := context.WithTimeout(ctx, p.opts.httpTimeoutDuration())
 	defer cancel()
 	list, metas, err := p.fetchExchangeInfo(ctx)
 	if err != nil {
@@ -357,7 +357,7 @@ func (p *Provider) refreshInstruments(ctx context.Context) error {
 }
 
 func (p *Provider) instrumentRefreshLoop() {
-	ticker := time.NewTicker(p.opts.InstrumentRefreshInterval)
+	ticker := time.NewTicker(p.opts.instrumentRefreshDuration())
 	defer ticker.Stop()
 	for {
 		select {
@@ -597,7 +597,7 @@ func (p *Provider) stopAllStreams() {
 }
 
 func (p *Provider) initStreamManagers(ctx context.Context) error {
-	baseURL := strings.TrimSuffix(p.opts.WebsocketBaseURL, "/") + "/ws"
+	baseURL := strings.TrimSuffix(p.opts.websocketURL(), "/") + "/ws"
 
 	// Trade stream handler
 	tradeHandler := func(data []byte) error {
@@ -783,7 +783,7 @@ func (p *Provider) runUserDataStream(ctx context.Context) {
 }
 
 func (p *Provider) consumeUserDataStream(ctx context.Context, listenKey string) error {
-	base := strings.TrimSuffix(p.opts.WebsocketBaseURL, "/")
+	base := strings.TrimSuffix(p.opts.websocketURL(), "/")
 	url := base + "/" + strings.TrimSpace(listenKey)
 	conn, _, err := websocket.Dial(ctx, url, nil)
 	if err != nil {
@@ -794,7 +794,7 @@ func (p *Provider) consumeUserDataStream(ctx context.Context, listenKey string) 
 	}()
 	keepCtx, keepCancel := context.WithCancel(ctx)
 	defer keepCancel()
-	interval := p.opts.UserStreamKeepAlive
+	interval := p.opts.userStreamKeepAliveDuration()
 	if interval <= 0 {
 		interval = 15 * time.Minute
 	}
@@ -1234,15 +1234,18 @@ func (p *Provider) submitOrder(ctx context.Context, meta symbolMeta, req schema.
 		params.Set("newClientOrderId", req.ClientOrderID)
 	}
 	params.Set("newOrderRespType", "FULL")
-	if p.opts.RecvWindow > 0 {
-		params.Set("recvWindow", strconv.FormatInt(p.opts.RecvWindow.Milliseconds(), 10))
+	if p.opts.recvWindowDuration() > 0 {
+		params.Set("recvWindow", strconv.FormatInt(p.opts.recvWindowDuration().Milliseconds(), 10))
 	}
 	params.Set("timestamp", strconv.FormatInt(p.clock().UTC().UnixMilli(), 10))
 	basePayload := params.Encode()
 	signature := signPayload(basePayload, p.opts.APISecret)
 	params.Set("signature", signature)
 	body := params.Encode()
-	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/order"
+	endpoint := p.opts.orderEndpoint()
+	if strings.TrimSpace(endpoint) == "" {
+		return errors.New("binance: order endpoint not configured")
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create order request: %w", err)
@@ -1279,8 +1282,15 @@ func (p *Provider) publishOrderAcknowledgement(meta symbolMeta, req schema.Order
 	quantity := defaultIfEmpty(strings.TrimSpace(order.OrigQty), strings.TrimSpace(fallbackQty))
 	filled := strings.TrimSpace(order.ExecutedQty)
 	remaining := calculateRemaining(order.OrigQty, order.ExecutedQty)
-	avgPrice := calculateAveragePrice(order.CummulativeQuoteQty, order.ExecutedQty)
+	avgPrice := strings.TrimSpace(order.AvgPrice)
+	if avgPrice == "" {
+		cumQuote := defaultIfEmpty(strings.TrimSpace(order.CummulativeQuoteQty), strings.TrimSpace(order.CumQuote))
+		avgPrice = calculateAveragePrice(cumQuote, order.ExecutedQty)
+	}
 	timestamp := resolveTimestamp(order.TransactTime, p.clock)
+	if timestamp.IsZero() && order.UpdateTime > 0 {
+		timestamp = resolveTimestamp(order.UpdateTime, p.clock)
+	}
 	clientOrderID := strings.TrimSpace(req.ClientOrderID)
 	if clientOrderID == "" {
 		clientOrderID = strings.TrimSpace(order.ClientOrderID)
@@ -1519,10 +1529,13 @@ type orderResponse struct {
 	OrderID             int64  `json:"orderId"`
 	ClientOrderID       string `json:"clientOrderId"`
 	TransactTime        int64  `json:"transactTime"`
+	UpdateTime          int64  `json:"updateTime"`
 	Price               string `json:"price"`
 	OrigQty             string `json:"origQty"`
 	ExecutedQty         string `json:"executedQty"`
 	CummulativeQuoteQty string `json:"cummulativeQuoteQty"`
+	CumQuote            string `json:"cumQuote"`
+	AvgPrice            string `json:"avgPrice"`
 	Status              string `json:"status"`
 	TimeInForce         string `json:"timeInForce"`
 	Type                string `json:"type"`

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	json "github.com/goccy/go-json"
+	"github.com/shopspring/decimal"
 
 	"github.com/coachpo/meltica/internal/schema"
 )
@@ -24,6 +25,8 @@ type exchangeInfoSymbol struct {
 	Status                 string               `json:"status"`
 	BaseAsset              string               `json:"baseAsset"`
 	QuoteAsset             string               `json:"quoteAsset"`
+	ContractSize           string               `json:"contractSize"`
+	ContractType           string               `json:"contractType"`
 	BaseAssetPrecision     int                  `json:"baseAssetPrecision"`
 	QuoteAssetPrecision    int                  `json:"quotePrecision"`
 	QuoteAssetPrecisionAlt int                  `json:"quoteAssetPrecision"`
@@ -67,8 +70,20 @@ type accountBalance struct {
 	Locked string `json:"locked"`
 }
 
+type futuresBalanceEntry struct {
+	Asset              string `json:"asset"`
+	Balance            string `json:"balance"`
+	WalletBalance      string `json:"walletBalance"`
+	CrossWalletBalance string `json:"crossWalletBalance"`
+	AvailableBalance   string `json:"availableBalance"`
+	WithdrawAvailable  string `json:"withdrawAvailable"`
+}
+
 func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, map[string]symbolMeta, error) {
-	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/exchangeInfo"
+	endpoint := p.opts.exchangeInfoEndpoint()
+	if strings.TrimSpace(endpoint) == "" {
+		return nil, nil, errors.New("binance: exchange info endpoint not configured")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create exchangeInfo request: %w", err)
@@ -101,6 +116,12 @@ func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, 
 	metas := make(map[string]symbolMeta, len(payload.Symbols))
 
 	for _, sym := range payload.Symbols {
+		if p.opts.isFuturesMarket() {
+			contract := strings.ToUpper(strings.TrimSpace(sym.ContractType))
+			if contract != "" && contract != "PERPETUAL" {
+				continue
+			}
+		}
 		if !strings.EqualFold(sym.Status, "TRADING") {
 			continue
 		}
@@ -128,15 +149,25 @@ func (p *Provider) fetchExchangeInfo(ctx context.Context) ([]schema.Instrument, 
 
 func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, symbolMeta, error) {
 	canonical := canonicalFromAssets(sym.BaseAsset, sym.QuoteAsset)
+	instType := schema.InstrumentTypeSpot
+	if p.opts.isFuturesMarket() {
+		instType = schema.InstrumentTypePerp
+	}
+	contractCurrency := ""
+	if p.opts.isFuturesUSDM() {
+		contractCurrency = strings.ToUpper(strings.TrimSpace(sym.QuoteAsset))
+	} else if p.opts.isFuturesCoinM() {
+		contractCurrency = strings.ToUpper(strings.TrimSpace(sym.BaseAsset))
+	}
 	inst := schema.Instrument{
 		Symbol:            canonical,
-		Type:              schema.InstrumentTypeSpot,
+		Type:              instType,
 		BaseCurrency:      strings.ToUpper(strings.TrimSpace(sym.BaseAsset)),
 		QuoteCurrency:     strings.ToUpper(strings.TrimSpace(sym.QuoteAsset)),
 		Venue:             p.opts.Venue,
 		Expiry:            "",
 		ContractValue:     nil,
-		ContractCurrency:  "",
+		ContractCurrency:  contractCurrency,
 		Strike:            nil,
 		OptionType:        "",
 		PriceIncrement:    "",
@@ -183,6 +214,12 @@ func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, s
 		}
 	}
 
+	if value := strings.TrimSpace(sym.ContractSize); value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil && parsed > 0 {
+			inst.ContractValue = &parsed
+		}
+	}
+
 	meta := symbolMeta{
 		canonical: canonical,
 		rest:      strings.ToUpper(strings.TrimSpace(sym.Symbol)),
@@ -196,8 +233,12 @@ func (p *Provider) fetchDepthSnapshot(ctx context.Context, symbol string) (depth
 	params := url.Values{}
 	params.Set("symbol", symbol)
 	params.Set("limit", fmt.Sprintf("%d", p.opts.SnapshotDepth))
-	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/depth?" + params.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	endpoint := p.opts.depthEndpoint()
+	if strings.TrimSpace(endpoint) == "" {
+		return depthSnapshotResponse{}, errors.New("binance: depth endpoint not configured")
+	}
+	fullEndpoint := endpoint + "?" + params.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullEndpoint, nil)
 	if err != nil {
 		return depthSnapshotResponse{}, fmt.Errorf("create depth request: %w", err)
 	}
@@ -224,9 +265,12 @@ func (p *Provider) createListenKey(ctx context.Context) (string, error) {
 	if !p.hasTradingCredentials() {
 		return "", errors.New("binance: missing api credentials for listen key")
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
+	reqCtx, cancel := context.WithTimeout(ctx, p.opts.httpTimeoutDuration())
 	defer cancel()
-	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/userDataStream"
+	endpoint := p.opts.listenKeyEndpoint()
+	if strings.TrimSpace(endpoint) == "" {
+		return "", errors.New("binance: listen key endpoint not configured")
+	}
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, nil)
 	if err != nil {
 		return "", fmt.Errorf("create listen key request: %w", err)
@@ -258,12 +302,16 @@ func (p *Provider) keepAliveListenKey(ctx context.Context, listenKey string) err
 	if strings.TrimSpace(listenKey) == "" {
 		return errors.New("binance: empty listen key for keepalive")
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
+	reqCtx, cancel := context.WithTimeout(ctx, p.opts.httpTimeoutDuration())
 	defer cancel()
 	params := url.Values{}
 	params.Set("listenKey", strings.TrimSpace(listenKey))
-	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/userDataStream?" + params.Encode()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPut, endpoint, nil)
+	endpoint := p.opts.listenKeyEndpoint()
+	if strings.TrimSpace(endpoint) == "" {
+		return errors.New("binance: listen key endpoint not configured")
+	}
+	fullEndpoint := endpoint + "?" + params.Encode()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPut, fullEndpoint, nil)
 	if err != nil {
 		return fmt.Errorf("create keepalive request: %w", err)
 	}
@@ -286,11 +334,15 @@ func (p *Provider) fetchAccountBalances(ctx context.Context) ([]accountBalance, 
 	if !p.hasTradingCredentials() {
 		return nil, errors.New("binance: missing api credentials for account balances")
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, p.opts.HTTPTimeout)
+	if p.opts.isFuturesMarket() {
+		return p.fetchFuturesAccountBalances(ctx)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, p.opts.httpTimeoutDuration())
 	defer cancel()
 	params := url.Values{}
-	if p.opts.RecvWindow > 0 {
-		params.Set("recvWindow", strconv.FormatInt(p.opts.RecvWindow.Milliseconds(), 10))
+	if p.opts.recvWindowDuration() > 0 {
+		params.Set("recvWindow", strconv.FormatInt(p.opts.recvWindowDuration().Milliseconds(), 10))
 	}
 	params.Set("timestamp", strconv.FormatInt(p.clock().UTC().UnixMilli(), 10))
 	query := params.Encode()
@@ -299,8 +351,11 @@ func (p *Provider) fetchAccountBalances(ctx context.Context) ([]accountBalance, 
 		query += "&"
 	}
 	query += "signature=" + signature
-	endpoint := strings.TrimSuffix(p.opts.APIBaseURL, "/") + "/api/v3/account?" + query
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	endpoint := p.opts.accountInfoEndpoint()
+	if strings.TrimSpace(endpoint) == "" {
+		return nil, errors.New("binance: account endpoint not configured")
+	}
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint+"?"+query, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create account request: %w", err)
 	}
@@ -322,6 +377,89 @@ func (p *Provider) fetchAccountBalances(ctx context.Context) ([]accountBalance, 
 		return nil, fmt.Errorf("decode account: %w", err)
 	}
 	return payload.Balances, nil
+}
+
+func (p *Provider) fetchFuturesAccountBalances(ctx context.Context) ([]accountBalance, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, p.opts.httpTimeoutDuration())
+	defer cancel()
+	params := url.Values{}
+	if p.opts.recvWindowDuration() > 0 {
+		params.Set("recvWindow", strconv.FormatInt(p.opts.recvWindowDuration().Milliseconds(), 10))
+	}
+	params.Set("timestamp", strconv.FormatInt(p.clock().UTC().UnixMilli(), 10))
+	query := params.Encode()
+	signature := signPayload(query, p.opts.APISecret)
+	if query != "" {
+		query += "&"
+	}
+	query += "signature=" + signature
+	endpoint := p.opts.accountInfoEndpoint()
+	if strings.TrimSpace(endpoint) == "" {
+		return nil, errors.New("binance: futures account endpoint not configured")
+	}
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint+"?"+query, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create futures account request: %w", err)
+	}
+	req.Header.Set("X-MBX-APIKEY", p.opts.APIKey)
+	resp, err := p.httpClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request futures account: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return nil, fmt.Errorf("futures account status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload []futuresBalanceEntry
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode futures account: %w", err)
+	}
+	out := make([]accountBalance, 0, len(payload))
+	for _, entry := range payload {
+		asset := strings.ToUpper(strings.TrimSpace(entry.Asset))
+		if asset == "" {
+			continue
+		}
+		total := firstNonEmpty(entry.WalletBalance, entry.Balance, entry.CrossWalletBalance)
+		free := firstNonEmpty(entry.AvailableBalance, entry.WithdrawAvailable)
+		if free == "" {
+			free = total
+		}
+		total = strings.TrimSpace(total)
+		free = strings.TrimSpace(free)
+		if total == "" && free == "" {
+			continue
+		}
+		locked := ""
+		totalDec, totalErr := decimal.NewFromString(total)
+		freeDec, freeErr := decimal.NewFromString(free)
+		if totalErr == nil && freeErr == nil {
+			lockedDec := totalDec.Sub(freeDec)
+			if lockedDec.Sign() < 0 {
+				lockedDec = decimal.Zero
+			}
+			locked = lockedDec.String()
+		}
+		out = append(out, accountBalance{
+			Asset:  asset,
+			Free:   free,
+			Locked: locked,
+		})
+	}
+	return out, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func ptr[T any](v T) *T {

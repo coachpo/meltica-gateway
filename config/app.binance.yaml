@@ -11,6 +11,11 @@ providers:
       name: binance
       venue: futures
       enabled: true
+  binance-futures-coin:
+    exchange:
+      name: binance
+      venue: coin
+      enabled: true
 
 eventbus:
   bufferSize: 8192

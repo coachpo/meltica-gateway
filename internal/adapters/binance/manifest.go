@@ -19,39 +19,22 @@ func RegisterFactory(reg *provider.Registry) {
 		}
 
 		opts := Options{
-			Name:                      "",
-			Exchange:                  "",
-			Venue:                     "",
-			APIBaseURL:                "",
-			WebsocketBaseURL:          "",
-			Symbols:                   nil,
-			SnapshotDepth:             0,
-			InstrumentRefreshInterval: 0,
-			Pools:                     pools,
-			HTTPTimeout:               0,
-			APIKey:                    "",
-			APISecret:                 "",
-			RecvWindow:                0,
-			UserStreamKeepAlive:       0,
+			Name:          "",
+			Venue:         "",
+			Symbols:       nil,
+			SnapshotDepth: 0,
+			Pools:         pools,
+			APIKey:        "",
+			APISecret:     "",
 		}
 
 		if alias, ok := stringFromConfig(cfg, "provider_name"); ok {
 			opts.Name = alias
-		}
-		if raw, ok := stringFromConfig(cfg, "name"); ok {
-			opts.Exchange = raw
-		}
-		if strings.TrimSpace(opts.Name) == "" && strings.TrimSpace(opts.Exchange) != "" {
-			opts.Name = opts.Exchange
+		} else if raw, ok := stringFromConfig(cfg, "name"); ok {
+			opts.Name = raw
 		}
 		if raw, ok := stringFromConfig(cfg, "venue"); ok {
 			opts.Venue = strings.ToUpper(strings.TrimSpace(raw))
-		}
-		if raw, ok := stringFromConfig(cfg, "api_base_url"); ok {
-			opts.APIBaseURL = raw
-		}
-		if raw, ok := stringFromConfig(cfg, "websocket_url"); ok {
-			opts.WebsocketBaseURL = raw
 		}
 		if raw, ok := stringSliceFromConfig(cfg, "symbols"); ok {
 			opts.Symbols = raw
@@ -66,16 +49,16 @@ func RegisterFactory(reg *provider.Registry) {
 			opts.SnapshotDepth = depth
 		}
 		if timeout, ok := durationFromConfig(cfg, "http_timeout"); ok {
-			opts.HTTPTimeout = timeout
+			opts.httpTimeout = timeout
 		}
 		if refresh, ok := durationFromConfig(cfg, "instrument_refresh_interval"); ok {
-			opts.InstrumentRefreshInterval = refresh
+			opts.instrumentRefresh = refresh
 		}
 		if recvWindow, ok := durationFromConfig(cfg, "recv_window"); ok {
-			opts.RecvWindow = recvWindow
+			opts.recvWindow = recvWindow
 		}
 		if keepAlive, ok := durationFromConfig(cfg, "user_stream_keepalive"); ok {
-			opts.UserStreamKeepAlive = keepAlive
+			opts.userStreamKeepAlive = keepAlive
 		}
 
 		provider := NewProvider(opts)

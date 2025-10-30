@@ -13,6 +13,12 @@ providers:
       venue: futures
       enabled: true
       snapshot_depth: 100
+  binance-futures-coin:
+    exchange:
+      name: binance
+      venue: coin
+      enabled: true
+      snapshot_depth: 100
 
 eventbus:
   bufferSize: 8192
