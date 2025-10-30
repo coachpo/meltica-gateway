@@ -28,7 +28,7 @@ make test                   # Run all tests with race detector (-race -count=1 -
 make coverage               # Enforce ≥70% coverage threshold (TS-01 requirement)
 go tool cover -html=coverage.out  # View coverage report in browser
 make contract-ws-routing    # Run WebSocket routing contract tests
-go test ./internal/config -run TestLoad  # Run specific package tests
+go test ./internal/infra/config -run TestLoad  # Run specific package tests
 ```
 
 ### Quality & Benchmarks
@@ -40,21 +40,21 @@ make bench                  # Run benchmark tests
 
 ### Single Test Execution
 ```bash
-go test ./internal/dispatcher -run TestTable_Register -v
-go test ./internal/pool -bench BenchmarkPoolManager -benchmem
+go test ./internal/app/dispatcher -run TestTable_Register -v
+go test ./internal/infra/pool -bench BenchmarkPoolManager -benchmem
 ```
 
 ## Architecture Overview
 
 Meltica uses a four-layer pipeline architecture:
 
-1. **Providers (`internal/provider`, `internal/adapters`)**: Manage exchange connections and emit normalized events. Each adapter (e.g., `fake`, `binance`) implements the `Provider` interface. The registry allows multiple provider aliases to map to a single adapter implementation.
+1. **Providers (`internal/app/provider`, `internal/infra/adapters`)**: Manage exchange connections and emit normalized events. Each adapter (e.g., `fake`, `binance`) implements the `Provider` interface. The registry allows multiple provider aliases to map to a single adapter implementation.
 
-2. **Event Bus (`internal/bus/eventbus`)**: In-memory fan-out system that distributes events from providers to dispatcher routes and strategy instances. Configured via `eventbus.bufferSize` and `eventbus.fanoutWorkers` in `config/app.yaml`.
+2. **Event Bus (`internal/infra/bus/eventbus`)**: In-memory fan-out system that distributes events from providers to dispatcher routes and strategy instances. Configured via `eventbus.bufferSize` and `eventbus.fanoutWorkers` in `config/app.yaml`.
 
-3. **Dispatcher (`internal/dispatcher`)**: Maintains routing tables mapping `(provider, symbol, event_type)` tuples to downstream subscribers. The `Registrar` handles route registration from lambda instances.
+3. **Dispatcher (`internal/app/dispatcher`)**: Maintains routing tables mapping `(provider, symbol, event_type)` tuples to downstream subscribers. The `Registrar` handles route registration from lambda instances.
 
-4. **Lambda Runtime (`internal/lambda/runtime`)**: Manages strategy lifecycles declared in the manifest or created via REST API. Each lambda consumes events from the dispatcher and publishes order requests back to the bus.
+4. **Lambda Runtime (`internal/app/lambda/runtime`)**: Manages strategy lifecycles declared in the manifest or created via REST API. Each lambda consumes events from the dispatcher and publishes order requests back to the bus.
 
 ### Key Data Flow
 ```
@@ -64,7 +64,7 @@ Provider → Events → Bus → Dispatcher Table → Routes → Lambda Strategie
 ```
 
 ### Object Pooling System
-`internal/pool` manages pooled `schema.Event` and `schema.OrderRequest` objects to minimize allocation churn in hot paths. Pools are configured in `config/app.yaml` under the `pools` section:
+`internal/infra/pool` manages pooled `schema.Event` and `schema.OrderRequest` objects to minimize allocation churn in hot paths. Pools are configured in `config/app.yaml` under the `pools` section:
 - `eventSize`: Event pool capacity (e.g., 50000)
 - `orderRequestSize`: Order request pool capacity (e.g., 10000)
 
@@ -90,11 +90,11 @@ cp config/app.example.yaml config/app.yaml
 make run
 ```
 
-See `internal/config/README.md` for migration notes from the legacy fragmented configuration system.
+See `internal/infra/config/README.md` for migration notes from the legacy fragmented configuration system.
 
 ## Lambda Strategies
 
-Trading strategies live in `internal/lambda/strategies/` and implement the `TradingStrategy` interface with 8 event callbacks:
+Trading strategies live in `internal/app/lambda/strategies/` and implement the `TradingStrategy` interface with 8 event callbacks:
 - `OnTrade`, `OnTicker`, `OnBookSnapshot`, `OnBalanceUpdate`, `OnOrderPlaced`, `OnOrderFilled`, `OnOrderCancelled`, `OnOrderRejected`
 
 **Built-in Strategies:**
@@ -142,10 +142,10 @@ Use concise summaries in sentence case with imperative verbs:
 
 ## Observability & Telemetry
 
-- **Metrics & Traces**: Configured via `internal/telemetry` with OTLP exporters. See `TELEMETRY_POINTS.md` for enumeration of emitted metrics.
+- **Metrics & Traces**: Configured via `internal/infra/telemetry` with OTLP exporters. See `TELEMETRY_POINTS.md` for enumeration of emitted metrics.
 - **Grafana Dashboards**: Import from `docs/dashboards/` directory. See `docs/dashboards/README.md` for setup.
 - **Prometheus Setup**: Collector wiring instructions in `deployments/telemetry/PROMETHEUS_SETUP.md`.
-- **Semantic Conventions**: All telemetry follows conventions defined in `internal/telemetry/semconv.go`.
+- **Semantic Conventions**: All telemetry follows conventions defined in `internal/infra/telemetry/semconv.go`.
 
 ## Important Notes
 
@@ -157,7 +157,7 @@ Use concise summaries in sentence case with imperative verbs:
 ## Repository Layout
 
 - `cmd/gateway`: Main binary entrypoint; loads `config/app.yaml`, wires pools, bus, dispatcher, and HTTP server
-- `internal/`: Core implementation (adapters, config, dispatcher, event bus, pools, telemetry, schema)
+- `internal/`: Core implementation organised into `app/`, `domain/`, `infra/`, and `support/`
 - `config/`: Shipping configuration (`app.yaml`) and example (`app.example.yaml`)
 - `api/`: Public API contracts and future protobuf/OpenAPI definitions
 - `docs/`: Lambdas API reference, Grafana dashboards
@@ -172,4 +172,4 @@ For deeper architectural context and contribution guidelines, refer to:
 - `GEMINI.md`: AI agent context for navigating the codebase
 - `MIGRATION.md`: Adapter and performance migration notes for v2 pooling/networking stack
 - `internal/README.md`: Detailed breakdown of internal package structure
-- `internal/lambda/strategies/README.md`: Strategy implementation guide with algorithm details
+- `internal/app/lambda/strategies/README.md`: Strategy implementation guide with algorithm details

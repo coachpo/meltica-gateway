@@ -13,24 +13,24 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
 
 ## Key Features
 
-- Pooled `schema.Event`/`schema.OrderRequest` types managed by `internal/pool` to cap allocation churn.
-- In-memory fan-out bus (`internal/bus/eventbus`) feeding dispatcher routes and strategy instances.
+- Pooled `schema.Event`/`schema.OrderRequest` types managed by `internal/infra/pool` to cap allocation churn.
+- In-memory fan-out bus (`internal/infra/bus/eventbus`) feeding dispatcher routes and strategy instances.
 - Lambda runtime with a REST control plane (`docs/lambdas-api.md`) for creating, updating, and removing strategies on the fly.
-- OTLP-ready telemetry provider (`internal/telemetry`) plus curated Grafana dashboards under `docs/dashboards/` and metric definitions in `TELEMETRY_POINTS.md`.
+- OTLP-ready telemetry provider (`internal/infra/telemetry`) plus curated Grafana dashboards under `docs/dashboards/` and metric definitions in `TELEMETRY_POINTS.md`.
 - Configuration-driven provider registry, making it easy to alias multiple venues to a single adapter implementation.
 
 ## Architecture Overview
 
 1. `cmd/gateway` is the entrypoint. It loads `config/app.yaml`, wires pools, the event bus, the dispatcher table, and HTTP control server, then blocks on OS signals.
-2. `internal/provider` hosts the registry/manager that instantiates adapters registered via `internal/adapters`. `internal/adapters/fake` is built-in; additional adapters register through the same hook.
-3. `internal/dispatcher` maintains routing tables that map provider events into downstream fan-outs and strategy queues.
-4. `internal/lambda/runtime` spins strategies declared in the manifest or via the REST API, consuming events from the dispatcher and publishing responses back onto the bus.
-5. `internal/telemetry` configures OpenTelemetry exporters and propagates tracing/metrics context through the pipeline.
+2. `internal/app/provider` hosts the registry/manager that instantiates adapters registered via `internal/infra/adapters`. The `fake` adapter ships with the repo; additional adapters register through the same hook.
+3. `internal/app/dispatcher` maintains routing tables that map provider events into downstream fan-outs and strategy queues.
+4. `internal/app/lambda/runtime` spins strategies declared in the manifest or via the REST API, consuming events from the dispatcher and publishing responses back onto the bus.
+5. `internal/infra/telemetry` configures OpenTelemetry exporters and propagates tracing/metrics context through the pipeline.
 
 ## Repository Layout
 
 - `cmd/gateway`: Main binary; exposes `-config` to point at any `app.yaml`.
-- `internal/`: Core implementation packages (adapters, config loader, dispatcher, event bus, pools, telemetry, schema helpers, etc.).
+- `internal/`: Core implementation packages organised into `app/`, `domain/`, `infra/`, and `support/`.
 - `api/`: Holds public API contracts and future protobuf/OpenAPI material.
 - `config/`: Shipping configuration (`app.yaml`) plus `app.example.yaml` for local overrides.
 - `deployments/`: IaC and telemetry deployment notes (`deployments/telemetry/PROMETHEUS_SETUP.md`).

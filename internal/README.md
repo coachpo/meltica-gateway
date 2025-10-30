@@ -9,43 +9,26 @@ This prevents external projects from depending on internal implementation detail
 
 ## Structure
 
-### Core Components
+- **`app/`** – Application runtime orchestration
+  - `dispatcher/` – Routing tables, registrar, and runtime fan-out
+  - `lambda/` – Lambda base types, runtime manager, and built-in strategies
+  - `provider/` – Registry, manager, and provider contracts
+  - `risk/` – Runtime risk-limit enforcement
 
-- **`adapters/`** - Provider implementations for market data sources
-  - `binance/` - Binance exchange adapter
-  - `fake/` - Synthetic data generator for testing
-  - `shared/` - Shared utilities for adapters
+- **`domain/`** – Core canonical types and shared error envelopes
+  - `schema/` – Canonical event structures, payloads, and route metadata
+  - `errs/` – Structured error codes and exchange error helpers
 
-- **`bus/`** - Message bus implementations
-  - `eventbus/` - Market data event distribution
-  - `controlbus/` - Control plane message routing
+- **`infra/`** – Infrastructure and platform integrations
+  - `adapters/` – Built-in exchange adapters plus shared utilities
+  - `bus/` – In-memory event bus implementation
+  - `config/` – Typed configuration loader and helpers
+  - `pool/` – Object pool manager and helpers
+  - `server/` – HTTP control-plane surface
+  - `telemetry/` – OpenTelemetry wiring and semantic conventions
 
-- **`consumer/`** - Event consumers and lambda processors
-  - Various lambda implementations for different event types
-
-- **`dispatcher/`** - Event routing and dispatch logic
-  - Route table management
-  - Stream ordering
-  - Control plane handlers
-
-- **`schema/`** - Canonical event definitions and schemas
-  - Event types and payloads
-  - Control message definitions
-  - Provider interfaces
-
-- **`pool/`** - Object pooling for high-frequency allocations
-  - Event pooling
-  - Resource management
-
-- **`config/`** - Configuration loading and management
-  - Streaming configuration
-  - Runtime configuration
-
-- **`telemetry/`** - OpenTelemetry instrumentation
-  - Tracing setup
-  - Metrics collection
-
-- **`errs/`** - Structured error handling utilities
+- **`support/`** – Tooling and offline utilities
+  - `backtest/` – Historical backtesting engine and fixtures
 
 ## Design Principles
 
@@ -57,6 +40,6 @@ This prevents external projects from depending on internal implementation detail
 
 ## Import Guidelines
 
-- Prefer interfaces from `/internal/schema` for cross-package communication
+- Prefer interfaces from `/internal/domain/schema` for cross-package communication
 - Avoid circular dependencies
 - Keep package APIs minimal and focused

@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/coachpo/meltica/internal/backtest"
-	"github.com/coachpo/meltica/internal/lambda"
-	"github.com/coachpo/meltica/internal/lambda/strategies"
-	"github.com/coachpo/meltica/internal/schema"
+	"github.com/coachpo/meltica/internal/app/lambda"
+	"github.com/coachpo/meltica/internal/app/lambda/strategies"
+	"github.com/coachpo/meltica/internal/domain/schema"
+	"github.com/coachpo/meltica/internal/support/backtest"
 )
 
 type orderStrategyAdapter struct {

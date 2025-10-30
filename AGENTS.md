@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Core exchange adapters, pools, and schedulers live under `internal/` (see `internal/provider`, `internal/pool`, `internal/telemetry`).
+- Core runtime code lives under `internal/`, split into `internal/app` (orchestration), `internal/domain` (canonical types), `internal/infra` (adapters, bus, config, pools, telemetry), and `internal/support` (backtesting utilities).
 - Public APIs and shared types live in `api/`, while CLI entrypoints and daemons reside in `cmd/` (notably `cmd/gateway`).
 - Reusable scripts sit in `scripts/`, deployment manifests in `deployments/`, and configuration defaults in `config/`. Documentation and dashboards live in `docs/` and `docs/dashboards/`.
 - Tests are split between `tests/architecture`, `tests/contract`, `test/`, and in-package `_test.go` files; fixtures should live beside the code inside `testdata/` directories.
