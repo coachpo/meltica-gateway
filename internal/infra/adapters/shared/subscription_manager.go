@@ -131,6 +131,26 @@ func (m *SubscriptionManager) Deactivate(ctx context.Context, route dispatcher.R
 	return nil
 }
 
+// Snapshot returns a copy of the currently active routes.
+func (m *SubscriptionManager) Snapshot() []dispatcher.Route {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.active) == 0 {
+		return nil
+	}
+	routes := make([]dispatcher.Route, 0, len(m.active))
+	for _, route := range m.active {
+		routes = append(routes, cloneDispatcherRoute(route))
+	}
+	sort.Slice(routes, func(i, j int) bool {
+		if routes[i].Provider == routes[j].Provider {
+			return routes[i].Type < routes[j].Type
+		}
+		return routes[i].Provider < routes[j].Provider
+	})
+	return routes
+}
+
 func sameNonFilterConfig(a, b dispatcher.Route) bool {
 	lhs := a
 	rhs := b
@@ -174,6 +194,22 @@ func makeRouteKey(route dispatcher.Route) routeKey {
 	provider := strings.ToLower(strings.TrimSpace(route.Provider))
 	typ := schema.NormalizeRouteType(route.Type)
 	return routeKey{provider: provider, typ: typ}
+}
+
+func cloneDispatcherRoute(route dispatcher.Route) dispatcher.Route {
+	cloned := route
+	if len(route.WSTopics) > 0 {
+		cloned.WSTopics = append([]string(nil), route.WSTopics...)
+	}
+	if len(route.RestFns) > 0 {
+		cloned.RestFns = append([]dispatcher.RestFn(nil), route.RestFns...)
+	}
+	if len(route.Filters) > 0 {
+		filters := make([]dispatcher.FilterRule, len(route.Filters))
+		copy(filters, route.Filters)
+		cloned.Filters = filters
+	}
+	return cloned
 }
 
 type fieldDelta struct {

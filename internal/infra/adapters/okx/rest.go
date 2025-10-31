@@ -135,7 +135,12 @@ func buildInstrument(record instrumentRecord, venue string) (schema.Instrument, 
 		OptionType:        "",
 		PriceIncrement:    strings.TrimSpace(record.TickSz),
 		QuantityIncrement: strings.TrimSpace(record.LotSz),
+		PricePrecision:    nil,
+		QuantityPrecision: nil,
+		NotionalPrecision: nil,
+		MinNotional:       "",
 		MinQuantity:       strings.TrimSpace(record.MinSz),
+		MaxQuantity:       "",
 	}
 
 	if pricePrec, ok := precisionFromStep(record.TickSz); ok {
@@ -219,13 +224,13 @@ func (p *Provider) fetchOrderBookSnapshot(ctx context.Context, instID string) (s
 	}
 	timestamp := parseMilliTimestamp(entry.TS)
 	snapshot := schema.BookSnapshotPayload{
-		Bids:       convertPriceLevels(entry.Bids),
-		Asks:       convertPriceLevels(entry.Asks),
-		Checksum:   strconv.Itoa(int(entry.Checksum)),
-		LastUpdate: timestamp,
+		Bids:          convertPriceLevels(entry.Bids),
+		Asks:          convertPriceLevels(entry.Asks),
+		Checksum:      strconv.Itoa(int(entry.Checksum)),
+		LastUpdate:    timestamp,
+		FirstUpdateID: seq,
+		FinalUpdateID: seq,
 	}
-	snapshot.FirstUpdateID = seq
-	snapshot.FinalUpdateID = seq
 	return snapshot, seq, nil
 }
 

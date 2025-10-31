@@ -2,6 +2,7 @@ import {
   Strategy,
   Provider,
   ProviderDetail,
+  ProviderRequest,
   AdapterMetadata,
   InstanceSummary,
   InstanceSpec,
@@ -49,6 +50,38 @@ class ApiClient {
 
   async getProvider(name: string): Promise<ProviderDetail> {
     return this.request(`/providers/${encodeURIComponent(name)}`);
+  }
+
+  async createProvider(payload: ProviderRequest): Promise<ProviderDetail> {
+    return this.request('/providers', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateProvider(name: string, payload: ProviderRequest): Promise<ProviderDetail> {
+    return this.request(`/providers/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteProvider(name: string): Promise<{ status: string; name: string }> {
+    return this.request(`/providers/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async startProvider(name: string): Promise<ProviderDetail> {
+    return this.request(`/providers/${encodeURIComponent(name)}/start`, {
+      method: 'POST',
+    });
+  }
+
+  async stopProvider(name: string): Promise<ProviderDetail> {
+    return this.request(`/providers/${encodeURIComponent(name)}/stop`, {
+      method: 'POST',
+    });
   }
 
   // Adapters

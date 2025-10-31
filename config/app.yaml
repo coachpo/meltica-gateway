@@ -4,7 +4,7 @@ environment: dev
 providers:
   # Real exchange wiring example; inject credentials via environment or config secrets.
   binance-spot:
-    exchange:
+    adapter:
       identifier: binance
       config:
         # api_key: "${BINANCE_API_KEY}"

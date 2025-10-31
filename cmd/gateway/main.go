@@ -72,7 +72,7 @@ func main() {
 	bus := newEventBus(appCfg.Eventbus, poolMgr)
 
 	table := dispatcher.NewTable()
-	providerManager, err := initProviders(ctx, logger, appCfg, poolMgr, table, bus, &lifecycle)
+	providerManager, err := initProviders(ctx, logger, appCfg, poolMgr, table, bus)
 	if err != nil {
 		logger.Fatalf("initialise providers: %v", err)
 	}
@@ -169,43 +169,25 @@ func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager) eventbus.Bu
 	})
 }
 
-func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppConfig, poolMgr *pool.PoolManager, table *dispatcher.Table, bus eventbus.Bus, lifecycle *conc.WaitGroup) (*provider.Manager, error) {
+func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppConfig, poolMgr *pool.PoolManager, table *dispatcher.Table, bus eventbus.Bus) (*provider.Manager, error) {
 	registry := provider.NewRegistry()
 	adapters.RegisterAll(registry)
 
-	manager := provider.NewManager(registry, poolMgr)
+	manager := provider.NewManager(registry, poolMgr, bus, table, logger)
+	manager.SetLifecycleContext(ctx)
 	specs, err := config.BuildProviderSpecs(appCfg.Providers)
 	if err != nil {
 		return nil, fmt.Errorf("build provider specs: %w", err)
 	}
-	providers, err := manager.Start(ctx, specs)
-	if err != nil {
+	if _, err := manager.Start(ctx, specs); err != nil {
 		return nil, fmt.Errorf("start providers: %w", err)
 	}
-	if len(providers) == 0 {
+	if len(manager.Providers()) == 0 {
 		return nil, fmt.Errorf("no providers started from configuration")
 	}
 
-	logger.Printf("providers started: %d", len(providers))
-	startProviderPipelines(ctx, logger, providers, table, bus, poolMgr, lifecycle)
+	logger.Printf("providers started: %d", len(manager.Providers()))
 	return manager, nil
-}
-
-func startProviderPipelines(ctx context.Context, logger *log.Logger, providers map[string]provider.Instance, table *dispatcher.Table, bus eventbus.Bus, poolMgr *pool.PoolManager, lifecycle *conc.WaitGroup) {
-	for name, inst := range providers {
-		providerName := name
-		providerInstance := inst
-
-		dispatcherRuntime := dispatcher.NewRuntime(bus, table, poolMgr)
-		dispatchErrs := dispatcherRuntime.Start(ctx, providerInstance.Events())
-
-		lifecycle.Go(func() {
-			logErrors(logger, fmt.Sprintf("dispatcher/%s", providerName), dispatchErrs)
-		})
-		lifecycle.Go(func() {
-			logErrors(logger, fmt.Sprintf("provider/%s", providerName), providerInstance.Errors())
-		})
-	}
 }
 
 func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
@@ -322,17 +304,6 @@ func performGracefulShutdown(ctx context.Context, logger *log.Logger, cfg gracef
 		shutdownStep("shutting down telemetry", telemetryShutdownTimeout, func(stepCtx context.Context) error {
 			return cfg.telemetry.Shutdown(stepCtx)
 		})
-	}
-}
-
-func logErrors(logger *log.Logger, stage string, errs <-chan error) {
-	if errs == nil {
-		return
-	}
-	for err := range errs {
-		if err != nil {
-			logger.Printf("%s: %v", stage, err)
-		}
 	}
 }
 

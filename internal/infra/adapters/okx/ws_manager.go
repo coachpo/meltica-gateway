@@ -348,7 +348,7 @@ func (sm *wsManager) waitForControlWindowLocked(ctx context.Context) error {
 		if wait > 0 {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return fmt.Errorf("control window wait canceled: %w", ctx.Err())
 			case <-time.After(wait):
 			}
 		}
@@ -415,7 +415,7 @@ func (sm *wsManager) pingLoop(ctx context.Context, conn *websocket.Conn) error {
 }
 
 func (sm *wsManager) writePing(ctx context.Context, conn *websocket.Conn) error {
-	pingPayload := wsRequest{Op: "ping"}
+	pingPayload := wsRequest{ID: "", Op: "ping", Args: nil}
 	data, err := json.Marshal(pingPayload)
 	if err != nil {
 		return fmt.Errorf("marshal ping: %w", err)
@@ -429,14 +429,17 @@ func (sm *wsManager) writePing(ctx context.Context, conn *websocket.Conn) error 
 }
 
 func (sm *wsManager) writePong(ctx context.Context, conn *websocket.Conn) error {
-	pongPayload := wsRequest{Op: "pong"}
+	pongPayload := wsRequest{ID: "", Op: "pong", Args: nil}
 	data, err := json.Marshal(pongPayload)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal pong: %w", err)
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, okxPingTimeout)
 	defer cancel()
-	return conn.Write(writeCtx, websocket.MessageText, data)
+	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
+		return fmt.Errorf("write pong: %w", err)
+	}
+	return nil
 }
 
 func (sm *wsManager) reportError(err error) {

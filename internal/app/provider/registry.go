@@ -58,14 +58,14 @@ func (r *Registry) RegisterWithMetadata(typ string, factory Factory, meta Adapte
 // Create creates a provider instance from the specification.
 func (r *Registry) Create(ctx context.Context, pools *pool.PoolManager, spec config.ProviderSpec) (Instance, error) {
 	r.mu.RLock()
-	factory, ok := r.factories[spec.Exchange]
+ factory, ok := r.factories[spec.Adapter]
 	r.mu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("provider exchange %q not registered", spec.Exchange)
+  return nil, fmt.Errorf("provider adapter %q not registered", spec.Adapter)
 	}
 	instance, err := factory(ctx, pools, spec.Config)
 	if err != nil {
-		return nil, fmt.Errorf("instantiate provider %s(%s): %w", spec.Name, spec.Exchange, err)
+  return nil, fmt.Errorf("instantiate provider %s(%s): %w", spec.Name, spec.Adapter, err)
 	}
 	return instance, nil
 }

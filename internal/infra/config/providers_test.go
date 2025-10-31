@@ -5,7 +5,7 @@ import "testing"
 func TestBuildProviderSpecs(t *testing.T) {
 	configs := map[Provider]map[string]any{
 		"binanceSpot": {
-			"exchange": map[string]any{
+			"adapter": map[string]any{
 				"identifier": "binance",
 				"config": map[string]any{
 					"rest_timeout": "5s",
@@ -13,7 +13,7 @@ func TestBuildProviderSpecs(t *testing.T) {
 			},
 		},
 		"COINBASE": {
-			"exchange": map[string]any{
+			"adapter": map[string]any{
 				"identifier": "Coinbase",
 				"config": map[string]any{
 					"ws_url": "wss://stream.exchange",
@@ -39,8 +39,8 @@ func TestBuildProviderSpecs(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected binanceSpot spec present")
 	}
-	if primary.Exchange != "binance" {
-		t.Fatalf("expected exchange binance, got %s", primary.Exchange)
+	if primary.Adapter != "binance" {
+		t.Fatalf("expected adapter binance, got %s", primary.Adapter)
 	}
 	nestedRaw, _ := primary.Config["config"]
 	nestedCfg, _ := nestedRaw.(map[string]any)
@@ -58,8 +58,8 @@ func TestBuildProviderSpecs(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected COINBASE spec present")
 	}
-	if secondary.Exchange != "coinbase" {
-		t.Fatalf("expected canonical exchange coinbase, got %s", secondary.Exchange)
+	if secondary.Adapter != "coinbase" {
+		t.Fatalf("expected canonical adapter coinbase, got %s", secondary.Adapter)
 	}
 }
 
@@ -70,34 +70,34 @@ func TestBuildProviderSpecsErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("missing exchange block", func(t *testing.T) {
+	t.Run("missing adapter block", func(t *testing.T) {
 		_, err := BuildProviderSpecs(map[Provider]map[string]any{
 			"binance": {},
 		})
 		if err == nil {
-			t.Fatal("expected error for missing exchange block")
+			t.Fatal("expected error for missing adapter block")
 		}
 	})
 
-	t.Run("invalid exchange map", func(t *testing.T) {
+	t.Run("invalid adapter map", func(t *testing.T) {
 		_, err := BuildProviderSpecs(map[Provider]map[string]any{
 			"binance": {
-				"exchange": "not-a-map",
+				"adapter": "not-a-map",
 			},
 		})
 		if err == nil {
-			t.Fatal("expected error for non-map exchange block")
+			t.Fatal("expected error for non-map adapter block")
 		}
 	})
 
-	t.Run("missing exchange identifier", func(t *testing.T) {
+	t.Run("missing adapter identifier", func(t *testing.T) {
 		_, err := BuildProviderSpecs(map[Provider]map[string]any{
 			"binance": {
-				"exchange": map[string]any{},
+				"adapter": map[string]any{},
 			},
 		})
 		if err == nil {
-			t.Fatal("expected error for missing exchange.identifier")
+			t.Fatal("expected error for missing adapter.identifier")
 		}
 	})
 }

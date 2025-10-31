@@ -46,7 +46,7 @@ func TestLoadFromYAML(t *testing.T) {
 environment: DEV
 providers:
   BinanceSpot:
-    exchange:
+    adapter:
       identifier: binance
       config:
         option: value
@@ -99,23 +99,23 @@ lambdaManifest:
 
 	ex, ok := cfg.Providers[Provider("binanceSpot")]
 	if !ok {
-		t.Fatalf("expected binance exchange config")
+		t.Fatalf("expected binance adapter config")
 	}
-	rawExchange := ex["exchange"]
-	exchangeCfg, ok := rawExchange.(map[string]any)
+	rawAdapter := ex["adapter"]
+	adapterCfg, ok := rawAdapter.(map[string]any)
 	if !ok {
-		t.Fatalf("expected exchange config map, got %T", rawExchange)
+		t.Fatalf("expected adapter config map, got %T", rawAdapter)
 	}
-	if id := exchangeCfg["identifier"]; id != "binance" {
+	if id := adapterCfg["identifier"]; id != "binance" {
 		t.Fatalf("expected identifier binance, got %v", id)
 	}
-	rawNested := exchangeCfg["config"]
+	rawNested := adapterCfg["config"]
 	nestedCfg, ok := rawNested.(map[string]any)
 	if !ok {
 		t.Fatalf("expected nested config map, got %T", rawNested)
 	}
 	if got := nestedCfg["option"]; got != "value" {
-		t.Fatalf("expected exchange option value, got %v", got)
+		t.Fatalf("expected adapter option value, got %v", got)
 	}
 
 	if cfg.Eventbus.BufferSize != 128 {
@@ -207,7 +207,7 @@ func loadConfigWithFanout(t *testing.T, fanoutLine string) AppConfig {
 environment: dev
 providers:
   binance-spot:
-    exchange:
+    adapter:
       identifier: binance
       config:
         option: value

@@ -46,10 +46,11 @@ func CloneAdapterSettings(settings []AdapterSetting) []AdapterSetting {
 // RuntimeMetadata summarizes a running provider instance.
 type RuntimeMetadata struct {
 	Name            string         `json:"name"`
-	Exchange        string         `json:"exchange"`
+	Adapter         string         `json:"adapter"`
 	Identifier      string         `json:"identifier"`
 	InstrumentCount int            `json:"instrumentCount"`
 	Settings        map[string]any `json:"settings,omitempty"`
+	Running         bool           `json:"running"`
 }
 
 // RuntimeDetail contains the detailed metadata for a provider instance.

@@ -68,25 +68,30 @@ type bookHandle struct {
 func NewProvider(opts Options) *Provider {
 	opts = withDefaults(opts)
 	p := &Provider{
-		name:        opts.Config.Name,
-		opts:        opts,
-		pools:       opts.Pools,
-		clock:       time.Now,
-		client:      nil,
-		events:      make(chan *schema.Event, 2048),
-		errs:        make(chan error, 32),
-		ctx:         nil,
-		cancel:      nil,
-		started:     atomic.Bool{},
-		publisher:   nil,
-		instruments: make(map[string]schema.Instrument),
-		metas:       make(map[string]symbolMeta),
-		instIDToSym: make(map[string]string),
-		ws:          nil,
-		tradeSubs:   make(map[string]struct{}),
-		tickerSubs:  make(map[string]struct{}),
-		bookSubs:    make(map[string]struct{}),
-		bookHandles: make(map[string]*bookHandle),
+		name:          opts.Config.Name,
+		opts:          opts,
+		pools:         opts.Pools,
+		clock:         time.Now,
+		client:        nil,
+		events:        make(chan *schema.Event, 2048),
+		errs:          make(chan error, 32),
+		ctx:           nil,
+		cancel:        nil,
+		started:       atomic.Bool{},
+		publisher:     nil,
+		instrumentsMu: sync.RWMutex{},
+		instruments:   make(map[string]schema.Instrument),
+		metas:         make(map[string]symbolMeta),
+		instIDToSym:   make(map[string]string),
+		wsMu:          sync.Mutex{},
+		ws:            nil,
+		tradeMu:       sync.Mutex{},
+		tradeSubs:     make(map[string]struct{}),
+		tickerMu:      sync.Mutex{},
+		tickerSubs:    make(map[string]struct{}),
+		bookMu:        sync.Mutex{},
+		bookSubs:      make(map[string]struct{}),
+		bookHandles:   make(map[string]*bookHandle),
 	}
 	if p.pools == nil {
 		log.Printf("okx/provider: Pools not injected; provider cannot start without shared PoolManager")
@@ -266,7 +271,10 @@ func (p *Provider) publishInstrumentUpdates() {
 func (p *Provider) httpClient() *http.Client {
 	if p.client == nil {
 		client := &http.Client{
-			Timeout: p.opts.httpTimeoutDuration(),
+			Transport:     nil,
+			CheckRedirect: nil,
+			Jar:           nil,
+			Timeout:       p.opts.httpTimeoutDuration(),
 		}
 		p.client = client
 	}
@@ -438,7 +446,11 @@ func (p *Provider) ensureOrderBookHandle(symbol string, meta symbolMeta) error {
 	p.bookMu.Lock()
 	handle, ok := p.bookHandles[symbol]
 	if !ok {
-		handle = &bookHandle{assembler: shared.NewOrderBookAssembler(p.opts.Config.SnapshotDepth)}
+		handle = &bookHandle{
+			assembler: shared.NewOrderBookAssembler(p.opts.Config.SnapshotDepth),
+			mu:        sync.Mutex{},
+			seeded:    false,
+		}
 		p.bookHandles[symbol] = handle
 	}
 	p.bookMu.Unlock()
@@ -450,11 +462,11 @@ func (p *Provider) ensureOrderBookHandle(symbol string, meta symbolMeta) error {
 	}
 	snapshot, seq, err := p.fetchOrderBookSnapshot(p.ctx, meta.instID)
 	if err != nil {
-		return err
+		return fmt.Errorf("fetch okx snapshot: %w", err)
 	}
 	payload, err := handle.assembler.ApplySnapshot(seq, snapshot)
 	if err != nil {
-		return err
+		return fmt.Errorf("apply okx snapshot: %w", err)
 	}
 	handle.seeded = true
 	p.publisher.PublishBookSnapshot(p.ctx, symbol, payload)
@@ -473,7 +485,7 @@ func (p *Provider) ensureWS() error {
 	}
 	manager := newWSManager(p.ctx, baseURL, p.handleWSMessage, p.errs)
 	if err := manager.start(); err != nil {
-		return err
+		return fmt.Errorf("start ws manager: %w", err)
 	}
 	p.ws = manager
 	return nil
@@ -568,13 +580,13 @@ func (p *Provider) handleBooks(envelope wsEnvelope) error {
 		ts := parseMilliTimestamp(evt.Timestamp)
 		if strings.EqualFold(strings.TrimSpace(evt.Action), "snapshot") {
 			snapshot := schema.BookSnapshotPayload{
-				Bids:       convertPriceLevels(evt.Bids),
-				Asks:       convertPriceLevels(evt.Asks),
-				Checksum:   strconv.Itoa(int(evt.Checksum)),
-				LastUpdate: ts,
+				Bids:          convertPriceLevels(evt.Bids),
+				Asks:          convertPriceLevels(evt.Asks),
+				Checksum:      strconv.Itoa(int(evt.Checksum)),
+				LastUpdate:    ts,
+				FirstUpdateID: seq,
+				FinalUpdateID: seq,
 			}
-			snapshot.FirstUpdateID = seq
-			snapshot.FinalUpdateID = seq
 			handle.mu.Lock()
 			payload, err := handle.assembler.ApplySnapshot(seq, snapshot)
 			handle.seeded = true

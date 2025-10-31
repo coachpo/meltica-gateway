@@ -20,10 +20,11 @@ export type ProviderSettings = Record<string, unknown>;
 
 export interface Provider {
   name: string;
-  exchange: string;
+  adapter: string;
   identifier: string;
   instrumentCount: number;
   settings: ProviderSettings;
+  running: boolean;
 }
 
 export interface Instrument {
@@ -52,6 +53,15 @@ export interface AdapterMetadata {
 export interface ProviderDetail extends Provider {
   instruments: Instrument[];
   adapter: AdapterMetadata;
+}
+
+export interface ProviderRequest {
+  name: string;
+  adapter: {
+    identifier: string;
+    config: Record<string, unknown>;
+  };
+  enabled?: boolean;
 }
 
 export interface InstanceSummary {

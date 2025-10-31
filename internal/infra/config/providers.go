@@ -7,9 +7,9 @@ import (
 
 // ProviderSpec describes a single provider instance and its configuration payload.
 type ProviderSpec struct {
-	Name     string
-	Exchange string
-	Config   map[string]any
+	Name    string
+	Adapter string
+	Config  map[string]any
 }
 
 // BuildProviderSpecs converts provider entries from the application configuration into provider specifications.
@@ -28,37 +28,37 @@ func BuildProviderSpecs(providers map[Provider]map[string]any) ([]ProviderSpec, 
 			return nil, fmt.Errorf("provider %q configuration required", name)
 		}
 
-		rawExchange, ok := data["exchange"]
+		rawAdapter, ok := data["adapter"]
 		if !ok {
-			return nil, fmt.Errorf("provider %q missing exchange block", name)
+			return nil, fmt.Errorf("provider %q missing adapter block", name)
 		}
 
-		exchangeConfig, ok := rawExchange.(map[string]any)
+		adapterConfig, ok := rawAdapter.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("provider %q exchange block must be a map", name)
+			return nil, fmt.Errorf("provider %q adapter block must be a map", name)
 		}
 
-		rawIdentifier, ok := exchangeConfig["identifier"]
+		rawIdentifier, ok := adapterConfig["identifier"]
 		if !ok {
-			return nil, fmt.Errorf("provider %q exchange.identifier required", name)
+			return nil, fmt.Errorf("provider %q adapter.identifier required", name)
 		}
 		identifierStr, ok := rawIdentifier.(string)
 		if !ok || strings.TrimSpace(identifierStr) == "" {
-			return nil, fmt.Errorf("provider %q exchange.identifier must be non-empty string", name)
+			return nil, fmt.Errorf("provider %q adapter.identifier must be non-empty string", name)
 		}
 
-		canonical := normalizeExchangeIdentifier(identifierStr)
+		canonical := normalizeAdapterIdentifier(identifierStr)
 
-		config := make(map[string]any, len(exchangeConfig)+1)
-		for k, v := range exchangeConfig {
+		config := make(map[string]any, len(adapterConfig)+1)
+		for k, v := range adapterConfig {
 			config[k] = v
 		}
 		config["provider_name"] = name
 
 		specs = append(specs, ProviderSpec{
-			Name:     name,
-			Exchange: canonical,
-			Config:   config,
+			Name:    name,
+			Adapter: canonical,
+			Config:  config,
 		})
 	}
 	return specs, nil

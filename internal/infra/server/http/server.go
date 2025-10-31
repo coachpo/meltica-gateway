@@ -42,6 +42,17 @@ type httpServer struct {
 	providers *provider.Manager
 }
 
+type providerPayload struct {
+	Name    string                 `json:"name"`
+	Adapter providerAdapterPayload `json:"adapter"`
+	Enabled *bool                  `json:"enabled,omitempty"`
+}
+
+type providerAdapterPayload struct {
+	Identifier string         `json:"identifier"`
+	Config     map[string]any `json:"config"`
+}
+
 // NewHandler creates an HTTP handler for lambda management operations.
 func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Handler {
 	server := &httpServer{manager: manager, providers: providers}
@@ -55,11 +66,10 @@ func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Hand
 	}))
 
 	mux.Handle(providersPath, server.methodHandlers(map[string]handlerFunc{
-		http.MethodGet: server.listProviders,
+		http.MethodGet:  server.listProviders,
+		http.MethodPost: server.createProvider,
 	}))
-	mux.Handle(providerDetailPrefix, server.methodHandlers(map[string]handlerFunc{
-		http.MethodGet: server.getProvider,
-	}))
+	mux.Handle(providerDetailPrefix, http.HandlerFunc(server.handleProvider))
 
 	mux.Handle(adaptersPath, server.methodHandlers(map[string]handlerFunc{
 		http.MethodGet: server.listAdapters,
@@ -133,8 +143,36 @@ func (s *httpServer) listProviders(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"providers": metadata})
 }
 
-func (s *httpServer) getProvider(w http.ResponseWriter, r *http.Request) {
-	name := strings.Trim(strings.TrimPrefix(r.URL.Path, providerDetailPrefix), "/")
+func (s *httpServer) createProvider(w http.ResponseWriter, r *http.Request) {
+	if s.providers == nil {
+		writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
+		return
+	}
+	limitRequestBody(w, r)
+	payload, err := decodeProviderPayload(r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	payload.Name = strings.TrimSpace(payload.Name)
+	if payload.Name == "" {
+		writeError(w, http.StatusBadRequest, "name required")
+		return
+	}
+	spec, enabled, err := buildProviderSpecFromPayload(payload)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	detail, err := s.providers.Create(r.Context(), spec, enabled)
+	if err != nil {
+		s.writeProviderError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, detail)
+}
+
+func (s *httpServer) writeProviderDetail(w http.ResponseWriter, name string) {
 	if name == "" {
 		writeError(w, http.StatusNotFound, "provider name required")
 		return
@@ -149,6 +187,106 @@ func (s *httpServer) getProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, meta)
+}
+
+func (s *httpServer) handleProvider(w http.ResponseWriter, r *http.Request) {
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, providerDetailPrefix), "/")
+	if rest == "" {
+		writeError(w, http.StatusNotFound, "provider name required")
+		return
+	}
+
+	name, action, hasAction := strings.Cut(rest, "/")
+	name = strings.TrimSpace(name)
+	if name == "" {
+		writeError(w, http.StatusNotFound, "provider name required")
+		return
+	}
+
+	if !hasAction {
+		s.handleProviderResource(w, r, name)
+		return
+	}
+
+	action = strings.TrimSpace(action)
+	s.handleProviderAction(w, r, name, action)
+}
+
+func (s *httpServer) handleProviderResource(w http.ResponseWriter, r *http.Request, name string) {
+	switch r.Method {
+	case http.MethodGet:
+		s.writeProviderDetail(w, name)
+	case http.MethodPut:
+		if s.providers == nil {
+			writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
+			return
+		}
+		limitRequestBody(w, r)
+		payload, err := decodeProviderPayload(r)
+		if err != nil {
+			writeDecodeError(w, err)
+			return
+		}
+		if strings.TrimSpace(payload.Name) == "" {
+			payload.Name = name
+		} else if !strings.EqualFold(strings.TrimSpace(payload.Name), name) {
+			writeError(w, http.StatusBadRequest, "provider name mismatch")
+			return
+		}
+		spec, enabled, err := buildProviderSpecFromPayload(payload)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		detail, err := s.providers.Update(r.Context(), spec, enabled)
+		if err != nil {
+			s.writeProviderError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, detail)
+	case http.MethodDelete:
+		if s.providers == nil {
+			writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
+			return
+		}
+		if err := s.providers.Remove(name); err != nil {
+			s.writeProviderError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "removed", "name": name})
+	default:
+		methodNotAllowed(w, http.MethodDelete, http.MethodGet, http.MethodPut)
+	}
+}
+
+func (s *httpServer) handleProviderAction(w http.ResponseWriter, r *http.Request, name, action string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if s.providers == nil {
+		writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
+		return
+	}
+
+	switch action {
+	case "start":
+		detail, err := s.providers.StartProvider(r.Context(), name)
+		if err != nil {
+			s.writeProviderError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, detail)
+	case "stop":
+		detail, err := s.providers.StopProvider(name)
+		if err != nil {
+			s.writeProviderError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, detail)
+	default:
+		writeError(w, http.StatusNotFound, "unsupported action")
+	}
 }
 
 func (s *httpServer) listAdapters(w http.ResponseWriter, _ *http.Request) {
@@ -326,6 +464,70 @@ func (s *httpServer) writeManagerError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}
+}
+
+func (s *httpServer) writeProviderError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, provider.ErrProviderExists):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, provider.ErrProviderNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, provider.ErrProviderRunning):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, provider.ErrProviderNotRunning):
+		writeError(w, http.StatusConflict, err.Error())
+	default:
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
+}
+
+func decodeProviderPayload(r *http.Request) (providerPayload, error) {
+	defer func() {
+		_ = r.Body.Close()
+	}()
+	var payload providerPayload
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		return payload, fmt.Errorf("decode payload: %w", err)
+	}
+	return payload, nil
+}
+
+func buildProviderSpecFromPayload(payload providerPayload) (config.ProviderSpec, bool, error) {
+	enabled := true
+	if payload.Enabled != nil {
+		enabled = *payload.Enabled
+	}
+
+	name := strings.TrimSpace(payload.Name)
+	if name == "" {
+		return config.ProviderSpec{}, false, fmt.Errorf("name required")
+	}
+
+	identifier := strings.TrimSpace(payload.Adapter.Identifier)
+	if identifier == "" {
+		return config.ProviderSpec{}, false, fmt.Errorf("adapter.identifier required")
+	}
+
+	adapterConfig := map[string]any{
+		"identifier": identifier,
+	}
+	if len(payload.Adapter.Config) > 0 {
+		adapterConfig["config"] = payload.Adapter.Config
+	}
+
+	specs, err := config.BuildProviderSpecs(map[config.Provider]map[string]any{
+		config.Provider(name): {
+			"adapter": adapterConfig,
+		},
+	})
+	if err != nil {
+		return config.ProviderSpec{}, false, fmt.Errorf("build provider spec: %w", err)
+	}
+	if len(specs) == 0 {
+		return config.ProviderSpec{}, false, fmt.Errorf("provider spec not generated")
+	}
+	return specs[0], enabled, nil
 }
 
 func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {

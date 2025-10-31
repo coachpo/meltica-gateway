@@ -20,7 +20,7 @@ const (
 	EnvProd Environment = "prod"
 )
 
-func normalizeExchangeIdentifier(name string) string {
+func normalizeAdapterIdentifier(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
