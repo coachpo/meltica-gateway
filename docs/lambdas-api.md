@@ -40,8 +40,8 @@ Lists all running providers with runtime metadata.
       "identifier": "binance",
       "instrumentCount": 342,
       "settings": {
-    "api_key": "${BINANCE_API_KEY}",
-    "api_secret": "${BINANCE_API_SECRET}",
+        "api_key": "${BINANCE_API_KEY}",
+        "api_secret": "${BINANCE_API_SECRET}",
         "snapshot_depth": 1000,
         "http_timeout": "10s",
         "instrument_refresh_interval": "30m",
@@ -93,17 +93,20 @@ Returns the detailed metadata, including the current instrument catalogue and un
 Instance resources are exposed under `/strategy-instances`.
 
 ### `GET /strategy-instances`
-Lists all known instances (running or stopped).
+Lists all known instances (running or stopped) using a flattened summary payload.
 
 ```json
 {
   "instances": [
     {
-      "id": "lambda-binance-btc",
-      "provider": "binance-spot",
-      "symbol": "BTC-USDT",
-      "strategy": "noop",
-      "config": {},
+      "id": "latency-probe-btc",
+      "strategyIdentifier": "logging",
+      "providers": [
+        "binance-spot"
+      ],
+      "aggregatedSymbols": [
+        "BTC-USDT"
+      ],
       "autoStart": true,
       "running": true
     }
@@ -111,17 +114,33 @@ Lists all known instances (running or stopped).
 }
 ```
 
+Each instance summary includes:
+
+- `strategyIdentifier` – name of the registered strategy.
+- `providers` – normalized list of providers derived from the scope mapping.
+- `aggregatedSymbols` – deduplicated union of symbols across all providers.
+- `autoStart` – whether the instance would start automatically when loaded from a manifest (runtime-created instances return `false`).
+- `running` – current execution state.
+
 ### `POST /strategy-instances`
 Creates and starts a new instance.
 
 Request body (minimum fields):
 ```json
 {
-  "id": "lambda-binance-eth",
-  "provider": "binance-spot",
-  "symbol": "ETH-USDT",
-  "strategy": "logging",
-  "config": { "logger_prefix": "[eth-strat] " }
+  "id": "latency-probe-eth",
+  "strategy": {
+    "identifier": "logging",
+    "config": {
+      "logger_prefix": "[LatencyProbe] ",
+      "dry_run": true
+    }
+  },
+  "scope": {
+    "binance-spot": {
+      "symbols": ["ETH-USDT"]
+    }
+  }
 }
 ```
 
@@ -129,14 +148,44 @@ Responses:
 - `201 Created` with the created instance snapshot on success.
 - `400 Bad Request` if validation fails or the provider/strategy is invalid/unavailable.
 
-Note: `autoStart` in the request is ignored by the server; runtime-created instances are started immediately and returned as a snapshot.
+Notes:
+- `scope` must supply at least one provider with at least one symbol; providers are inferred from this map.
+- Optional `auto_start` is ignored on create—instances are started immediately and returned as a snapshot with `autoStart: false`.
 
 ## Instance Item Endpoints
 
 All item endpoints operate on `/strategy-instances/{id}`.
 
 ### `GET /strategy-instances/{id}`
-Returns the instance snapshot, or `404` if not found.
+Returns the detailed instance snapshot, including strategy configuration and provider scope, or `404` if not found.
+
+```json
+{
+  "id": "latency-probe-btc",
+  "strategy": {
+    "identifier": "logging",
+    "config": {
+      "dry_run": true,
+      "logger_prefix": "[LatencyProbe] "
+    }
+  },
+  "providers": [
+    "binance-spot"
+  ],
+  "scope": {
+    "binance-spot": {
+      "symbols": [
+        "BTC-USDT"
+      ]
+    }
+  },
+  "aggregatedSymbols": [
+    "BTC-USDT"
+  ],
+  "autoStart": true,
+  "running": true
+}
+```
 
 ### `PUT /strategy-instances/{id}`
 Replaces the configuration and restarts the instance. Provider, symbol, and strategy are immutable and cannot be changed; only `config` can be updated.

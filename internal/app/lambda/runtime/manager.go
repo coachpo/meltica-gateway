@@ -582,7 +582,17 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	return nil
 }
 
-// InstanceSnapshot captures the current state of a lambda instance.
+// InstanceSummary provides a flattened overview of a lambda instance.
+type InstanceSummary struct {
+	ID                 string   `json:"id"`
+	StrategyIdentifier string   `json:"strategyIdentifier"`
+	Providers          []string `json:"providers"`
+	AggregatedSymbols  []string `json:"aggregatedSymbols"`
+	AutoStart          bool     `json:"autoStart"`
+	Running            bool     `json:"running"`
+}
+
+// InstanceSnapshot captures the detailed state of a lambda instance.
 type InstanceSnapshot struct {
 	ID                string                            `json:"id"`
 	Strategy          config.LambdaStrategySpec         `json:"strategy"`
@@ -593,14 +603,14 @@ type InstanceSnapshot struct {
 	Running           bool                              `json:"running"`
 }
 
-// Instances returns snapshots of all lambda instances.
-func (m *Manager) Instances() []InstanceSnapshot {
+// Instances returns summaries of all lambda instances.
+func (m *Manager) Instances() []InstanceSummary {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]InstanceSnapshot, 0, len(m.specs))
+	out := make([]InstanceSummary, 0, len(m.specs))
 	for id, spec := range m.specs {
 		_, running := m.instances[id]
-		out = append(out, snapshotOf(spec, running))
+		out = append(out, summaryOf(spec, running))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -624,6 +634,19 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 	_, running := m.instances[spec.ID]
 	m.mu.RUnlock()
 	return snapshotOf(spec, running), true
+}
+
+func summaryOf(spec config.LambdaSpec, running bool) InstanceSummary {
+	providers := append([]string(nil), spec.Providers...)
+	aggregated := spec.AllSymbols()
+	return InstanceSummary{
+		ID:                 spec.ID,
+		StrategyIdentifier: spec.Strategy.Identifier,
+		Providers:          providers,
+		AggregatedSymbols:  aggregated,
+		AutoStart:          spec.AutoStart,
+		Running:            running,
+	}
 }
 
 func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
