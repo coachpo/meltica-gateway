@@ -165,6 +165,9 @@ type RuntimeStore struct {
 func NewRuntimeStore(initial RuntimeConfig) (*RuntimeStore, error) {
 	cfg := initial.Clone()
 	cfg.Normalise()
+	if strings.TrimSpace(cfg.Telemetry.ServiceName) == "" {
+		cfg.Telemetry.ServiceName = DefaultRuntimeConfig().Telemetry.ServiceName
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -182,6 +185,9 @@ func (s *RuntimeStore) Snapshot() RuntimeConfig {
 func (s *RuntimeStore) Replace(cfg RuntimeConfig) (RuntimeConfig, error) {
 	updated := cfg.Clone()
 	updated.Normalise()
+	if strings.TrimSpace(updated.Telemetry.ServiceName) == "" {
+		updated.Telemetry.ServiceName = DefaultRuntimeConfig().Telemetry.ServiceName
+	}
 	if err := updated.Validate(); err != nil {
 		return RuntimeConfig{}, err
 	}
