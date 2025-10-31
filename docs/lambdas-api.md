@@ -90,9 +90,9 @@ Returns the detailed metadata, including the current instrument catalogue and un
 
 ## Strategy Instances
 
-Instance resources are exposed under `/strategy-instances`.
+Instance resources are exposed under `/strategy/instances`.
 
-### `GET /strategy-instances`
+### `GET /strategy/instances`
 Lists all known instances (running or stopped) using a flattened summary payload.
 
 ```json
@@ -122,7 +122,7 @@ Each instance summary includes:
 - `autoStart` – whether the instance would start automatically when loaded from a manifest (runtime-created instances return `false`).
 - `running` – current execution state.
 
-### `POST /strategy-instances`
+### `POST /strategy/instances`
 Creates and starts a new instance.
 
 Request body (minimum fields):
@@ -154,9 +154,9 @@ Notes:
 
 ## Instance Item Endpoints
 
-All item endpoints operate on `/strategy-instances/{id}`.
+All item endpoints operate on `/strategy/instances/{id}`.
 
-### `GET /strategy-instances/{id}`
+### `GET /strategy/instances/{id}`
 Returns the detailed instance snapshot, including strategy configuration and provider scope, or `404` if not found.
 
 ```json
@@ -187,10 +187,10 @@ Returns the detailed instance snapshot, including strategy configuration and pro
 }
 ```
 
-### `PUT /strategy-instances/{id}`
+### `PUT /strategy/instances/{id}`
 Replaces the configuration and restarts the instance. Provider, symbol, and strategy are immutable and cannot be changed; only `config` can be updated.
 
-### `DELETE /strategy-instances/{id}`
+### `DELETE /strategy/instances/{id}`
 Stops the instance (if running) and removes it from the manager. Returns:
 
 ```json
@@ -200,8 +200,8 @@ Stops the instance (if running) and removes it from the manager. Returns:
 ### Actions
 
 Action endpoints accept `POST` only:
-- `POST /strategy-instances/{id}/start` – starts a stopped instance (`409` if already running)
-- `POST /strategy-instances/{id}/stop` – stops a running instance (`409` if not running)
+- `POST /strategy/instances/{id}/start` – starts a stopped instance (`409` if already running)
+- `POST /strategy/instances/{id}/stop` – stops a running instance (`409` if not running)
 
 ## Error Model
 
