@@ -117,12 +117,13 @@ type Manager struct {
 	lifecycleMu  sync.RWMutex
 	lifecycleCtx context.Context
 
-	bus         eventbus.Bus
-	pools       *pool.PoolManager
-	providers   ProviderCatalog
-	logger      *log.Logger
-	registrar   RouteRegistrar
-	riskManager *risk.Manager
+	bus          eventbus.Bus
+	pools        *pool.PoolManager
+	providers    ProviderCatalog
+	logger       *log.Logger
+	registrar    RouteRegistrar
+	riskManager  *risk.Manager
+	runtimeStore *config.RuntimeStore
 
 	strategies map[string]StrategyDefinition
 	specs      map[string]config.LambdaSpec
@@ -136,12 +137,17 @@ type lambdaInstance struct {
 }
 
 // NewManager creates a new lambda manager with the specified dependencies.
-func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) *Manager {
+func NewManager(cfg config.AppConfig, store *config.RuntimeStore, bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) *Manager {
 	if logger == nil {
 		logger = log.New(os.Stdout, "lambda-manager ", log.LstdFlags|log.Lmicroseconds)
 	}
 
-	rm := risk.NewManager(buildRiskLimits(cfg.Risk, logger))
+	riskCfg := cfg.Runtime.Risk
+	if store != nil {
+		snapshot := store.Snapshot()
+		riskCfg = snapshot.Risk
+	}
+	rm := risk.NewManager(buildRiskLimits(riskCfg, logger))
 
 	mgr := &Manager{
 		mu:           sync.RWMutex{},
@@ -153,6 +159,7 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 		logger:       logger,
 		registrar:    registrar,
 		riskManager:  rm,
+		runtimeStore: store,
 		strategies:   make(map[string]StrategyDefinition),
 		specs:        make(map[string]config.LambdaSpec),
 		instances:    make(map[string]*lambdaInstance),
@@ -289,11 +296,26 @@ func (m *Manager) UpdateRiskLimits(limits risk.Limits) {
 	}
 }
 
-// ApplyRiskConfig converts the supplied risk configuration into limits and applies them.
-func (m *Manager) ApplyRiskConfig(cfg config.RiskConfig) risk.Limits {
-	limits := buildRiskLimits(cfg, m.logger)
+// ApplyRuntimeConfig synchronises the manager with the supplied runtime configuration snapshot.
+func (m *Manager) ApplyRuntimeConfig(cfg config.RuntimeConfig) error {
+	limits := buildRiskLimits(cfg.Risk, m.logger)
 	m.UpdateRiskLimits(limits)
-	return limits
+	return nil
+}
+
+// ApplyRiskConfig converts the supplied risk configuration into limits and applies them.
+func (m *Manager) ApplyRiskConfig(cfg config.RiskConfig) (risk.Limits, error) {
+	effective := cfg
+	if m.runtimeStore != nil {
+		updated, err := m.runtimeStore.UpdateRisk(cfg)
+		if err != nil {
+			return risk.Limits{}, fmt.Errorf("update runtime risk: %w", err)
+		}
+		effective = updated
+	}
+	limits := buildRiskLimits(effective, m.logger)
+	m.UpdateRiskLimits(limits)
+	return limits, nil
 }
 
 func (m *Manager) registerStrategy(def StrategyDefinition) {

@@ -57,19 +57,25 @@ func main() {
 	logger.Printf("lambda manifest loaded: lambdas=%d", len(appCfg.LambdaManifest.Lambdas))
 	logger.Printf("providers configured: %d", len(appCfg.Providers))
 
-	telemetryProvider, err := initTelemetry(ctx, logger, appCfg)
+	runtimeStore, err := config.NewRuntimeStore(appCfg.Runtime)
+	if err != nil {
+		logger.Fatalf("initialise runtime config: %v", err)
+	}
+	runtimeSnapshot := runtimeStore.Snapshot()
+
+	telemetryProvider, err := initTelemetry(ctx, logger, appCfg.Environment, runtimeSnapshot.Telemetry)
 	if err != nil {
 		logger.Fatalf("initialize telemetry: %v", err)
 	}
 
-	poolMgr, err := buildPoolManager(appCfg.Pools)
+	poolMgr, err := buildPoolManager(runtimeSnapshot.Pools)
 	if err != nil {
 		logger.Fatalf("initialise pools: %v", err)
 	}
 
 	var lifecycle conc.WaitGroup
 
-	bus := newEventBus(appCfg.Eventbus, poolMgr)
+	bus := newEventBus(runtimeSnapshot.Eventbus, poolMgr)
 
 	table := dispatcher.NewTable()
 	providerManager, err := initProviders(ctx, logger, appCfg, poolMgr, table, bus)
@@ -79,13 +85,13 @@ func main() {
 
 	registrar := dispatcher.NewRegistrar(table, providerManager)
 
-	lambdaManager, err := startLambdaManager(ctx, appCfg, bus, poolMgr, providerManager, registrar, logger)
+	lambdaManager, err := startLambdaManager(ctx, appCfg, runtimeStore, bus, poolMgr, providerManager, registrar, logger)
 	if err != nil {
 		logger.Fatalf("initialise lambdas: %v", err)
 	}
 	logger.Printf("strategy instances registered: %d", len(lambdaManager.Instances()))
 
-	apiServer := buildAPIServer(appCfg.APIServer, lambdaManager, providerManager)
+	apiServer := buildAPIServer(runtimeSnapshot.APIServer, runtimeStore, lambdaManager, providerManager)
 	startAPIServer(&lifecycle, logger, apiServer)
 	logger.Printf("control API listening on %s", apiServer.Addr)
 
@@ -123,17 +129,17 @@ func newGatewayLogger() *log.Logger {
 	return log.New(os.Stdout, gatewayLoggerPrefix, log.LstdFlags|log.Lmicroseconds)
 }
 
-func initTelemetry(ctx context.Context, logger *log.Logger, appCfg config.AppConfig) (*telemetry.Provider, error) {
+func initTelemetry(ctx context.Context, logger *log.Logger, env config.Environment, cfg config.TelemetryConfig) (*telemetry.Provider, error) {
 	telemetryCfg := telemetry.DefaultConfig()
-	if appCfg.Telemetry.OTLPEndpoint != "" {
-		telemetryCfg.OTLPEndpoint = appCfg.Telemetry.OTLPEndpoint
+	if cfg.OTLPEndpoint != "" {
+		telemetryCfg.OTLPEndpoint = cfg.OTLPEndpoint
 	}
-	if appCfg.Telemetry.ServiceName != "" {
-		telemetryCfg.ServiceName = appCfg.Telemetry.ServiceName
+	if cfg.ServiceName != "" {
+		telemetryCfg.ServiceName = cfg.ServiceName
 	}
-	telemetryCfg.Environment = string(appCfg.Environment)
-	telemetryCfg.OTLPInsecure = appCfg.Telemetry.OTLPInsecure
-	telemetryCfg.EnableMetrics = appCfg.Telemetry.EnableMetrics
+	telemetryCfg.Environment = string(env)
+	telemetryCfg.OTLPInsecure = cfg.OTLPInsecure
+	telemetryCfg.EnableMetrics = cfg.EnableMetrics
 
 	provider, err := telemetry.NewProvider(ctx, telemetryCfg)
 	if err != nil {
@@ -190,8 +196,8 @@ func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 	return manager, nil
 }
 
-func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
-	manager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providers, logger, registrar)
+func startLambdaManager(ctx context.Context, appCfg config.AppConfig, runtimeStore *config.RuntimeStore, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
+	manager := lambdaruntime.NewManager(appCfg, runtimeStore, bus, poolMgr, providers, logger, registrar)
 	manager.SetLifecycleContext(ctx)
 	if err := manager.StartFromManifest(ctx, appCfg.LambdaManifest); err != nil {
 		return nil, fmt.Errorf("start manifest lambdas: %w", err)
@@ -199,8 +205,8 @@ func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventb
 	return manager, nil
 }
 
-func buildAPIServer(cfg config.APIServerConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager) *http.Server {
-	handler := httpserver.NewHandler(lambdaManager, providerManager)
+func buildAPIServer(cfg config.APIServerConfig, runtimeStore *config.RuntimeStore, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager) *http.Server {
+	handler := httpserver.NewHandler(lambdaManager, providerManager, runtimeStore)
 
 	return &http.Server{
 		Addr:                         cfg.Addr,

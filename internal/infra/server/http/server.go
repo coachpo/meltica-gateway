@@ -32,14 +32,16 @@ const (
 	instancesPath        = "/strategy/instances"
 	instanceDetailPrefix = instancesPath + "/"
 
-	riskLimitsPath = "/risk/limits"
+	riskLimitsPath    = "/risk/limits"
+	runtimeConfigPath = "/config/runtime"
 )
 
 type handlerFunc func(http.ResponseWriter, *http.Request)
 
 type httpServer struct {
-	manager   *runtime.Manager
-	providers *provider.Manager
+	manager      *runtime.Manager
+	providers    *provider.Manager
+	runtimeStore *config.RuntimeStore
 }
 
 type providerPayload struct {
@@ -54,8 +56,8 @@ type providerAdapterPayload struct {
 }
 
 // NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Handler {
-	server := &httpServer{manager: manager, providers: providers}
+func NewHandler(manager *runtime.Manager, providers *provider.Manager, runtimeStore *config.RuntimeStore) http.Handler {
+	server := &httpServer{manager: manager, providers: providers, runtimeStore: runtimeStore}
 	mux := http.NewServeMux()
 
 	mux.Handle(strategiesPath, server.methodHandlers(map[string]handlerFunc{
@@ -87,6 +89,11 @@ func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Hand
 	mux.Handle(riskLimitsPath, server.methodHandlers(map[string]handlerFunc{
 		http.MethodGet: server.getRiskLimits,
 		http.MethodPut: server.updateRiskLimits,
+	}))
+
+	mux.Handle(runtimeConfigPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.exportRuntimeConfig,
+		http.MethodPut: server.importRuntimeConfig,
 	}))
 
 	return withCORS(mux)
@@ -359,8 +366,44 @@ func (s *httpServer) updateRiskLimits(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	limits := s.manager.ApplyRiskConfig(cfg)
+	limits, err := s.manager.ApplyRiskConfig(cfg)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "limits": riskConfigFromLimits(limits)})
+}
+
+func (s *httpServer) exportRuntimeConfig(w http.ResponseWriter, _ *http.Request) {
+	if s.runtimeStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "runtime config store unavailable")
+		return
+	}
+	snapshot := s.runtimeStore.Snapshot()
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (s *httpServer) importRuntimeConfig(w http.ResponseWriter, r *http.Request) {
+	if s.runtimeStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "runtime config store unavailable")
+		return
+	}
+	limitRequestBody(w, r)
+	cfg, err := decodeRuntimeConfig(r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	updated, err := s.runtimeStore.Replace(cfg)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.manager.ApplyRuntimeConfig(updated); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "imported", "runtime": updated})
 }
 
 func (s *httpServer) handleInstance(w http.ResponseWriter, r *http.Request) {
@@ -603,6 +646,19 @@ func decodeRiskConfig(r *http.Request) (config.RiskConfig, error) {
 	return cfg, nil
 }
 
+func decodeRuntimeConfig(r *http.Request) (config.RuntimeConfig, error) {
+	defer func() {
+		_ = r.Body.Close()
+	}()
+	var cfg config.RuntimeConfig
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&cfg); err != nil {
+		return cfg, fmt.Errorf("decode payload: %w", err)
+	}
+	cfg.Normalise()
+	return cfg, nil
+}
+
 func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
 	allowed := make([]string, 0, len(limits.AllowedOrderTypes))
 	for _, ot := range limits.AllowedOrderTypes {
@@ -633,34 +689,34 @@ func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
 
 func validateRiskConfig(cfg config.RiskConfig) error {
 	if cfg.MaxPositionSize == "" {
-		return fmt.Errorf("maxPositionSize required")
+		return fmt.Errorf("max_position_size required")
 	}
 	if cfg.MaxNotionalValue == "" {
-		return fmt.Errorf("maxNotionalValue required")
+		return fmt.Errorf("max_notional_value required")
 	}
 	if cfg.NotionalCurrency == "" {
-		return fmt.Errorf("notionalCurrency required")
+		return fmt.Errorf("notional_currency required")
 	}
 	if cfg.OrderThrottle <= 0 {
-		return fmt.Errorf("orderThrottle must be > 0")
+		return fmt.Errorf("order_throttle must be > 0")
 	}
 	if cfg.OrderBurst <= 0 {
-		return fmt.Errorf("orderBurst must be > 0")
+		return fmt.Errorf("order_burst must be > 0")
 	}
 	if cfg.MaxConcurrentOrders < 0 {
-		return fmt.Errorf("maxConcurrentOrders must be >= 0")
+		return fmt.Errorf("max_concurrent_orders must be >= 0")
 	}
 	if cfg.PriceBandPercent < 0 {
-		return fmt.Errorf("priceBandPercent must be >= 0")
+		return fmt.Errorf("price_band_percent must be >= 0")
 	}
 	if cfg.MaxRiskBreaches < 0 {
-		return fmt.Errorf("maxRiskBreaches must be >= 0")
+		return fmt.Errorf("max_risk_breaches must be >= 0")
 	}
 	if cfg.CircuitBreaker.Threshold < 0 {
-		return fmt.Errorf("circuitBreaker.threshold must be >= 0")
+		return fmt.Errorf("circuit_breaker.threshold must be >= 0")
 	}
 	if cfg.CircuitBreaker.Enabled && strings.TrimSpace(cfg.CircuitBreaker.Cooldown) == "" {
-		return fmt.Errorf("circuitBreaker.cooldown required when enabled")
+		return fmt.Errorf("circuit_breaker.cooldown required when enabled")
 	}
 	return nil
 }

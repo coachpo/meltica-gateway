@@ -11,13 +11,21 @@ import (
 	"strconv"
 	"strings"
 
+	json "github.com/goccy/go-json"
 	"gopkg.in/yaml.v3"
 )
 
 // EventbusConfig sets in-memory event bus sizing characteristics.
 type EventbusConfig struct {
-	BufferSize    int                 `yaml:"bufferSize"`
-	FanoutWorkers FanoutWorkerSetting `yaml:"fanoutWorkers"`
+	BufferSize    int                 `yaml:"buffer_size" json:"buffer_size"`
+	FanoutWorkers FanoutWorkerSetting `yaml:"fanout_workers" json:"fanout_workers"`
+}
+
+// MetaConfig captures descriptive metadata for the configuration bundle.
+type MetaConfig struct {
+	Name        string `yaml:"name" json:"name"`
+	Version     string `yaml:"version" json:"version"`
+	Description string `yaml:"description" json:"description"`
 }
 
 type fanoutWorkerKind int
@@ -64,14 +72,75 @@ func (s *FanoutWorkerSetting) UnmarshalYAML(node *yaml.Node) error {
 	// Attempt numeric parse for both explicit integers and scalar yaml ints.
 	val, err := strconv.Atoi(text)
 	if err != nil {
-		return fmt.Errorf("fanoutWorkers: invalid value %q", node.Value)
+		return fmt.Errorf("fanout_workers: invalid value %q", node.Value)
 	}
 	if val <= 0 {
-		return fmt.Errorf("fanoutWorkers: numeric value must be > 0")
+		return fmt.Errorf("fanout_workers: numeric value must be > 0")
 	}
 	s.kind = fanoutWorkerExplicit
 	s.value = val
 	return nil
+}
+
+// MarshalJSON renders the fanout worker setting into JSON preserving symbolic values.
+func (s FanoutWorkerSetting) MarshalJSON() ([]byte, error) {
+	var value any
+	switch s.kind {
+	case fanoutWorkerExplicit:
+		value = s.value
+	case fanoutWorkerAuto:
+		value = "auto"
+	case fanoutWorkerDefault, fanoutWorkerUnset:
+		value = "default"
+	default:
+		value = "default"
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("fanout_workers: marshal: %w", err)
+	}
+	return data, nil
+}
+
+// UnmarshalJSON accepts integer, "auto", and "default" values for fanout workers.
+func (s *FanoutWorkerSetting) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			*s = FanoutWorkerSetting{kind: fanoutWorkerUnset, value: 0}
+			return nil
+		}
+		switch strings.ToLower(trimmed) {
+		case "auto":
+			*s = FanoutWorkerSetting{kind: fanoutWorkerAuto, value: 0}
+			return nil
+		case "default":
+			*s = FanoutWorkerSetting{kind: fanoutWorkerDefault, value: 0}
+			return nil
+		}
+
+		val, err := strconv.Atoi(trimmed)
+		if err != nil {
+			return fmt.Errorf("fanout_workers: invalid value %q", text)
+		}
+		if val <= 0 {
+			return fmt.Errorf("fanout_workers: numeric value must be > 0")
+		}
+		*s = FanoutWorkerSetting{kind: fanoutWorkerExplicit, value: val}
+		return nil
+	}
+
+	var numeric int
+	if err := json.Unmarshal(data, &numeric); err == nil {
+		if numeric <= 0 {
+			return fmt.Errorf("fanout_workers: numeric value must be > 0")
+		}
+		*s = FanoutWorkerSetting{kind: fanoutWorkerExplicit, value: numeric}
+		return nil
+	}
+
+	return fmt.Errorf("fanout_workers: invalid json value")
 }
 
 // resolve returns the effective worker count derived from the setting.
@@ -98,14 +167,14 @@ func (c EventbusConfig) FanoutWorkerCount() int {
 
 // ObjectPoolConfig describes sizing for a single named pool.
 type ObjectPoolConfig struct {
-	Size          int `yaml:"size"`
-	WaitQueueSize int `yaml:"waitQueueSize"`
+	Size          int `yaml:"size" json:"size"`
+	WaitQueueSize int `yaml:"wait_queue_size" json:"wait_queue_size"`
 }
 
 // PoolConfig controls pooled object capacities.
 type PoolConfig struct {
-	Event        ObjectPoolConfig `yaml:"event"`
-	OrderRequest ObjectPoolConfig `yaml:"orderRequest"`
+	Event        ObjectPoolConfig `yaml:"event" json:"event"`
+	OrderRequest ObjectPoolConfig `yaml:"order_request" json:"order_request"`
 }
 
 // QueueSize returns the effective pending borrower queue size, defaulting to Size.
@@ -118,51 +187,48 @@ func (c ObjectPoolConfig) QueueSize() int {
 
 // APIServerConfig configures the gateway's HTTP control surface.
 type APIServerConfig struct {
-	Addr string `yaml:"addr"`
+	Addr string `yaml:"addr" json:"addr"`
 }
 
 // RiskConfig defines risk parameters for a single strategy.
 
 // CircuitBreakerConfig describes cascading halt behaviour for repeated risk breaches.
 type CircuitBreakerConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	Threshold int    `yaml:"threshold"`
-	Cooldown  string `yaml:"cooldown"`
+	Enabled   bool   `yaml:"enabled" json:"enabled"`
+	Threshold int    `yaml:"threshold" json:"threshold"`
+	Cooldown  string `yaml:"cooldown" json:"cooldown"`
 }
 
 // RiskConfig defines risk parameters for a single strategy.
 type RiskConfig struct {
-	MaxPositionSize     string               `yaml:"maxPositionSize"`
-	MaxNotionalValue    string               `yaml:"maxNotionalValue"`
-	NotionalCurrency    string               `yaml:"notionalCurrency"`
-	OrderThrottle       float64              `yaml:"orderThrottle"`
-	OrderBurst          int                  `yaml:"orderBurst"`
-	MaxConcurrentOrders int                  `yaml:"maxConcurrentOrders"`
-	PriceBandPercent    float64              `yaml:"priceBandPercent"`
-	AllowedOrderTypes   []string             `yaml:"allowedOrderTypes"`
-	KillSwitchEnabled   bool                 `yaml:"killSwitchEnabled"`
-	MaxRiskBreaches     int                  `yaml:"maxRiskBreaches"`
-	CircuitBreaker      CircuitBreakerConfig `yaml:"circuitBreaker"`
+	MaxPositionSize     string               `yaml:"max_position_size" json:"max_position_size"`
+	MaxNotionalValue    string               `yaml:"max_notional_value" json:"max_notional_value"`
+	NotionalCurrency    string               `yaml:"notional_currency" json:"notional_currency"`
+	OrderThrottle       float64              `yaml:"order_throttle" json:"order_throttle"`
+	OrderBurst          int                  `yaml:"order_burst" json:"order_burst"`
+	MaxConcurrentOrders int                  `yaml:"max_concurrent_orders" json:"max_concurrent_orders"`
+	PriceBandPercent    float64              `yaml:"price_band_percent" json:"price_band_percent"`
+	AllowedOrderTypes   []string             `yaml:"allowed_order_types" json:"allowed_order_types"`
+	KillSwitchEnabled   bool                 `yaml:"kill_switch_enabled" json:"kill_switch_enabled"`
+	MaxRiskBreaches     int                  `yaml:"max_risk_breaches" json:"max_risk_breaches"`
+	CircuitBreaker      CircuitBreakerConfig `yaml:"circuit_breaker" json:"circuit_breaker"`
 }
 
 // TelemetryConfig configures OTLP exporters (metrics only).
 type TelemetryConfig struct {
-	OTLPEndpoint  string `yaml:"otlpEndpoint"`
-	ServiceName   string `yaml:"serviceName"`
-	OTLPInsecure  bool   `yaml:"otlpInsecure"`
-	EnableMetrics bool   `yaml:"enableMetrics"`
+	OTLPEndpoint  string `yaml:"otlp_endpoint" json:"otlp_endpoint"`
+	ServiceName   string `yaml:"service_name" json:"service_name"`
+	OTLPInsecure  bool   `yaml:"otlp_insecure" json:"otlp_insecure"`
+	EnableMetrics bool   `yaml:"enable_metrics" json:"enable_metrics"`
 }
 
 // AppConfig is the unified Meltica application configuration sourced from YAML.
 type AppConfig struct {
-	Environment    Environment                 `yaml:"environment"`
-	Providers      map[Provider]map[string]any `yaml:"providers"`
-	Eventbus       EventbusConfig              `yaml:"eventbus"`
-	Pools          PoolConfig                  `yaml:"pools"`
-	Risk           RiskConfig                  `yaml:"risk"`
-	APIServer      APIServerConfig             `yaml:"apiServer"`
-	Telemetry      TelemetryConfig             `yaml:"telemetry"`
-	LambdaManifest LambdaManifest              `yaml:"lambdaManifest"`
+	Environment    Environment                 `yaml:"environment" json:"environment"`
+	Meta           MetaConfig                  `yaml:"meta" json:"meta"`
+	Runtime        RuntimeConfig               `yaml:"runtime" json:"runtime"`
+	Providers      map[Provider]map[string]any `yaml:"providers" json:"providers"`
+	LambdaManifest LambdaManifest              `yaml:"lambda_manifest" json:"lambda_manifest"`
 }
 
 // Load reads and validates an AppConfig from the provided YAML file.
@@ -208,22 +274,11 @@ func (c *AppConfig) normalise() error {
 	c.Providers = normalised
 
 	c.Environment = Environment(strings.ToLower(strings.TrimSpace(string(c.Environment))))
-	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
-	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
-	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
+	c.Meta.Name = strings.TrimSpace(c.Meta.Name)
+	c.Meta.Version = strings.TrimSpace(c.Meta.Version)
+	c.Meta.Description = strings.TrimSpace(c.Meta.Description)
 
-	if c.Risk.OrderBurst <= 0 {
-		c.Risk.OrderBurst = 1
-	}
-	if c.Risk.MaxRiskBreaches < 0 {
-		c.Risk.MaxRiskBreaches = 0
-	}
-	if c.Risk.CircuitBreaker.Threshold < 0 {
-		c.Risk.CircuitBreaker.Threshold = 0
-	}
-	for i, ot := range c.Risk.AllowedOrderTypes {
-		c.Risk.AllowedOrderTypes[i] = strings.TrimSpace(ot)
-	}
+	c.Runtime.Normalise()
 	return nil
 }
 
@@ -238,65 +293,9 @@ func (c AppConfig) Validate() error {
 		return fmt.Errorf("at least one provider must be configured")
 	}
 
-	if c.Eventbus.BufferSize <= 0 {
-		return fmt.Errorf("eventbus bufferSize must be >0")
+	if err := c.Runtime.Validate(); err != nil {
+		return fmt.Errorf("runtime: %w", err)
 	}
-	if c.Eventbus.FanoutWorkerCount() <= 0 {
-		return fmt.Errorf("eventbus fanoutWorkers must be >0")
-	}
-
-	if c.Pools.Event.Size <= 0 {
-		return fmt.Errorf("pools.event.size must be >0")
-	}
-	if c.Pools.Event.WaitQueueSize < 0 {
-		return fmt.Errorf("pools.event.waitQueueSize must be >=0")
-	}
-	if c.Pools.OrderRequest.Size <= 0 {
-		return fmt.Errorf("pools.orderRequest.size must be >0")
-	}
-	if c.Pools.OrderRequest.WaitQueueSize < 0 {
-		return fmt.Errorf("pools.orderRequest.waitQueueSize must be >=0")
-	}
-
-	if strings.TrimSpace(c.APIServer.Addr) == "" {
-		return fmt.Errorf("apiServer addr required")
-	}
-
-	if c.Risk.MaxPositionSize == "" {
-		return fmt.Errorf("risk maxPositionSize required")
-	}
-	if c.Risk.MaxNotionalValue == "" {
-		return fmt.Errorf("risk maxNotionalValue required")
-	}
-	if c.Risk.NotionalCurrency == "" {
-		return fmt.Errorf("risk notionalCurrency required")
-	}
-	if c.Risk.OrderThrottle <= 0 {
-		return fmt.Errorf("risk orderThrottle must be > 0")
-	}
-	if c.Risk.OrderBurst <= 0 {
-		return fmt.Errorf("risk orderBurst must be > 0")
-	}
-	if c.Risk.MaxConcurrentOrders < 0 {
-		return fmt.Errorf("risk maxConcurrentOrders must be >= 0")
-	}
-	if c.Risk.PriceBandPercent < 0 {
-		return fmt.Errorf("risk priceBandPercent must be >= 0")
-	}
-	if c.Risk.MaxRiskBreaches < 0 {
-		return fmt.Errorf("risk maxRiskBreaches must be >= 0")
-	}
-	if c.Risk.CircuitBreaker.Threshold < 0 {
-		return fmt.Errorf("risk circuitBreaker threshold must be >= 0")
-	}
-	if c.Risk.CircuitBreaker.Enabled && strings.TrimSpace(c.Risk.CircuitBreaker.Cooldown) == "" {
-		return fmt.Errorf("risk circuitBreaker cooldown required when enabled")
-	}
-
-	if strings.TrimSpace(c.Telemetry.ServiceName) == "" {
-		return fmt.Errorf("telemetry serviceName required")
-	}
-
 	if err := c.LambdaManifest.Validate(); err != nil {
 		return fmt.Errorf("lambda manifest: %w", err)
 	}
