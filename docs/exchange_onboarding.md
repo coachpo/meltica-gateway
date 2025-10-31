@@ -57,7 +57,9 @@ All exchange adapters **MUST** implement WebSocket stream management using the *
 - [ ] Publish tickers, trades, order book updates, balances, and execution reports using the shared publisher utilities.
 - [ ] Confirm logging displays provider info so multi-provider deployments can trace control flow.
 - [ ] Integrate the `OrderBookAssembler` when the exchange offers diff streams, falling back to periodic snapshots if necessary.
+- [ ] **Implement trading support** if the exchange offers trading APIs (see Trading Support section below).
 - [ ] Cover the adapter with table-driven unit tests and run contract suites such as `make contract-ws-routing` before merging.
+- [ ] Run `make lint` and resolve all linting issues (especially exhaustruct warnings for struct initialization).
 
 ## Detailed Implementation Notes
 
@@ -78,3 +80,166 @@ All exchange adapters **MUST** implement WebSocket stream management using the *
     - Minimum and maximum order sizes.
     - Minimum notional value.
     - Price and quantity precision.
+
+## Trading Support (CRITICAL for Strategy Compatibility)
+
+If the exchange adapter is intended to support trading strategies (e.g., grid, market making, momentum), you **MUST** implement the following components. Missing any of these will prevent strategies from functioning correctly.
+
+### 1. API Credentials Configuration
+
+Add trading credentials to `options.go`:
+```go
+type Config struct {
+    Name              string
+    APIKey            string        // Required for authenticated requests
+    APISecret         string        // Required for request signing
+    Passphrase        string        // Required for some exchanges (e.g., OKX)
+    // ... other fields
+}
+```
+
+Update `AdapterMetadata.SettingsSchema` to include:
+- `api_key` (string) - API key for authenticated REST and user data streams
+- `api_secret` (string) - API secret for signing REST requests
+- `passphrase` (string) - API passphrase if required by the exchange
+
+Update `AdapterMetadata.Capabilities` to include `"trading"`.
+
+### 2. REST Order Submission
+
+Implement `submitOrder()` method in `rest.go`:
+- Parse `schema.OrderRequest` and convert to exchange-specific format
+- Implement exchange-specific authentication (HMAC signing, headers, etc.)
+- Handle order types (market, limit) and side (buy, sell)
+- Support optional fields like client order ID and price
+- Return proper error messages for validation failures
+
+Example authentication patterns:
+- **Binance:** HMAC-SHA256 signature in query parameters with `X-MBX-APIKEY` header
+- **OKX:** HMAC-SHA256 signature in headers (`OK-ACCESS-SIGN`, `OK-ACCESS-KEY`, `OK-ACCESS-TIMESTAMP`, `OK-ACCESS-PASSPHRASE`)
+
+Update `SubmitOrder()` in `provider.go` to call `submitOrder()` instead of returning "not supported" error.
+
+### 3. Private WebSocket Stream (User Data)
+
+Implement user data stream to receive real-time updates:
+- Create separate WebSocket manager for private streams (authenticated)
+- Implement exchange-specific login/authentication flow
+- Subscribe to order updates and account balance channels
+- Handle reconnection and re-authentication on disconnect
+
+Add to `provider.go`:
+```go
+type Provider struct {
+    // ... existing fields
+    privateWsMu     sync.Mutex
+    privateWs       *wsManager
+    userStreamReady bool
+    balanceMu       sync.Mutex
+    balances        map[string]BalanceItem
+}
+```
+
+Start user data stream in `Start()` if credentials are configured:
+```go
+if p.hasTradingCredentials() {
+    go p.startUserDataStream()
+}
+```
+
+### 4. Execution Report Handling
+
+Implement `handleOrders()` to process order update events:
+- Parse exchange-specific order update messages
+- Map exchange order states to `schema.ExecReportState` (ACK, PARTIAL, FILLED, CANCELLED, REJECTED, EXPIRED)
+- Populate `schema.ExecReportPayload` with all required fields:
+  - `ExchangeOrderID`, `ClientOrderID`
+  - `State`, `Side`, `OrderType`
+  - `Price`, `Quantity`, `FilledQuantity`, `RemainingQty`
+  - `AvgFillPrice`, `Timestamp`
+  - Optional: `CommissionAmount`, `CommissionAsset`, `RejectReason`
+- Publish via `p.publisher.PublishExecReport()`
+
+**Critical:** Strategies rely on execution reports to track order lifecycle. Missing or incorrect state mappings will cause strategies to malfunction.
+
+### 5. Balance Update Handling
+
+Implement `handleAccount()` to process balance updates:
+- Parse exchange account/balance update messages
+- Update local balance cache
+- Publish `schema.BalanceUpdatePayload` with:
+  - `Currency`, `Available`, `Total`, `Timestamp`
+- Implement `publishBalanceSnapshot()` for initial balance sync on startup
+
+### 6. Helper Functions
+
+Add utility functions to `provider.go`:
+```go
+func (p *Provider) hasTradingCredentials() bool {
+    return strings.TrimSpace(p.opts.Config.APIKey) != "" &&
+           strings.TrimSpace(p.opts.Config.APISecret) != ""
+}
+```
+
+Add to `manifest.go` config parsing:
+```go
+if raw, ok := stringFromConfig(userCfg, "api_key"); ok {
+    opts.Config.APIKey = raw
+}
+if raw, ok := stringFromConfig(userCfg, "api_secret"); ok {
+    opts.Config.APISecret = raw
+}
+```
+
+### 7. Common Pitfalls (Lessons from OKX Onboarding)
+
+1. **Stub SubmitOrder:** Initial implementation had `return errors.New("trading not supported")` - this must be replaced with actual implementation.
+
+2. **Missing Private WebSocket:** Market data streams are separate from user data streams. Trading requires a second authenticated WebSocket connection.
+
+3. **Authentication Flow:** Each exchange has unique authentication:
+   - Some use query string signatures (Binance)
+   - Others use header-based signatures (OKX)
+   - Some require login messages on WebSocket (OKX)
+   - Some use listen keys (Binance)
+
+4. **State Mapping:** Exchange order states don't directly map to schema states:
+   - OKX "live" → `ExecReportStateACK`
+   - OKX "partially_filled" → `ExecReportStatePARTIAL`
+   - OKX "filled" → `ExecReportStateFILLED`
+   - OKX "canceled" → `ExecReportStateCANCELLED`
+
+5. **Struct Exhaustiveness:** Use linter-compliant struct initialization with all fields explicitly set (including empty strings for optional fields) to avoid exhaustruct warnings.
+
+6. **Balance vs Account Updates:** Balance updates can come from both balance-specific channels and order update channels. Deduplicate carefully.
+
+7. **Orderbook Events:** Market data events (orderbook, trades, tickers) are independent from trading support but must work correctly for strategy initialization.
+
+8. **WebSocket Ping/Pong Protocol:** Each exchange has different WebSocket keepalive requirements:
+   - **Binance:** Supports standard WebSocket ping control frames via `conn.Ping()`
+   - **OKX:** Requires sending plain text `"ping"` (not JSON) and expects `"pong"` response
+   - Always check exchange documentation for specific ping/pong format
+
+9. **Orderbook Sequence IDs:** Some exchanges don't provide sequence IDs for full orderbook snapshots:
+   - **Binance:** Always provides `lastUpdateId` in REST responses
+   - **OKX:** May return empty `seqId` for full orderbook requests
+   - Use timestamp as fallback sequence ID when `seqId` is missing
+   - Handle missing/empty sequence fields gracefully to avoid parsing errors
+
+10. **JSON Type Inconsistencies:** Exchanges may send the same field with different JSON types:
+    - **OKX:** Sends `seqId` as **number** in WebSocket messages but as **string** in REST responses
+    - **Solution:** Use `json.Number` type for fields that may be sent as either string or number
+    - Example: `SeqID json.Number \`json:"seqId"\`` can unmarshal both `"123"` and `123`
+    - Convert to string with `.String()` method: `seqStr := event.SeqID.String()`
+
+### Verification Checklist
+
+After implementing trading support, verify:
+- [ ] `make lint` passes without errors
+- [ ] `make build` compiles successfully
+- [ ] Strategies can retrieve initial market data (trades, tickers, orderbook)
+- [ ] Strategies can submit orders via `SubmitOrder()`
+- [ ] Execution reports are received and processed
+- [ ] Balance updates are received and cached
+- [ ] Order state transitions are correctly mapped
+- [ ] Reconnection preserves trading functionality
