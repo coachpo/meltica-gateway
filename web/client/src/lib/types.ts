@@ -4,7 +4,7 @@ export interface StrategyConfig {
   name: string;
   type: string;
   description: string;
-  default?: any;
+  default?: unknown;
   required: boolean;
 }
 
@@ -16,9 +16,7 @@ export interface Strategy {
   events: string[];
 }
 
-export interface ProviderSettings {
-  [key: string]: any;
-}
+export type ProviderSettings = Record<string, unknown>;
 
 export interface Provider {
   name: string;
@@ -39,7 +37,7 @@ export interface Instrument {
 export interface SettingsSchema {
   name: string;
   type: string;
-  default?: any;
+  default?: unknown;
   required: boolean;
 }
 
@@ -73,7 +71,7 @@ export interface InstanceSpec {
   id: string;
   strategy: {
     identifier: string;
-    config: Record<string, any>;
+    config: Record<string, unknown>;
   };
   scope: Record<string, ProviderSymbols>;
   providers?: string[];

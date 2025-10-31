@@ -12,6 +12,24 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 
 export default function RiskPage() {
+  const normalizeRiskConfig = (config?: RiskConfig | null): RiskConfig => ({
+    maxPositionSize: config?.maxPositionSize ?? '',
+    maxNotionalValue: config?.maxNotionalValue ?? '',
+    notionalCurrency: config?.notionalCurrency ?? '',
+    orderThrottle: Number(config?.orderThrottle ?? 0),
+    orderBurst: Number(config?.orderBurst ?? 0),
+    maxConcurrentOrders: Number(config?.maxConcurrentOrders ?? 0),
+    priceBandPercent: Number(config?.priceBandPercent ?? 0),
+    allowedOrderTypes: config?.allowedOrderTypes ?? [],
+    killSwitchEnabled: Boolean(config?.killSwitchEnabled ?? false),
+    maxRiskBreaches: Number(config?.maxRiskBreaches ?? 0),
+    circuitBreaker: {
+      enabled: Boolean(config?.circuitBreaker?.enabled ?? false),
+      threshold: Number(config?.circuitBreaker?.threshold ?? 0),
+      cooldown: config?.circuitBreaker?.cooldown ?? '',
+    },
+  });
+
   const [limits, setLimits] = useState<RiskConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,26 +55,28 @@ export default function RiskPage() {
   });
 
   useEffect(() => {
-    fetchLimits();
-  }, []);
+    const loadLimits = async () => {
+      try {
+        const response = await apiClient.getRiskLimits();
+        const normalized = normalizeRiskConfig(response.limits);
+        setLimits(normalized);
+        setFormData(normalized);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch risk limits');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const fetchLimits = async () => {
-    try {
-      const response = await apiClient.getRiskLimits();
-      setLimits(response.limits);
-      setFormData(response.limits);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch risk limits');
-    } finally {
-      setLoading(false);
-    }
-  };
+    void loadLimits();
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       const response = await apiClient.updateRiskLimits(formData);
-      setLimits(response.limits);
+      const normalized = normalizeRiskConfig(response.limits);
+      setLimits(normalized);
       setEditMode(false);
       alert('Risk limits updated successfully');
     } catch (err) {
@@ -68,14 +88,14 @@ export default function RiskPage() {
 
   const handleCancel = () => {
     if (limits) {
-      setFormData(limits);
+      setFormData(normalizeRiskConfig(limits));
     }
     setEditMode(false);
   };
 
   const handleOrderTypesChange = (value: string) => {
-    const types = value.split(',').map(t => t.trim()).filter(Boolean);
-    setFormData({ ...formData, allowedOrderTypes: types });
+    const types = value.split(',').map((t) => t.trim()).filter(Boolean);
+    setFormData((prev) => ({ ...prev, allowedOrderTypes: types }));
   };
 
   if (loading) {
@@ -241,11 +261,15 @@ export default function RiskPage() {
                 />
               ) : (
                 <div className="flex flex-wrap gap-1">
-                  {limits?.allowedOrderTypes.map((type) => (
-                    <Badge key={type} variant="secondary">
-                      {type}
-                    </Badge>
-                  ))}
+                  {limits?.allowedOrderTypes?.length ? (
+                    limits.allowedOrderTypes.map((type) => (
+                      <Badge key={type} variant="secondary">
+                        {type}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">None</span>
+                  )}
                 </div>
               )}
             </div>
@@ -284,19 +308,19 @@ export default function RiskPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label>Circuit Breaker</Label>
-                <Badge variant={limits?.circuitBreaker.enabled ? 'default' : 'secondary'}>
-                  {limits?.circuitBreaker.enabled ? 'Enabled' : 'Disabled'}
+                <Badge variant={limits?.circuitBreaker?.enabled ? 'default' : 'secondary'}>
+                  {limits?.circuitBreaker?.enabled ? 'Enabled' : 'Disabled'}
                 </Badge>
               </div>
-              {limits?.circuitBreaker.enabled && (
+              {limits?.circuitBreaker?.enabled && (
                 <>
                   <div>
                     <span className="text-sm font-medium">Threshold:</span>{' '}
-                    <span className="text-sm text-muted-foreground">{limits?.circuitBreaker.threshold}</span>
+                    <span className="text-sm text-muted-foreground">{limits?.circuitBreaker?.threshold}</span>
                   </div>
                   <div>
                     <span className="text-sm font-medium">Cooldown:</span>{' '}
-                    <span className="text-sm text-muted-foreground">{limits?.circuitBreaker.cooldown}</span>
+                    <span className="text-sm text-muted-foreground">{limits?.circuitBreaker?.cooldown}</span>
                   </div>
                 </>
               )}

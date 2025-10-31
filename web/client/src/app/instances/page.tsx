@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { InstanceSummary, Strategy, Provider } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,8 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { PlayIcon, StopIcon, TrashIcon, PlusIcon } from 'lucide-react';
+import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon } from 'lucide-react';
 
 export default function InstancesPage() {
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
@@ -27,8 +26,50 @@ export default function InstancesPage() {
     strategyIdentifier: '',
     provider: '',
     symbols: '',
-    config: '{}',
   });
+  const [configValues, setConfigValues] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const selectedStrategy = useMemo(
+    () => strategies.find((strategy) => strategy.name === newInstance.strategyIdentifier),
+    [strategies, newInstance.strategyIdentifier]
+  );
+
+  useEffect(() => {
+    if (!selectedStrategy) {
+      setConfigValues({});
+      return;
+    }
+    const defaults: Record<string, string> = {};
+    selectedStrategy.config.forEach((field) => {
+      if (typeof field.default === 'boolean') {
+        defaults[field.name] = field.default ? 'true' : 'false';
+        return;
+      }
+      if (field.default !== undefined && field.default !== null) {
+        defaults[field.name] = String(field.default);
+        return;
+      }
+      defaults[field.name] = field.type === 'bool' ? 'false' : '';
+    });
+    setConfigValues(defaults);
+  }, [selectedStrategy]);
+
+  const resetForm = () => {
+    setNewInstance({
+      id: '',
+      strategyIdentifier: '',
+      provider: '',
+      symbols: '',
+    });
+    setConfigValues({});
+    setFormError(null);
+  };
+
+  const handleConfigChange = (field: string, value: string) => {
+    setConfigValues((prev) => ({ ...prev, [field]: value }));
+    setFormError(null);
+  };
 
   useEffect(() => {
     fetchData();
@@ -52,32 +93,86 @@ export default function InstancesPage() {
   };
 
   const handleCreate = async () => {
+    if (!newInstance.id.trim()) {
+      setFormError('Instance ID is required');
+      return;
+    }
+    if (!newInstance.strategyIdentifier) {
+      setFormError('Strategy selection is required');
+      return;
+    }
+    if (!newInstance.provider) {
+      setFormError('Provider selection is required');
+      return;
+    }
+
+    const symbols = newInstance.symbols
+      .split(',')
+      .map((symbol) => symbol.trim())
+      .filter(Boolean);
+    if (symbols.length === 0) {
+      setFormError('At least one symbol is required');
+      return;
+    }
+
+    const strategyMeta = selectedStrategy;
+    if (!strategyMeta) {
+      setFormError('Strategy metadata is unavailable');
+      return;
+    }
+
+    const configPayload: Record<string, unknown> = {};
+    for (const field of strategyMeta.config) {
+      const rawValue = configValues[field.name] ?? '';
+      if (field.type === 'bool') {
+        configPayload[field.name] = rawValue === 'true';
+        continue;
+      }
+      if (rawValue === '') {
+        if (field.required) {
+          setFormError(`Configuration field "${field.name}" is required`);
+          return;
+        }
+        continue;
+      }
+      if (field.type === 'int') {
+        const parsed = parseInt(rawValue, 10);
+        if (Number.isNaN(parsed)) {
+          setFormError(`Configuration field "${field.name}" must be an integer`);
+          return;
+        }
+        configPayload[field.name] = parsed;
+        continue;
+      }
+      if (field.type === 'float') {
+        const parsed = parseFloat(rawValue);
+        if (Number.isNaN(parsed)) {
+          setFormError(`Configuration field "${field.name}" must be a number`);
+          return;
+        }
+        configPayload[field.name] = parsed;
+        continue;
+      }
+      configPayload[field.name] = rawValue;
+    }
+
     try {
-      const config = JSON.parse(newInstance.config);
-      const symbols = newInstance.symbols.split(',').map(s => s.trim()).filter(Boolean);
-      
+      setFormError(null);
       await apiClient.createInstance({
-        id: newInstance.id,
+        id: newInstance.id.trim(),
         strategy: {
           identifier: newInstance.strategyIdentifier,
-          config,
+          config: configPayload,
         },
         scope: {
           [newInstance.provider]: { symbols },
         },
       });
-      
       setCreateDialogOpen(false);
-      setNewInstance({
-        id: '',
-        strategyIdentifier: '',
-        provider: '',
-        symbols: '',
-        config: '{}',
-      });
+      resetForm();
       fetchData();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to create instance');
+      setFormError(err instanceof Error ? err.message : 'Failed to create instance');
     }
   };
 
@@ -132,7 +227,15 @@ export default function InstancesPage() {
             Manage running strategy instances with full lifecycle control
           </p>
         </div>
-        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <Dialog
+          open={createDialogOpen}
+          onOpenChange={(open) => {
+            setCreateDialogOpen(open);
+            if (!open) {
+              resetForm();
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button>
               <PlusIcon className="mr-2 h-4 w-4" />
@@ -146,13 +249,21 @@ export default function InstancesPage() {
                 Configure and start a new trading strategy instance
               </DialogDescription>
             </DialogHeader>
+            {formError && (
+              <Alert variant="destructive">
+                <AlertDescription>{formError}</AlertDescription>
+              </Alert>
+            )}
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
                 <Label htmlFor="id">Instance ID</Label>
                 <Input
                   id="id"
                   value={newInstance.id}
-                  onChange={(e) => setNewInstance({ ...newInstance, id: e.target.value })}
+                  onChange={(e) => {
+                    setFormError(null);
+                    setNewInstance({ ...newInstance, id: e.target.value });
+                  }}
                   placeholder="my-strategy-instance"
                 />
               </div>
@@ -160,7 +271,10 @@ export default function InstancesPage() {
                 <Label htmlFor="strategy">Strategy</Label>
                 <Select
                   value={newInstance.strategyIdentifier}
-                  onValueChange={(value) => setNewInstance({ ...newInstance, strategyIdentifier: value })}
+                  onValueChange={(value) => {
+                    setFormError(null);
+                    setNewInstance({ ...newInstance, strategyIdentifier: value });
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select strategy" />
@@ -178,7 +292,10 @@ export default function InstancesPage() {
                 <Label htmlFor="provider">Provider</Label>
                 <Select
                   value={newInstance.provider}
-                  onValueChange={(value) => setNewInstance({ ...newInstance, provider: value })}
+                  onValueChange={(value) => {
+                    setFormError(null);
+                    setNewInstance({ ...newInstance, provider: value });
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select provider" />
@@ -197,23 +314,74 @@ export default function InstancesPage() {
                 <Input
                   id="symbols"
                   value={newInstance.symbols}
-                  onChange={(e) => setNewInstance({ ...newInstance, symbols: e.target.value })}
+                  onChange={(e) => {
+                    setFormError(null);
+                    setNewInstance({ ...newInstance, symbols: e.target.value });
+                  }}
                   placeholder="BTC-USDT, ETH-USDT"
                 />
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="config">Configuration (JSON)</Label>
-                <Textarea
-                  id="config"
-                  value={newInstance.config}
-                  onChange={(e) => setNewInstance({ ...newInstance, config: e.target.value })}
-                  placeholder='{"dry_run": true}'
-                  rows={5}
-                />
-              </div>
+              {selectedStrategy && selectedStrategy.config.length > 0 && (
+                <div className="grid gap-3">
+                  <div className="text-sm font-medium">Configuration</div>
+                  <div className="grid gap-4">
+                    {selectedStrategy.config.map((field) => {
+                      const value = configValues[field.name] ?? '';
+                      return (
+                        <div className="grid gap-2" key={field.name}>
+                          <Label htmlFor={`config-${field.name}`}>
+                            {field.name}
+                            {!field.required && (
+                              <span className="ml-1 text-xs font-normal text-muted-foreground">
+                                (optional)
+                              </span>
+                            )}
+                          </Label>
+                          {field.type === 'bool' ? (
+                            <Select
+                              value={value || 'false'}
+                              onValueChange={(val) => handleConfigChange(field.name, val)}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select value" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="true">True</SelectItem>
+                                <SelectItem value="false">False</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Input
+                              id={`config-${field.name}`}
+                              type={field.type === 'int' || field.type === 'float' ? 'number' : 'text'}
+                              step={field.type === 'float' ? 'any' : undefined}
+                              value={value}
+                              onChange={(e) => handleConfigChange(field.name, e.target.value)}
+                              placeholder={
+                                field.default !== undefined && field.default !== null
+                                  ? String(field.default)
+                                  : undefined
+                              }
+                            />
+                          )}
+                          {field.description && (
+                            <p className="text-xs text-muted-foreground">{field.description}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  resetForm();
+                  setCreateDialogOpen(false);
+                }}
+              >
                 Cancel
               </Button>
               <Button onClick={handleCreate}>Create & Start</Button>
@@ -267,7 +435,7 @@ export default function InstancesPage() {
                     variant="outline"
                     onClick={() => handleStop(instance.id)}
                   >
-                    <StopIcon className="mr-1 h-3 w-3" />
+                    <CircleStopIcon className="mr-1 h-3 w-3" />
                     Stop
                   </Button>
                 ) : (
