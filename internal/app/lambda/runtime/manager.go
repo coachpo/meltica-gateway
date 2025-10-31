@@ -323,7 +323,7 @@ func (m *Manager) ManifestSnapshot() config.LambdaManifest {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if len(m.specs) == 0 {
-		return config.LambdaManifest{}
+		return config.LambdaManifest{Lambdas: nil}
 	}
 	manifest := config.LambdaManifest{
 		Lambdas: make([]config.LambdaSpec, 0, len(m.specs)),
