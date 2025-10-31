@@ -11,7 +11,7 @@ type RuntimeConfig struct {
 	Eventbus  EventbusConfig  `json:"eventbus" yaml:"eventbus"`
 	Pools     PoolConfig      `json:"pools" yaml:"pools"`
 	Risk      RiskConfig      `json:"risk" yaml:"risk"`
-	APIServer APIServerConfig `json:"api_server" yaml:"api_server"`
+	APIServer APIServerConfig `json:"apiServer" yaml:"api_server"`
 	Telemetry TelemetryConfig `json:"telemetry" yaml:"telemetry"`
 }
 
@@ -94,62 +94,62 @@ func (c *RuntimeConfig) Normalise() {
 // Validate performs semantic validation on runtime configuration fields.
 func (c RuntimeConfig) Validate() error {
 	if c.Eventbus.BufferSize <= 0 {
-		return fmt.Errorf("eventbus.buffer_size must be > 0")
+		return fmt.Errorf("eventbus.bufferSize must be > 0")
 	}
 	if c.Eventbus.FanoutWorkerCount() <= 0 {
-		return fmt.Errorf("eventbus.fanout_workers must be > 0")
+		return fmt.Errorf("eventbus.fanoutWorkers must be > 0")
 	}
 
 	if c.Pools.Event.Size <= 0 {
 		return fmt.Errorf("pools.event.size must be > 0")
 	}
 	if c.Pools.Event.WaitQueueSize < 0 {
-		return fmt.Errorf("pools.event.wait_queue_size must be >= 0")
+		return fmt.Errorf("pools.event.waitQueueSize must be >= 0")
 	}
 	if c.Pools.OrderRequest.Size <= 0 {
-		return fmt.Errorf("pools.order_request.size must be > 0")
+		return fmt.Errorf("pools.orderRequest.size must be > 0")
 	}
 	if c.Pools.OrderRequest.WaitQueueSize < 0 {
-		return fmt.Errorf("pools.order_request.wait_queue_size must be >= 0")
+		return fmt.Errorf("pools.orderRequest.waitQueueSize must be >= 0")
 	}
 
 	if strings.TrimSpace(c.APIServer.Addr) == "" {
-		return fmt.Errorf("api_server.addr required")
+		return fmt.Errorf("apiServer.addr required")
 	}
 
 	if strings.TrimSpace(c.Risk.MaxPositionSize) == "" {
-		return fmt.Errorf("risk.max_position_size required")
+		return fmt.Errorf("risk.maxPositionSize required")
 	}
 	if strings.TrimSpace(c.Risk.MaxNotionalValue) == "" {
-		return fmt.Errorf("risk.max_notional_value required")
+		return fmt.Errorf("risk.maxNotionalValue required")
 	}
 	if strings.TrimSpace(c.Risk.NotionalCurrency) == "" {
-		return fmt.Errorf("risk.notional_currency required")
+		return fmt.Errorf("risk.notionalCurrency required")
 	}
 	if c.Risk.OrderThrottle <= 0 {
-		return fmt.Errorf("risk.order_throttle must be > 0")
+		return fmt.Errorf("risk.orderThrottle must be > 0")
 	}
 	if c.Risk.OrderBurst <= 0 {
-		return fmt.Errorf("risk.order_burst must be > 0")
+		return fmt.Errorf("risk.orderBurst must be > 0")
 	}
 	if c.Risk.MaxConcurrentOrders < 0 {
-		return fmt.Errorf("risk.max_concurrent_orders must be >= 0")
+		return fmt.Errorf("risk.maxConcurrentOrders must be >= 0")
 	}
 	if c.Risk.PriceBandPercent < 0 {
-		return fmt.Errorf("risk.price_band_percent must be >= 0")
+		return fmt.Errorf("risk.priceBandPercent must be >= 0")
 	}
 	if c.Risk.MaxRiskBreaches < 0 {
-		return fmt.Errorf("risk.max_risk_breaches must be >= 0")
+		return fmt.Errorf("risk.maxRiskBreaches must be >= 0")
 	}
 	if c.Risk.CircuitBreaker.Threshold < 0 {
-		return fmt.Errorf("risk.circuit_breaker.threshold must be >= 0")
+		return fmt.Errorf("risk.circuitBreaker.threshold must be >= 0")
 	}
 	if c.Risk.CircuitBreaker.Enabled && strings.TrimSpace(c.Risk.CircuitBreaker.Cooldown) == "" {
-		return fmt.Errorf("risk.circuit_breaker.cooldown required when enabled")
+		return fmt.Errorf("risk.circuitBreaker.cooldown required when enabled")
 	}
 
 	if strings.TrimSpace(c.Telemetry.ServiceName) == "" {
-		return fmt.Errorf("telemetry.service_name required")
+		return fmt.Errorf("telemetry.serviceName required")
 	}
 
 	return nil

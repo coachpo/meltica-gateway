@@ -37,11 +37,11 @@ import { cn } from '@/lib/utils';
 const INSTRUMENTS_PAGE_SIZE = 120;
 
 function instrumentBaseValue(instrument: Instrument): string {
-  return instrument.baseAsset ?? instrument.base_currency ?? '';
+  return instrument.baseAsset ?? instrument.baseCurrency ?? '';
 }
 
 function instrumentQuoteValue(instrument: Instrument): string {
-  return instrument.quoteAsset ?? instrument.quote_currency ?? '';
+  return instrument.quoteAsset ?? instrument.quoteCurrency ?? '';
 }
 
 function formatInstrumentMetric(value: unknown): string {
@@ -323,17 +323,13 @@ export default function ProvidersPage() {
       base: instrumentBaseValue(selectedInstrument) || '—',
       quote: instrumentQuoteValue(selectedInstrument) || '—',
       type: selectedInstrument.type ?? '—',
-      pricePrecision: formatInstrumentMetric(
-        selectedInstrument.pricePrecision ?? selectedInstrument.price_precision,
-      ),
-      quantityPrecision: formatInstrumentMetric(
-        selectedInstrument.quantityPrecision ?? selectedInstrument.quantity_precision,
-      ),
-      priceIncrement: formatInstrumentMetric(selectedInstrument.price_increment),
-      quantityIncrement: formatInstrumentMetric(selectedInstrument.quantity_increment),
-      minQuantity: formatInstrumentMetric(selectedInstrument.min_quantity),
-      maxQuantity: formatInstrumentMetric(selectedInstrument.max_quantity),
-      notionalPrecision: formatInstrumentMetric(selectedInstrument.notional_precision),
+      pricePrecision: formatInstrumentMetric(selectedInstrument.pricePrecision),
+      quantityPrecision: formatInstrumentMetric(selectedInstrument.quantityPrecision),
+      priceIncrement: formatInstrumentMetric(selectedInstrument.priceIncrement),
+      quantityIncrement: formatInstrumentMetric(selectedInstrument.quantityIncrement),
+      minQuantity: formatInstrumentMetric(selectedInstrument.minQuantity),
+      maxQuantity: formatInstrumentMetric(selectedInstrument.maxQuantity),
+      notionalPrecision: formatInstrumentMetric(selectedInstrument.notionalPrecision),
     };
   }, [selectedInstrument]);
 

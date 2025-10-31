@@ -25,22 +25,22 @@ const (
 type Instrument struct {
 	Symbol            string         `json:"symbol"`
 	Type              InstrumentType `json:"type"`
-	BaseCurrency      string         `json:"base_currency"`
-	QuoteCurrency     string         `json:"quote_currency"`
+	BaseCurrency      string         `json:"baseCurrency"`
+	QuoteCurrency     string         `json:"quoteCurrency"`
 	Venue             string         `json:"venue"`
 	Expiry            string         `json:"expiry,omitempty"`
-	ContractValue     *float64       `json:"contract_value,omitempty"`
-	ContractCurrency  string         `json:"contract_currency,omitempty"`
+	ContractValue     *float64       `json:"contractValue,omitempty"`
+	ContractCurrency  string         `json:"contractCurrency,omitempty"`
 	Strike            *float64       `json:"strike,omitempty"`
-	OptionType        OptionType     `json:"option_type,omitempty"`
-	PriceIncrement    string         `json:"price_increment,omitempty"`
-	QuantityIncrement string         `json:"quantity_increment,omitempty"`
-	PricePrecision    *int           `json:"price_precision,omitempty"`
-	QuantityPrecision *int           `json:"quantity_precision,omitempty"`
-	NotionalPrecision *int           `json:"notional_precision,omitempty"`
-	MinNotional       string         `json:"min_notional,omitempty"`
-	MinQuantity       string         `json:"min_quantity,omitempty"`
-	MaxQuantity       string         `json:"max_quantity,omitempty"`
+	OptionType        OptionType     `json:"optionType,omitempty"`
+	PriceIncrement    string         `json:"priceIncrement,omitempty"`
+	QuantityIncrement string         `json:"quantityIncrement,omitempty"`
+	PricePrecision    *int           `json:"pricePrecision,omitempty"`
+	QuantityPrecision *int           `json:"quantityPrecision,omitempty"`
+	NotionalPrecision *int           `json:"notionalPrecision,omitempty"`
+	MinNotional       string         `json:"minNotional,omitempty"`
+	MinQuantity       string         `json:"minQuantity,omitempty"`
+	MaxQuantity       string         `json:"maxQuantity,omitempty"`
 }
 
 // InstrumentType identifies the market structure for an instrument.
@@ -169,23 +169,23 @@ func (i *Instrument) Validate() error {
 	}
 	i.Symbol = symbol
 
-	base, err := normalizeRequiredCurrency(i.BaseCurrency, "instrument.base_currency")
+	base, err := normalizeRequiredCurrency(i.BaseCurrency, "instrument.baseCurrency")
 	if err != nil {
 		return err
 	}
 	i.BaseCurrency = base
 
-	quote, err := normalizeRequiredCurrency(i.QuoteCurrency, "instrument.quote_currency")
+	quote, err := normalizeRequiredCurrency(i.QuoteCurrency, "instrument.quoteCurrency")
 	if err != nil {
 		return err
 	}
 	i.QuoteCurrency = quote
 
 	if parts[0] != i.BaseCurrency {
-		return instrumentError("instrument.base_currency must match symbol base segment")
+		return instrumentError("instrument.baseCurrency must match symbol base segment")
 	}
 	if parts[1] != i.QuoteCurrency {
-		return instrumentError("instrument.quote_currency must match symbol quote segment")
+		return instrumentError("instrument.quoteCurrency must match symbol quote segment")
 	}
 
 	venue, err := normalizeVenue(i.Venue)
@@ -320,25 +320,25 @@ func validateContractNotional(i *Instrument) error {
 	switch i.Type {
 	case InstrumentTypeSpot:
 		if i.ContractValue != nil {
-			return instrumentError("instrument.contract_value must be omitted for spot instruments")
+			return instrumentError("instrument.contractValue must be omitted for spot instruments")
 		}
 		if strings.TrimSpace(i.ContractCurrency) != "" {
-			return instrumentError("instrument.contract_currency must be omitted for spot instruments")
+			return instrumentError("instrument.contractCurrency must be omitted for spot instruments")
 		}
 		i.ContractCurrency = ""
 	case InstrumentTypePerp, InstrumentTypeFutures, InstrumentTypeOptions:
-		normalized, err := normalizeOptionalCurrency(i.ContractCurrency, "instrument.contract_currency")
+		normalized, err := normalizeOptionalCurrency(i.ContractCurrency, "instrument.contractCurrency")
 		if err != nil {
 			return err
 		}
 		if normalized != "" && i.ContractValue == nil {
-			return instrumentError("instrument.contract_value required when contract_currency is provided")
+			return instrumentError("instrument.contractValue required when contractCurrency is provided")
 		}
 		if i.ContractValue != nil && normalized == "" {
-			return instrumentError("instrument.contract_currency required when contract_value is provided")
+			return instrumentError("instrument.contractCurrency required when contractValue is provided")
 		}
 		if i.ContractValue != nil && *i.ContractValue <= 0 {
-			return instrumentError("instrument.contract_value must be greater than zero when provided")
+			return instrumentError("instrument.contractValue must be greater than zero when provided")
 		}
 		i.ContractCurrency = normalized
 	default:
@@ -353,7 +353,7 @@ func validateOptionsSpecifics(i *Instrument, meta symbolMeta) error {
 			return instrumentError("instrument.strike must be omitted for non-options instruments")
 		}
 		if strings.TrimSpace(string(i.OptionType)) != "" {
-			return instrumentError("instrument.option_type must be omitted for non-options instruments")
+			return instrumentError("instrument.optionType must be omitted for non-options instruments")
 		}
 		i.OptionType = ""
 		return nil
@@ -375,58 +375,58 @@ func validateOptionsSpecifics(i *Instrument, meta symbolMeta) error {
 
 	optionType := OptionType(strings.ToLower(strings.TrimSpace(string(i.OptionType))))
 	if optionType == "" {
-		return instrumentError("instrument.option_type required for options instruments")
+		return instrumentError("instrument.optionType required for options instruments")
 	}
 	if !optionType.Valid() {
-		return instrumentError("instrument.option_type invalid")
+		return instrumentError("instrument.optionType invalid")
 	}
 	if meta.optionMarker != "" && meta.optionMarker != optionType {
-		return instrumentError("instrument.option_type does not match symbol option marker")
+		return instrumentError("instrument.optionType does not match symbol option marker")
 	}
 	i.OptionType = optionType
 	return nil
 }
 
 func validateTradingConstraints(i *Instrument) error {
-	priceIncrement, _, err := normalizeOptionalDecimal(i.PriceIncrement, "instrument.price_increment", true)
+	priceIncrement, _, err := normalizeOptionalDecimal(i.PriceIncrement, "instrument.priceIncrement", true)
 	if err != nil {
 		return err
 	}
 	i.PriceIncrement = priceIncrement
 
-	quantityIncrement, _, err := normalizeOptionalDecimal(i.QuantityIncrement, "instrument.quantity_increment", true)
+	quantityIncrement, _, err := normalizeOptionalDecimal(i.QuantityIncrement, "instrument.quantityIncrement", true)
 	if err != nil {
 		return err
 	}
 	i.QuantityIncrement = quantityIncrement
 
-	if err := validatePrecisionField(i.PricePrecision, "instrument.price_precision"); err != nil {
+	if err := validatePrecisionField(i.PricePrecision, "instrument.pricePrecision"); err != nil {
 		return err
 	}
-	if err := validatePrecisionField(i.QuantityPrecision, "instrument.quantity_precision"); err != nil {
+	if err := validatePrecisionField(i.QuantityPrecision, "instrument.quantityPrecision"); err != nil {
 		return err
 	}
-	if err := validatePrecisionField(i.NotionalPrecision, "instrument.notional_precision"); err != nil {
+	if err := validatePrecisionField(i.NotionalPrecision, "instrument.notionalPrecision"); err != nil {
 		return err
 	}
 
-	minQuantity, minQuantityRat, err := normalizeOptionalDecimal(i.MinQuantity, "instrument.min_quantity", true)
+	minQuantity, minQuantityRat, err := normalizeOptionalDecimal(i.MinQuantity, "instrument.minQuantity", true)
 	if err != nil {
 		return err
 	}
 	i.MinQuantity = minQuantity
 
-	maxQuantity, maxQuantityRat, err := normalizeOptionalDecimal(i.MaxQuantity, "instrument.max_quantity", true)
+	maxQuantity, maxQuantityRat, err := normalizeOptionalDecimal(i.MaxQuantity, "instrument.maxQuantity", true)
 	if err != nil {
 		return err
 	}
 	i.MaxQuantity = maxQuantity
 
 	if minQuantityRat != nil && maxQuantityRat != nil && maxQuantityRat.Cmp(minQuantityRat) < 0 {
-		return instrumentError("instrument.max_quantity must be greater than or equal to instrument.min_quantity")
+		return instrumentError("instrument.maxQuantity must be greater than or equal to instrument.minQuantity")
 	}
 
-	minNotional, _, err := normalizeOptionalDecimal(i.MinNotional, "instrument.min_notional", true)
+	minNotional, _, err := normalizeOptionalDecimal(i.MinNotional, "instrument.minNotional", true)
 	if err != nil {
 		return err
 	}

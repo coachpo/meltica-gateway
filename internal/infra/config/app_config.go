@@ -17,8 +17,8 @@ import (
 
 // EventbusConfig sets in-memory event bus sizing characteristics.
 type EventbusConfig struct {
-	BufferSize    int                 `yaml:"buffer_size" json:"buffer_size"`
-	FanoutWorkers FanoutWorkerSetting `yaml:"fanout_workers" json:"fanout_workers"`
+	BufferSize    int                 `yaml:"buffer_size" json:"bufferSize"`
+	FanoutWorkers FanoutWorkerSetting `yaml:"fanout_workers" json:"fanoutWorkers"`
 }
 
 // MetaConfig captures descriptive metadata for the configuration bundle.
@@ -72,10 +72,10 @@ func (s *FanoutWorkerSetting) UnmarshalYAML(node *yaml.Node) error {
 	// Attempt numeric parse for both explicit integers and scalar yaml ints.
 	val, err := strconv.Atoi(text)
 	if err != nil {
-		return fmt.Errorf("fanout_workers: invalid value %q", node.Value)
+		return fmt.Errorf("fanoutWorkers: invalid value %q", node.Value)
 	}
 	if val <= 0 {
-		return fmt.Errorf("fanout_workers: numeric value must be > 0")
+		return fmt.Errorf("fanoutWorkers: numeric value must be > 0")
 	}
 	s.kind = fanoutWorkerExplicit
 	s.value = val
@@ -97,7 +97,7 @@ func (s FanoutWorkerSetting) MarshalJSON() ([]byte, error) {
 	}
 	data, err := json.Marshal(value)
 	if err != nil {
-		return nil, fmt.Errorf("fanout_workers: marshal: %w", err)
+		return nil, fmt.Errorf("fanoutWorkers: marshal: %w", err)
 	}
 	return data, nil
 }
@@ -122,10 +122,10 @@ func (s *FanoutWorkerSetting) UnmarshalJSON(data []byte) error {
 
 		val, err := strconv.Atoi(trimmed)
 		if err != nil {
-			return fmt.Errorf("fanout_workers: invalid value %q", text)
+			return fmt.Errorf("fanoutWorkers: invalid value %q", text)
 		}
 		if val <= 0 {
-			return fmt.Errorf("fanout_workers: numeric value must be > 0")
+			return fmt.Errorf("fanoutWorkers: numeric value must be > 0")
 		}
 		*s = FanoutWorkerSetting{kind: fanoutWorkerExplicit, value: val}
 		return nil
@@ -134,13 +134,13 @@ func (s *FanoutWorkerSetting) UnmarshalJSON(data []byte) error {
 	var numeric int
 	if err := json.Unmarshal(data, &numeric); err == nil {
 		if numeric <= 0 {
-			return fmt.Errorf("fanout_workers: numeric value must be > 0")
+			return fmt.Errorf("fanoutWorkers: numeric value must be > 0")
 		}
 		*s = FanoutWorkerSetting{kind: fanoutWorkerExplicit, value: numeric}
 		return nil
 	}
 
-	return fmt.Errorf("fanout_workers: invalid json value")
+	return fmt.Errorf("fanoutWorkers: invalid json value")
 }
 
 // resolve returns the effective worker count derived from the setting.
@@ -168,13 +168,13 @@ func (c EventbusConfig) FanoutWorkerCount() int {
 // ObjectPoolConfig describes sizing for a single named pool.
 type ObjectPoolConfig struct {
 	Size          int `yaml:"size" json:"size"`
-	WaitQueueSize int `yaml:"wait_queue_size" json:"wait_queue_size"`
+	WaitQueueSize int `yaml:"wait_queue_size" json:"waitQueueSize"`
 }
 
 // PoolConfig controls pooled object capacities.
 type PoolConfig struct {
 	Event        ObjectPoolConfig `yaml:"event" json:"event"`
-	OrderRequest ObjectPoolConfig `yaml:"order_request" json:"order_request"`
+	OrderRequest ObjectPoolConfig `yaml:"order_request" json:"orderRequest"`
 }
 
 // QueueSize returns the effective pending borrower queue size, defaulting to Size.
@@ -201,25 +201,25 @@ type CircuitBreakerConfig struct {
 
 // RiskConfig defines risk parameters for a single strategy.
 type RiskConfig struct {
-	MaxPositionSize     string               `yaml:"max_position_size" json:"max_position_size"`
-	MaxNotionalValue    string               `yaml:"max_notional_value" json:"max_notional_value"`
-	NotionalCurrency    string               `yaml:"notional_currency" json:"notional_currency"`
-	OrderThrottle       float64              `yaml:"order_throttle" json:"order_throttle"`
-	OrderBurst          int                  `yaml:"order_burst" json:"order_burst"`
-	MaxConcurrentOrders int                  `yaml:"max_concurrent_orders" json:"max_concurrent_orders"`
-	PriceBandPercent    float64              `yaml:"price_band_percent" json:"price_band_percent"`
-	AllowedOrderTypes   []string             `yaml:"allowed_order_types" json:"allowed_order_types"`
-	KillSwitchEnabled   bool                 `yaml:"kill_switch_enabled" json:"kill_switch_enabled"`
-	MaxRiskBreaches     int                  `yaml:"max_risk_breaches" json:"max_risk_breaches"`
-	CircuitBreaker      CircuitBreakerConfig `yaml:"circuit_breaker" json:"circuit_breaker"`
+	MaxPositionSize     string               `yaml:"max_position_size" json:"maxPositionSize"`
+	MaxNotionalValue    string               `yaml:"max_notional_value" json:"maxNotionalValue"`
+	NotionalCurrency    string               `yaml:"notional_currency" json:"notionalCurrency"`
+	OrderThrottle       float64              `yaml:"order_throttle" json:"orderThrottle"`
+	OrderBurst          int                  `yaml:"order_burst" json:"orderBurst"`
+	MaxConcurrentOrders int                  `yaml:"max_concurrent_orders" json:"maxConcurrentOrders"`
+	PriceBandPercent    float64              `yaml:"price_band_percent" json:"priceBandPercent"`
+	AllowedOrderTypes   []string             `yaml:"allowed_order_types" json:"allowedOrderTypes"`
+	KillSwitchEnabled   bool                 `yaml:"kill_switch_enabled" json:"killSwitchEnabled"`
+	MaxRiskBreaches     int                  `yaml:"max_risk_breaches" json:"maxRiskBreaches"`
+	CircuitBreaker      CircuitBreakerConfig `yaml:"circuit_breaker" json:"circuitBreaker"`
 }
 
 // TelemetryConfig configures OTLP exporters (metrics only).
 type TelemetryConfig struct {
-	OTLPEndpoint  string `yaml:"otlp_endpoint" json:"otlp_endpoint"`
-	ServiceName   string `yaml:"service_name" json:"service_name"`
-	OTLPInsecure  bool   `yaml:"otlp_insecure" json:"otlp_insecure"`
-	EnableMetrics bool   `yaml:"enable_metrics" json:"enable_metrics"`
+	OTLPEndpoint  string `yaml:"otlp_endpoint" json:"otlpEndpoint"`
+	ServiceName   string `yaml:"service_name" json:"serviceName"`
+	OTLPInsecure  bool   `yaml:"otlp_insecure" json:"otlpInsecure"`
+	EnableMetrics bool   `yaml:"enable_metrics" json:"enableMetrics"`
 }
 
 // AppConfig is the unified Meltica application configuration sourced from YAML.
@@ -228,7 +228,7 @@ type AppConfig struct {
 	Meta           MetaConfig                  `yaml:"meta" json:"meta"`
 	Runtime        RuntimeConfig               `yaml:"runtime" json:"runtime"`
 	Providers      map[Provider]map[string]any `yaml:"providers" json:"providers"`
-	LambdaManifest LambdaManifest              `yaml:"lambda_manifest" json:"lambda_manifest"`
+	LambdaManifest LambdaManifest              `yaml:"lambda_manifest" json:"lambdaManifest"`
 }
 
 // Load reads and validates an AppConfig from the provided YAML file.

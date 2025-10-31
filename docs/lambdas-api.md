@@ -69,8 +69,8 @@ Returns the detailed metadata, including the current instrument catalogue and un
   "instruments": [
     {
       "symbol": "BTC-USDT",
-      "baseAsset": "BTC",
-      "quoteAsset": "USDT",
+      "baseCurrency": "BTC",
+      "quoteCurrency": "USDT",
       "pricePrecision": 2,
       "quantityPrecision": 6
     }
@@ -150,7 +150,7 @@ Responses:
 
 Notes:
 - `scope` must supply at least one provider with at least one symbol; providers are inferred from this map.
-- Optional `auto_start` is ignored on create—instances are started immediately and returned as a snapshot with `autoStart: false`.
+- Optional `autoStart` is ignored on create—instances are started immediately and returned as a snapshot with `autoStart: false`.
 
 ## Instance Item Endpoints
 

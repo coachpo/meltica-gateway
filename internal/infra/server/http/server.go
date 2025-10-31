@@ -689,34 +689,34 @@ func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
 
 func validateRiskConfig(cfg config.RiskConfig) error {
 	if cfg.MaxPositionSize == "" {
-		return fmt.Errorf("max_position_size required")
+		return fmt.Errorf("maxPositionSize required")
 	}
 	if cfg.MaxNotionalValue == "" {
-		return fmt.Errorf("max_notional_value required")
+		return fmt.Errorf("maxNotionalValue required")
 	}
 	if cfg.NotionalCurrency == "" {
-		return fmt.Errorf("notional_currency required")
+		return fmt.Errorf("notionalCurrency required")
 	}
 	if cfg.OrderThrottle <= 0 {
-		return fmt.Errorf("order_throttle must be > 0")
+		return fmt.Errorf("orderThrottle must be > 0")
 	}
 	if cfg.OrderBurst <= 0 {
-		return fmt.Errorf("order_burst must be > 0")
+		return fmt.Errorf("orderBurst must be > 0")
 	}
 	if cfg.MaxConcurrentOrders < 0 {
-		return fmt.Errorf("max_concurrent_orders must be >= 0")
+		return fmt.Errorf("maxConcurrentOrders must be >= 0")
 	}
 	if cfg.PriceBandPercent < 0 {
-		return fmt.Errorf("price_band_percent must be >= 0")
+		return fmt.Errorf("priceBandPercent must be >= 0")
 	}
 	if cfg.MaxRiskBreaches < 0 {
-		return fmt.Errorf("max_risk_breaches must be >= 0")
+		return fmt.Errorf("maxRiskBreaches must be >= 0")
 	}
 	if cfg.CircuitBreaker.Threshold < 0 {
-		return fmt.Errorf("circuit_breaker.threshold must be >= 0")
+		return fmt.Errorf("circuitBreaker.threshold must be >= 0")
 	}
 	if cfg.CircuitBreaker.Enabled && strings.TrimSpace(cfg.CircuitBreaker.Cooldown) == "" {
-		return fmt.Errorf("circuit_breaker.cooldown required when enabled")
+		return fmt.Errorf("circuitBreaker.cooldown required when enabled")
 	}
 	return nil
 }

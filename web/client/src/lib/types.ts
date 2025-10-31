@@ -31,18 +31,23 @@ export interface Instrument {
   symbol: string;
   type?: string;
   baseAsset?: string | null;
-  base_currency?: string | null;
+  baseCurrency?: string | null;
   quoteAsset?: string | null;
-  quote_currency?: string | null;
+  quoteCurrency?: string | null;
+  venue?: string | null;
+  expiry?: string | null;
+  contractValue?: number | null;
+  contractCurrency?: string | null;
+  strike?: number | null;
+  optionType?: string | null;
+  priceIncrement?: number | string | null;
+  quantityIncrement?: number | string | null;
   pricePrecision?: number | null;
-  price_precision?: number | null;
   quantityPrecision?: number | null;
-  quantity_precision?: number | null;
-  price_increment?: number | string | null;
-  quantity_increment?: number | string | null;
-  notional_precision?: number | null;
-  min_quantity?: number | string | null;
-  max_quantity?: number | string | null;
+  notionalPrecision?: number | null;
+  minNotional?: number | string | null;
+  minQuantity?: number | string | null;
+  maxQuantity?: number | string | null;
   [key: string]: unknown;
 }
 

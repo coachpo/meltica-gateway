@@ -71,7 +71,7 @@ func (p *ProviderSymbols) Normalize() {
 type LambdaSpec struct {
 	ID              string                     `yaml:"id" json:"id"`
 	Strategy        LambdaStrategySpec         `yaml:"strategy" json:"strategy"`
-	AutoStart       bool                       `yaml:"auto_start" json:"auto_start"`
+	AutoStart       bool                       `yaml:"auto_start" json:"autoStart"`
 	ProviderSymbols map[string]ProviderSymbols `yaml:"scope" json:"scope"`
 	Providers       []string                   `yaml:"-" json:"-"`
 }
