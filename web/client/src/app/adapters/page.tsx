@@ -56,9 +56,14 @@ export default function AdaptersPage() {
                 <CardTitle>{adapter.displayName}</CardTitle>
                 <Badge variant="outline">{adapter.venue}</Badge>
               </div>
-              <CardDescription>
+              {adapter.description && (
+                <CardDescription className="mt-2">
+                  {adapter.description}
+                </CardDescription>
+              )}
+              <p className="text-xs text-muted-foreground">
                 Identifier: {adapter.identifier}
-              </CardDescription>
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>

@@ -46,6 +46,7 @@ export interface AdapterMetadata {
   identifier: string;
   displayName: string;
   venue: string;
+  description?: string;
   capabilities: string[];
   settingsSchema: SettingsSchema[];
 }

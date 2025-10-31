@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type {
   AdapterMetadata,
+  Instrument,
   Provider,
   ProviderDetail,
   ProviderRequest,
@@ -31,6 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 
 type FormMode = 'create' | 'edit';
 
@@ -144,6 +146,7 @@ export default function ProvidersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>('create');
@@ -156,6 +159,8 @@ export default function ProvidersPage() {
   const [detail, setDetail] = useState<ProviderDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(null);
+  const [instrumentQuery, setInstrumentQuery] = useState('');
 
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
@@ -163,6 +168,14 @@ export default function ProvidersPage() {
     () => adapters.find((adapter) => adapter.identifier === formState.adapter),
     [adapters, formState.adapter],
   );
+
+  const adapterByIdentifier = useMemo(() => {
+    const map = new Map<string, AdapterMetadata>();
+    adapters.forEach((adapter) => {
+      map.set(adapter.identifier, adapter);
+    });
+    return map;
+  }, [adapters]);
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -184,6 +197,71 @@ export default function ProvidersPage() {
 
     fetchInitial();
   }, []);
+
+  useEffect(() => {
+    if (!detailOpen) {
+      setSelectedInstrument(null);
+      setInstrumentQuery('');
+    }
+  }, [detailOpen]);
+
+  useEffect(() => {
+    if (!detail) {
+      setSelectedInstrument(null);
+      return;
+    }
+    setInstrumentQuery('');
+  }, [detail]);
+
+  const filteredInstruments = useMemo(() => {
+    if (!detail) {
+      return [] as Instrument[];
+    }
+    const query = instrumentQuery.trim().toLowerCase();
+    if (!query) {
+      return detail.instruments;
+    }
+    return detail.instruments.filter((instrument) => {
+      const symbol = instrument.symbol.toLowerCase();
+      const base = instrument.baseAsset.toLowerCase();
+      const quote = instrument.quoteAsset.toLowerCase();
+      return (
+        symbol.includes(query) || base.includes(query) || quote.includes(query)
+      );
+    });
+  }, [detail, instrumentQuery]);
+
+  useEffect(() => {
+    if (!filteredInstruments.length) {
+      setSelectedInstrument(null);
+      return;
+    }
+    if (!selectedInstrument) {
+      setSelectedInstrument(filteredInstruments[0]);
+      return;
+    }
+    const stillSelected = filteredInstruments.some(
+      (instrument) => instrument.symbol === selectedInstrument.symbol,
+    );
+    if (!stillSelected) {
+      setSelectedInstrument(filteredInstruments[0]);
+    }
+  }, [filteredInstruments, selectedInstrument]);
+
+  useEffect(() => {
+    if (!actionNotice) {
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setActionNotice(null);
+    }, 4000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [actionNotice]);
 
   const refreshProviders = async () => {
     try {
@@ -270,6 +348,8 @@ export default function ProvidersPage() {
 
   const handleFormSubmit = async () => {
     setFormError(null);
+    setActionNotice(null);
+    const mode = formMode;
     const trimmedName = formState.name.trim();
     if (!trimmedName) {
       setFormError('Provider name is required');
@@ -297,12 +377,17 @@ export default function ProvidersPage() {
 
     setSubmitting(true);
     try {
-      if (formMode === 'create') {
+      if (mode === 'create') {
         await apiClient.createProvider(payload);
       } else {
         await apiClient.updateProvider(trimmedName, payload);
       }
       await refreshProviders();
+      setActionNotice(
+        mode === 'create'
+          ? `Provider ${trimmedName} created successfully`
+          : `Provider ${trimmedName} updated successfully`,
+      );
       handleFormOpenChange(false);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to save provider');
@@ -313,10 +398,12 @@ export default function ProvidersPage() {
 
   const handleStart = async (name: string) => {
     setActionError(null);
+    setActionNotice(null);
     setPendingAction(name);
     try {
       await apiClient.startProvider(name);
       await refreshProviders();
+      setActionNotice(`Provider ${name} started`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Failed to start ${name}`);
     } finally {
@@ -326,10 +413,12 @@ export default function ProvidersPage() {
 
   const handleStop = async (name: string) => {
     setActionError(null);
+    setActionNotice(null);
     setPendingAction(name);
     try {
       await apiClient.stopProvider(name);
       await refreshProviders();
+      setActionNotice(`Provider ${name} stopped`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Failed to stop ${name}`);
     } finally {
@@ -345,10 +434,12 @@ export default function ProvidersPage() {
       }
     }
     setActionError(null);
+    setActionNotice(null);
     setPendingAction(name);
     try {
       await apiClient.deleteProvider(name);
       await refreshProviders();
+      setActionNotice(`Provider ${name} deleted`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Failed to delete ${name}`);
     } finally {
@@ -380,6 +471,23 @@ export default function ProvidersPage() {
         <Button onClick={handleCreateClick}>Create provider</Button>
       </div>
 
+      {actionNotice && (
+        <Alert>
+          <AlertDescription>
+            <div className="flex items-center justify-between gap-4">
+              <span>{actionNotice}</span>
+              <button
+                type="button"
+                className="text-sm font-medium text-primary hover:underline"
+                onClick={() => setActionNotice(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {actionError && (
         <Alert variant="destructive">
           <AlertDescription>{actionError}</AlertDescription>
@@ -389,13 +497,23 @@ export default function ProvidersPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {providers.map((provider) => {
           const isPending = pendingAction === provider.name;
+          const adapterMeta = adapterByIdentifier.get(provider.adapter);
           return (
             <Card key={provider.name}>
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <CardTitle>{provider.name}</CardTitle>
-                    <CardDescription>{provider.adapter}</CardDescription>
+                    <CardDescription>
+                      {adapterMeta
+                        ? `${adapterMeta.displayName} (${adapterMeta.identifier})`
+                        : provider.adapter}
+                    </CardDescription>
+                    {adapterMeta?.description && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {adapterMeta.description}
+                      </p>
+                    )}
                   </div>
                   <Badge variant={provider.running ? 'default' : 'secondary'}>
                     {provider.running ? 'Running' : 'Stopped'}
@@ -597,6 +715,11 @@ export default function ProvidersPage() {
                 <p className="text-muted-foreground">
                   {detail.adapter.displayName} ({detail.adapter.identifier})
                 </p>
+                {detail.adapter.description && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {detail.adapter.description}
+                  </p>
+                )}
               </div>
 
               <Separator />
@@ -621,21 +744,81 @@ export default function ProvidersPage() {
 
               <div>
                 <p className="font-medium text-foreground">
-                  Instruments ({detail.instruments.length})
+                  Instruments (
+                  {filteredInstruments.length}
+                  {detail.instruments.length !== filteredInstruments.length
+                    ? ` of ${detail.instruments.length}`
+                    : ''}
+                  )
                 </p>
                 {detail.instruments.length === 0 ? (
                   <p className="text-muted-foreground">No instruments registered.</p>
                 ) : (
-                  <div className="max-h-48 overflow-y-auto space-y-1 text-muted-foreground">
-                    {detail.instruments.map((instrument) => (
-                      <div key={instrument.symbol}>
-                        <span className="font-medium text-foreground">{instrument.symbol}</span>{' '}
-                        ({instrument.baseAsset}/{instrument.quoteAsset})
+                  <>
+                    <Input
+                      value={instrumentQuery}
+                      onChange={(event) => setInstrumentQuery(event.target.value)}
+                      placeholder="Search symbol or asset"
+                      className="mt-2"
+                    />
+                    {filteredInstruments.length === 0 ? (
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        No instruments match your filter.
+                      </p>
+                    ) : (
+                      <div className="max-h-56 overflow-y-auto space-y-1">
+                        {filteredInstruments.map((instrument) => {
+                      const isSelected = selectedInstrument?.symbol === instrument.symbol;
+                      return (
+                        <button
+                          key={instrument.symbol}
+                          type="button"
+                          onClick={() => setSelectedInstrument(instrument)}
+                          className={cn(
+                            'w-full rounded-md px-2 py-1 text-left text-sm transition-colors',
+                            isSelected
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-muted-foreground hover:bg-muted'
+                          )}
+                        >
+                          <span className="font-medium">{instrument.symbol}</span>{' '}
+                          ({instrument.baseAsset}/{instrument.quoteAsset})
+                        </button>
+                      );
+                        })}
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 )}
               </div>
+
+              {selectedInstrument && (
+                <div className="space-y-2 rounded-lg border bg-muted/30 p-4 text-sm">
+                  <p className="font-medium text-foreground">Instrument details</p>
+                  <div className="grid gap-1 text-muted-foreground">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Symbol</span>
+                      <span>{selectedInstrument.symbol}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Base asset</span>
+                      <span>{selectedInstrument.baseAsset}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Quote asset</span>
+                      <span>{selectedInstrument.quoteAsset}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Price precision</span>
+                      <span>{selectedInstrument.pricePrecision}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Quantity precision</span>
+                      <span>{selectedInstrument.quantityPrecision}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-muted-foreground">Select a provider to view details.</div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { RiskConfig } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,60 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+
+type RiskPresence = {
+  maxPositionSize: boolean;
+  maxNotionalValue: boolean;
+  notionalCurrency: boolean;
+  orderThrottle: boolean;
+  orderBurst: boolean;
+  maxConcurrentOrders: boolean;
+  priceBandPercent: boolean;
+  allowedOrderTypes: boolean;
+  killSwitchEnabled: boolean;
+  maxRiskBreaches: boolean;
+  circuitBreaker: {
+    enabled: boolean;
+    threshold: boolean;
+    cooldown: boolean;
+  };
+};
+
+const computePresence = (config?: Partial<RiskConfig> | null): RiskPresence => {
+  const source = (config ?? {}) as Partial<RiskConfig>;
+  const circuit = (source.circuitBreaker ?? {}) as Partial<RiskConfig['circuitBreaker']>;
+  const has = <K extends keyof RiskConfig>(key: K) =>
+    Object.prototype.hasOwnProperty.call(source, key) &&
+    source[key] !== undefined &&
+    source[key] !== null &&
+    (typeof source[key] !== 'string' || (source[key] as unknown as string).trim() !== '');
+  const hasCircuit = <K extends keyof RiskConfig['circuitBreaker']>(key: K) =>
+    Object.prototype.hasOwnProperty.call(circuit, key) &&
+    circuit[key] !== undefined &&
+    circuit[key] !== null &&
+    (typeof circuit[key] !== 'string' || (circuit[key] as unknown as string).trim() !== '');
+
+  return {
+    maxPositionSize: has('maxPositionSize'),
+    maxNotionalValue: has('maxNotionalValue'),
+    notionalCurrency: has('notionalCurrency'),
+    orderThrottle: has('orderThrottle'),
+    orderBurst: has('orderBurst'),
+    maxConcurrentOrders: has('maxConcurrentOrders'),
+    priceBandPercent: has('priceBandPercent'),
+    allowedOrderTypes:
+      Object.prototype.hasOwnProperty.call(source, 'allowedOrderTypes') &&
+      Array.isArray(source.allowedOrderTypes) &&
+      source.allowedOrderTypes.length > 0,
+    killSwitchEnabled: Object.prototype.hasOwnProperty.call(source, 'killSwitchEnabled'),
+    maxRiskBreaches: has('maxRiskBreaches'),
+    circuitBreaker: {
+      enabled: Object.prototype.hasOwnProperty.call(circuit, 'enabled'),
+      threshold: hasCircuit('threshold'),
+      cooldown: hasCircuit('cooldown'),
+    },
+  };
+};
 
 export default function RiskPage() {
   const normalizeRiskConfig = (config?: RiskConfig | null): RiskConfig => ({
@@ -35,6 +89,9 @@ export default function RiskPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [presence, setPresence] = useState<RiskPresence | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<RiskConfig>({
     maxPositionSize: '',
@@ -59,8 +116,10 @@ export default function RiskPage() {
       try {
         const response = await apiClient.getRiskLimits();
         const normalized = normalizeRiskConfig(response.limits);
+        const resolvedPresence = computePresence(response.limits as Partial<RiskConfig>);
         setLimits(normalized);
         setFormData(normalized);
+        setPresence(resolvedPresence);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch risk limits');
       } finally {
@@ -71,16 +130,33 @@ export default function RiskPage() {
     void loadLimits();
   }, []);
 
+  useEffect(() => {
+    if (!actionMessage) {
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const timeout = window.setTimeout(() => setActionMessage(null), 4000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [actionMessage]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
+      setActionMessage(null);
+      setActionError(null);
       const response = await apiClient.updateRiskLimits(formData);
       const normalized = normalizeRiskConfig(response.limits);
+      const resolvedPresence = computePresence(response.limits as Partial<RiskConfig>);
       setLimits(normalized);
       setEditMode(false);
-      alert('Risk limits updated successfully');
+      setPresence(resolvedPresence);
+      setActionMessage('Risk limits updated successfully');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update risk limits');
+      setActionError(err instanceof Error ? err.message : 'Failed to update risk limits');
     } finally {
       setSaving(false);
     }
@@ -91,12 +167,37 @@ export default function RiskPage() {
       setFormData(normalizeRiskConfig(limits));
     }
     setEditMode(false);
+    setActionError(null);
   };
 
   const handleOrderTypesChange = (value: string) => {
     const types = value.split(',').map((t) => t.trim()).filter(Boolean);
     setFormData((prev) => ({ ...prev, allowedOrderTypes: types }));
   };
+
+  const missingFields = useMemo(() => {
+    if (!presence) {
+      return [] as string[];
+    }
+    const fields: string[] = [];
+    if (!presence.maxPositionSize) fields.push('Max position size');
+    if (!presence.maxNotionalValue) fields.push('Max notional value');
+    if (!presence.notionalCurrency) fields.push('Notional currency');
+    if (!presence.orderThrottle) fields.push('Order throttle');
+    if (!presence.orderBurst) fields.push('Order burst');
+    if (!presence.maxConcurrentOrders) fields.push('Max concurrent orders');
+    if (!presence.priceBandPercent) fields.push('Price band percent');
+    if (!presence.allowedOrderTypes) fields.push('Allowed order types');
+    if (!presence.killSwitchEnabled) fields.push('Kill switch');
+    if (!presence.maxRiskBreaches) fields.push('Max risk breaches');
+    if (!presence.circuitBreaker.enabled) {
+      fields.push('Circuit breaker');
+    } else {
+      if (!presence.circuitBreaker.threshold) fields.push('Circuit breaker threshold');
+      if (!presence.circuitBreaker.cooldown) fields.push('Circuit breaker cooldown');
+    }
+    return fields;
+  }, [presence]);
 
   if (loading) {
     return <div>Loading risk limits...</div>;
@@ -133,6 +234,53 @@ export default function RiskPage() {
         )}
       </div>
 
+      {actionMessage && (
+        <Alert>
+          <AlertDescription>
+            <div className="flex items-center justify-between gap-4">
+              <span>{actionMessage}</span>
+              <button
+                type="button"
+                className="text-sm font-medium text-primary hover:underline"
+                onClick={() => setActionMessage(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {actionError && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            <div className="flex items-center justify-between gap-4">
+              <span>{actionError}</span>
+              <button
+                type="button"
+                className="text-sm font-medium text-destructive hover:underline"
+                onClick={() => setActionError(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {missingFields.length > 0 && !editMode && (
+        <Alert>
+          <AlertDescription>
+            <div className="space-y-2">
+              <div className="font-medium text-foreground">Action recommended</div>
+              <div className="text-sm text-muted-foreground">
+                Configure the following risk limits: {missingFields.join(', ')}.
+              </div>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
@@ -150,7 +298,11 @@ export default function RiskPage() {
                   placeholder="e.g., 1000"
                 />
               ) : (
-                <div className="text-sm text-muted-foreground">{limits?.maxPositionSize}</div>
+                <div className="text-sm text-muted-foreground">
+                  {presence?.maxPositionSize && limits?.maxPositionSize
+                    ? limits.maxPositionSize
+                    : <span className="italic">Not configured</span>}
+                </div>
               )}
             </div>
             <div className="grid gap-2">
@@ -163,7 +315,11 @@ export default function RiskPage() {
                   placeholder="e.g., 10000"
                 />
               ) : (
-                <div className="text-sm text-muted-foreground">{limits?.maxNotionalValue}</div>
+                <div className="text-sm text-muted-foreground">
+                  {presence?.maxNotionalValue && limits?.maxNotionalValue
+                    ? limits.maxNotionalValue
+                    : <span className="italic">Not configured</span>}
+                </div>
               )}
             </div>
             <div className="grid gap-2">
@@ -176,7 +332,11 @@ export default function RiskPage() {
                   placeholder="e.g., USDT"
                 />
               ) : (
-                <div className="text-sm text-muted-foreground">{limits?.notionalCurrency}</div>
+                <div className="text-sm text-muted-foreground">
+                  {presence?.notionalCurrency && limits?.notionalCurrency
+                    ? limits.notionalCurrency
+                    : <span className="italic">Not configured</span>}
+                </div>
               )}
             </div>
           </CardContent>
@@ -198,7 +358,11 @@ export default function RiskPage() {
                   onChange={(e) => setFormData({ ...formData, orderThrottle: Number(e.target.value) })}
                 />
               ) : (
-                <div className="text-sm text-muted-foreground">{limits?.orderThrottle}</div>
+                <div className="text-sm text-muted-foreground">
+                  {presence?.orderThrottle
+                    ? `${limits?.orderThrottle ?? 0}`
+                    : <span className="italic">Not configured</span>}
+                </div>
               )}
             </div>
             <div className="grid gap-2">
@@ -211,7 +375,11 @@ export default function RiskPage() {
                   onChange={(e) => setFormData({ ...formData, orderBurst: Number(e.target.value) })}
                 />
               ) : (
-                <div className="text-sm text-muted-foreground">{limits?.orderBurst}</div>
+                <div className="text-sm text-muted-foreground">
+                  {presence?.orderBurst
+                    ? `${limits?.orderBurst ?? 0}`
+                    : <span className="italic">Not configured</span>}
+                </div>
               )}
             </div>
             <div className="grid gap-2">
@@ -224,7 +392,11 @@ export default function RiskPage() {
                   onChange={(e) => setFormData({ ...formData, maxConcurrentOrders: Number(e.target.value) })}
                 />
               ) : (
-                <div className="text-sm text-muted-foreground">{limits?.maxConcurrentOrders}</div>
+                <div className="text-sm text-muted-foreground">
+                  {presence?.maxConcurrentOrders
+                    ? `${limits?.maxConcurrentOrders ?? 0}`
+                    : <span className="italic">Not configured</span>}
+                </div>
               )}
             </div>
           </CardContent>
@@ -247,7 +419,11 @@ export default function RiskPage() {
                   onChange={(e) => setFormData({ ...formData, priceBandPercent: Number(e.target.value) })}
                 />
               ) : (
-                <div className="text-sm text-muted-foreground">{limits?.priceBandPercent}%</div>
+                <div className="text-sm text-muted-foreground">
+                  {presence?.priceBandPercent
+                    ? `${limits?.priceBandPercent ?? 0}%`
+                    : <span className="italic">Not configured</span>}
+                </div>
               )}
             </div>
             <div className="grid gap-2">
@@ -261,14 +437,14 @@ export default function RiskPage() {
                 />
               ) : (
                 <div className="flex flex-wrap gap-1">
-                  {limits?.allowedOrderTypes?.length ? (
+                  {presence?.allowedOrderTypes && limits?.allowedOrderTypes?.length ? (
                     limits.allowedOrderTypes.map((type) => (
                       <Badge key={type} variant="secondary">
                         {type}
                       </Badge>
                     ))
                   ) : (
-                    <span className="text-sm text-muted-foreground">None</span>
+                    <span className="text-sm italic text-muted-foreground">Not configured</span>
                   )}
                 </div>
               )}
@@ -292,35 +468,55 @@ export default function RiskPage() {
                   onChange={(e) => setFormData({ ...formData, maxRiskBreaches: Number(e.target.value) })}
                 />
               ) : (
-                <div className="text-sm text-muted-foreground">{limits?.maxRiskBreaches}</div>
+                <div className="text-sm text-muted-foreground">
+                  {presence?.maxRiskBreaches
+                    ? `${limits?.maxRiskBreaches ?? 0}`
+                    : <span className="italic">Not configured</span>}
+                </div>
               )}
             </div>
             <Separator />
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Kill Switch</Label>
-                <Badge variant={limits?.killSwitchEnabled ? 'destructive' : 'secondary'}>
-                  {limits?.killSwitchEnabled ? 'Enabled' : 'Disabled'}
-                </Badge>
+                {presence?.killSwitchEnabled ? (
+                  <Badge variant={limits?.killSwitchEnabled ? 'destructive' : 'secondary'}>
+                    {limits?.killSwitchEnabled ? 'Enabled' : 'Disabled'}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">Not configured</Badge>
+                )}
               </div>
             </div>
             <Separator />
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label>Circuit Breaker</Label>
-                <Badge variant={limits?.circuitBreaker?.enabled ? 'default' : 'secondary'}>
-                  {limits?.circuitBreaker?.enabled ? 'Enabled' : 'Disabled'}
-                </Badge>
+                {presence?.circuitBreaker.enabled ? (
+                  <Badge variant={limits?.circuitBreaker?.enabled ? 'default' : 'secondary'}>
+                    {limits?.circuitBreaker?.enabled ? 'Enabled' : 'Disabled'}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">Not configured</Badge>
+                )}
               </div>
-              {limits?.circuitBreaker?.enabled && (
+              {presence?.circuitBreaker.enabled && limits?.circuitBreaker?.enabled && (
                 <>
                   <div>
                     <span className="text-sm font-medium">Threshold:</span>{' '}
-                    <span className="text-sm text-muted-foreground">{limits?.circuitBreaker?.threshold}</span>
+                    {presence.circuitBreaker.threshold ? (
+                      <span className="text-sm text-muted-foreground">{limits?.circuitBreaker?.threshold}</span>
+                    ) : (
+                      <span className="text-sm italic text-muted-foreground">Not configured</span>
+                    )}
                   </div>
                   <div>
                     <span className="text-sm font-medium">Cooldown:</span>{' '}
-                    <span className="text-sm text-muted-foreground">{limits?.circuitBreaker?.cooldown}</span>
+                    {presence.circuitBreaker.cooldown ? (
+                      <span className="text-sm text-muted-foreground">{limits?.circuitBreaker?.cooldown}</span>
+                    ) : (
+                      <span className="text-sm italic text-muted-foreground">Not configured</span>
+                    )}
                   </div>
                 </>
               )}

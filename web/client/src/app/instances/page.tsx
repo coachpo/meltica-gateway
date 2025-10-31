@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon } from 'lucide-react';
+import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon } from 'lucide-react';
 
 export default function InstancesPage() {
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
@@ -19,7 +19,14 @@ export default function InstancesPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create');
+  const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
+  const [prefilledConfig, setPrefilledConfig] = useState(false);
+  const [dialogSaving, setDialogSaving] = useState(false);
+  const [instanceLoading, setInstanceLoading] = useState(false);
 
   const [newInstance, setNewInstance] = useState({
     id: '',
@@ -37,7 +44,12 @@ export default function InstancesPage() {
 
   useEffect(() => {
     if (!selectedStrategy) {
-      setConfigValues({});
+      if (!prefilledConfig) {
+        setConfigValues({});
+      }
+      return;
+    }
+    if (dialogMode === 'edit' && prefilledConfig) {
       return;
     }
     const defaults: Record<string, string> = {};
@@ -53,7 +65,7 @@ export default function InstancesPage() {
       defaults[field.name] = field.type === 'bool' ? 'false' : '';
     });
     setConfigValues(defaults);
-  }, [selectedStrategy]);
+  }, [selectedStrategy, dialogMode, prefilledConfig]);
 
   const resetForm = () => {
     setNewInstance({
@@ -64,6 +76,11 @@ export default function InstancesPage() {
     });
     setConfigValues({});
     setFormError(null);
+    setEditingInstanceId(null);
+    setDialogMode('create');
+    setPrefilledConfig(false);
+    setDialogSaving(false);
+    setInstanceLoading(false);
   };
 
   const handleConfigChange = (field: string, value: string) => {
@@ -74,6 +91,19 @@ export default function InstancesPage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (!actionMessage) {
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const timeout = window.setTimeout(() => setActionMessage(null), 4000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [actionMessage]);
 
   const fetchData = async () => {
     try {
@@ -92,7 +122,7 @@ export default function InstancesPage() {
     }
   };
 
-  const handleCreate = async () => {
+  const handleSubmit = async () => {
     if (!newInstance.id.trim()) {
       setFormError('Instance ID is required');
       return;
@@ -156,41 +186,76 @@ export default function InstancesPage() {
       configPayload[field.name] = rawValue;
     }
 
+    const payload = {
+      id: newInstance.id.trim(),
+      strategy: {
+        identifier: newInstance.strategyIdentifier,
+        config: configPayload,
+      },
+      scope: {
+        [newInstance.provider]: { symbols },
+      },
+    };
+
+    const mode = dialogMode;
+    const targetId = newInstance.id.trim();
     try {
       setFormError(null);
-      await apiClient.createInstance({
-        id: newInstance.id.trim(),
-        strategy: {
-          identifier: newInstance.strategyIdentifier,
-          config: configPayload,
-        },
-        scope: {
-          [newInstance.provider]: { symbols },
-        },
-      });
+      setDialogSaving(true);
+      setActionMessage(null);
+      setActionError(null);
+      if (dialogMode === 'edit') {
+        if (!editingInstanceId) {
+          setFormError('No instance selected for update');
+          setDialogSaving(false);
+          return;
+        }
+        await apiClient.updateInstance(editingInstanceId, payload);
+      } else {
+        await apiClient.createInstance(payload);
+      }
       setCreateDialogOpen(false);
       resetForm();
-      fetchData();
+      await fetchData();
+      setActionMessage(
+        mode === 'create'
+          ? `Instance ${targetId} created successfully`
+          : `Instance ${targetId} updated successfully`,
+      );
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to create instance');
+      setFormError(
+        err instanceof Error
+          ? err.message
+          : dialogMode === 'edit'
+            ? 'Failed to update instance'
+            : 'Failed to create instance'
+      );
+    } finally {
+      setDialogSaving(false);
     }
   };
 
   const handleStart = async (id: string) => {
+    setActionMessage(null);
+    setActionError(null);
     try {
       await apiClient.startInstance(id);
-      fetchData();
+      await fetchData();
+      setActionMessage(`Instance ${id} started`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to start instance');
+      setActionError(err instanceof Error ? err.message : `Failed to start ${id}`);
     }
   };
 
   const handleStop = async (id: string) => {
+    setActionMessage(null);
+    setActionError(null);
     try {
       await apiClient.stopInstance(id);
-      fetchData();
+      await fetchData();
+      setActionMessage(`Instance ${id} stopped`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to stop instance');
+      setActionError(err instanceof Error ? err.message : `Failed to stop ${id}`);
     }
   };
 
@@ -198,11 +263,65 @@ export default function InstancesPage() {
     if (!confirm(`Are you sure you want to delete instance "${id}"?`)) {
       return;
     }
+    setActionMessage(null);
+    setActionError(null);
     try {
       await apiClient.deleteInstance(id);
-      fetchData();
+      await fetchData();
+      setActionMessage(`Instance ${id} deleted`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete instance');
+      setActionError(err instanceof Error ? err.message : `Failed to delete ${id}`);
+    }
+  };
+
+  const handleEdit = async (id: string) => {
+    setDialogMode('edit');
+    setEditingInstanceId(id);
+    setPrefilledConfig(true);
+    setFormError(null);
+    setConfigValues({});
+    setInstanceLoading(true);
+    setCreateDialogOpen(true);
+    try {
+      const instance = await apiClient.getInstance(id);
+      const providerEntries = Object.entries(instance.scope);
+      const [providerName, providerScope] = providerEntries[0] ?? ['', { symbols: [] }];
+      const symbolsValue = (providerScope?.symbols ?? []).join(', ');
+
+      setNewInstance({
+        id: instance.id,
+        strategyIdentifier: instance.strategy.identifier,
+        provider: providerName,
+        symbols: symbolsValue,
+      });
+
+      const strategyMeta = strategies.find((strategy) => strategy.name === instance.strategy.identifier);
+      if (strategyMeta) {
+        const values: Record<string, string> = {};
+        strategyMeta.config.forEach((field) => {
+          const raw = instance.strategy.config[field.name];
+          if (raw === undefined || raw === null) {
+            values[field.name] = field.type === 'bool' ? 'false' : '';
+            return;
+          }
+          if (field.type === 'bool') {
+            values[field.name] = raw === true ? 'true' : 'false';
+            return;
+          }
+          values[field.name] = String(raw);
+        });
+        setConfigValues(values);
+      } else {
+        const values = Object.fromEntries(
+          Object.entries(instance.strategy.config).map(([key, value]) => [key, String(value)])
+        );
+        setConfigValues(values);
+      }
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to load instance');
+      setPrefilledConfig(false);
+    } finally {
+      setInstanceLoading(false);
     }
   };
 
@@ -237,16 +356,24 @@ export default function InstancesPage() {
           }}
         >
           <DialogTrigger asChild>
-            <Button>
+            <Button
+              onClick={() => {
+                resetForm();
+              }}
+            >
               <PlusIcon className="mr-2 h-4 w-4" />
               Create Instance
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Create Strategy Instance</DialogTitle>
+              <DialogTitle>
+                {dialogMode === 'create' ? 'Create Strategy Instance' : 'Edit Strategy Instance'}
+              </DialogTitle>
               <DialogDescription>
-                Configure and start a new trading strategy instance
+                {dialogMode === 'create'
+                  ? 'Configure a new trading strategy instance'
+                  : 'Update the configuration for this trading strategy instance'}
               </DialogDescription>
             </DialogHeader>
             {formError && (
@@ -254,126 +381,135 @@ export default function InstancesPage() {
                 <AlertDescription>{formError}</AlertDescription>
               </Alert>
             )}
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="id">Instance ID</Label>
-                <Input
-                  id="id"
-                  value={newInstance.id}
-                  onChange={(e) => {
-                    setFormError(null);
-                    setNewInstance({ ...newInstance, id: e.target.value });
-                  }}
-                  placeholder="my-strategy-instance"
-                />
+            {instanceLoading ? (
+              <div className="flex items-center justify-center py-10 text-muted-foreground">
+                <Loader2Icon className="mr-2 h-5 w-5 animate-spin" />
+                Loading instance...
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="strategy">Strategy</Label>
-                <Select
-                  value={newInstance.strategyIdentifier}
-                  onValueChange={(value) => {
-                    setFormError(null);
-                    setNewInstance({ ...newInstance, strategyIdentifier: value });
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select strategy" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {strategies.map((strategy) => (
-                      <SelectItem key={strategy.name} value={strategy.name}>
-                        {strategy.displayName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="provider">Provider</Label>
-                <Select
-                  value={newInstance.provider}
-                  onValueChange={(value) => {
-                    setFormError(null);
-                    setNewInstance({ ...newInstance, provider: value });
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providers.map((provider) => (
-                      <SelectItem key={provider.name} value={provider.name}>
-                        {provider.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="symbols">Symbols (comma-separated)</Label>
-                <Input
-                  id="symbols"
-                  value={newInstance.symbols}
-                  onChange={(e) => {
-                    setFormError(null);
-                    setNewInstance({ ...newInstance, symbols: e.target.value });
-                  }}
-                  placeholder="BTC-USDT, ETH-USDT"
-                />
-              </div>
-              {selectedStrategy && selectedStrategy.config.length > 0 && (
-                <div className="grid gap-3">
-                  <div className="text-sm font-medium">Configuration</div>
-                  <div className="grid gap-4">
-                    {selectedStrategy.config.map((field) => {
-                      const value = configValues[field.name] ?? '';
-                      return (
-                        <div className="grid gap-2" key={field.name}>
-                          <Label htmlFor={`config-${field.name}`}>
-                            {field.name}
-                            {!field.required && (
-                              <span className="ml-1 text-xs font-normal text-muted-foreground">
-                                (optional)
-                              </span>
-                            )}
-                          </Label>
-                          {field.type === 'bool' ? (
-                            <Select
-                              value={value || 'false'}
-                              onValueChange={(val) => handleConfigChange(field.name, val)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select value" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="true">True</SelectItem>
-                                <SelectItem value="false">False</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <Input
-                              id={`config-${field.name}`}
-                              type={field.type === 'int' || field.type === 'float' ? 'number' : 'text'}
-                              step={field.type === 'float' ? 'any' : undefined}
-                              value={value}
-                              onChange={(e) => handleConfigChange(field.name, e.target.value)}
-                              placeholder={
-                                field.default !== undefined && field.default !== null
-                                  ? String(field.default)
-                                  : undefined
-                              }
-                            />
-                          )}
-                          {field.description && (
-                            <p className="text-xs text-muted-foreground">{field.description}</p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+            ) : (
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="id">Instance ID</Label>
+                  <Input
+                    id="id"
+                    value={newInstance.id}
+                    onChange={(e) => {
+                      setFormError(null);
+                      setNewInstance({ ...newInstance, id: e.target.value });
+                    }}
+                    placeholder="my-strategy-instance"
+                    disabled={dialogMode === 'edit'}
+                  />
                 </div>
-              )}
-            </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="strategy">Strategy</Label>
+                  <Select
+                    value={newInstance.strategyIdentifier}
+                    onValueChange={(value) => {
+                      setFormError(null);
+                      setPrefilledConfig(false);
+                      setNewInstance({ ...newInstance, strategyIdentifier: value });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select strategy" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {strategies.map((strategy) => (
+                        <SelectItem key={strategy.name} value={strategy.name}>
+                          {strategy.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="provider">Provider</Label>
+                  <Select
+                    value={newInstance.provider}
+                    onValueChange={(value) => {
+                      setFormError(null);
+                      setNewInstance({ ...newInstance, provider: value });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providers.map((provider) => (
+                        <SelectItem key={provider.name} value={provider.name}>
+                          {provider.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="symbols">Symbols (comma-separated)</Label>
+                  <Input
+                    id="symbols"
+                    value={newInstance.symbols}
+                    onChange={(e) => {
+                      setFormError(null);
+                      setNewInstance({ ...newInstance, symbols: e.target.value });
+                    }}
+                    placeholder="BTC-USDT, ETH-USDT"
+                  />
+                </div>
+                {selectedStrategy && selectedStrategy.config.length > 0 && (
+                  <div className="grid gap-3">
+                    <div className="text-sm font-medium">Configuration</div>
+                    <div className="grid gap-4">
+                      {selectedStrategy.config.map((field) => {
+                        const value = configValues[field.name] ?? '';
+                        return (
+                          <div className="grid gap-2" key={field.name}>
+                            <Label htmlFor={`config-${field.name}`}>
+                              {field.name}
+                              {!field.required && (
+                                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                                  (optional)
+                                </span>
+                              )}
+                            </Label>
+                            {field.type === 'bool' ? (
+                              <Select
+                                value={value || 'false'}
+                                onValueChange={(val) => handleConfigChange(field.name, val)}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select value" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="true">True</SelectItem>
+                                  <SelectItem value="false">False</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Input
+                                id={`config-${field.name}`}
+                                type={field.type === 'int' || field.type === 'float' ? 'number' : 'text'}
+                                step={field.type === 'float' ? 'any' : undefined}
+                                value={value}
+                                onChange={(e) => handleConfigChange(field.name, e.target.value)}
+                                placeholder={
+                                  field.default !== undefined && field.default !== null
+                                    ? String(field.default)
+                                    : undefined
+                                }
+                              />
+                            )}
+                            {field.description && (
+                              <p className="text-xs text-muted-foreground">{field.description}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <DialogFooter>
               <Button
                 variant="outline"
@@ -381,14 +517,58 @@ export default function InstancesPage() {
                   resetForm();
                   setCreateDialogOpen(false);
                 }}
+                disabled={dialogSaving}
               >
                 Cancel
               </Button>
-              <Button onClick={handleCreate}>Create & Start</Button>
+              <Button onClick={handleSubmit} disabled={dialogSaving || instanceLoading}>
+                {dialogSaving ? (
+                  <>
+                    <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
+                    Saving
+                  </>
+                ) : (
+                  dialogMode === 'create' ? 'Create' : 'Save changes'
+                )}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
+
+      {actionMessage && (
+        <Alert>
+          <AlertDescription>
+            <div className="flex items-center justify-between gap-4">
+              <span>{actionMessage}</span>
+              <button
+                type="button"
+                className="text-sm font-medium text-primary hover:underline"
+                onClick={() => setActionMessage(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {actionError && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            <div className="flex items-center justify-between gap-4">
+              <span>{actionError}</span>
+              <button
+                type="button"
+                className="text-sm font-medium text-destructive hover:underline"
+                onClick={() => setActionError(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {instances.map((instance) => (
@@ -429,6 +609,14 @@ export default function InstancesPage() {
                 </div>
               </div>
               <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleEdit(instance.id)}
+                >
+                  <PencilIcon className="mr-1 h-3 w-3" />
+                  Edit
+                </Button>
                 {instance.running ? (
                   <Button
                     size="sm"
