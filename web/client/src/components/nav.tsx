@@ -11,6 +11,7 @@ const navItems = [
   { href: '/providers', label: 'Providers' },
   { href: '/adapters', label: 'Adapters' },
   { href: '/risk', label: 'Risk Limits' },
+  { href: '/runtime-config', label: 'Runtime Config' },
 ];
 
 export function Nav() {

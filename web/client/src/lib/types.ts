@@ -131,3 +131,39 @@ export interface ApiError {
   status: string;
   error: string;
 }
+
+export type FanoutWorkersSetting = number | 'auto' | 'default' | string;
+
+export interface EventbusRuntimeConfig {
+  bufferSize: number;
+  fanoutWorkers: FanoutWorkersSetting;
+}
+
+export interface ObjectPoolRuntimeConfig {
+  size: number;
+  waitQueueSize: number;
+}
+
+export interface PoolRuntimeConfig {
+  event: ObjectPoolRuntimeConfig;
+  orderRequest: ObjectPoolRuntimeConfig;
+}
+
+export interface ApiServerConfig {
+  addr: string;
+}
+
+export interface TelemetryConfig {
+  otlpEndpoint: string;
+  serviceName: string;
+  otlpInsecure: boolean;
+  enableMetrics: boolean;
+}
+
+export interface RuntimeConfig {
+  eventbus: EventbusRuntimeConfig;
+  pools: PoolRuntimeConfig;
+  risk: RiskConfig;
+  apiServer: ApiServerConfig;
+  telemetry: TelemetryConfig;
+}

@@ -7,6 +7,7 @@ import {
   InstanceSummary,
   InstanceSpec,
   RiskConfig,
+  RuntimeConfig,
   ApiError,
 } from './types';
 
@@ -145,6 +146,17 @@ class ApiClient {
     return this.request('/risk/limits', {
       method: 'PUT',
       body: JSON.stringify(config),
+    });
+  }
+
+  async getRuntimeConfig(): Promise<RuntimeConfig> {
+    return this.request('/config/runtime');
+  }
+
+  async updateRuntimeConfig(payload: RuntimeConfig): Promise<RuntimeConfig> {
+    return this.request('/config/runtime', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     });
   }
 }
