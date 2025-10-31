@@ -1,7 +1,11 @@
 package okx
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -40,13 +44,13 @@ type booksResponse struct {
 }
 
 type booksSnapshot struct {
-	Asks     [][]string `json:"asks"`
-	Bids     [][]string `json:"bids"`
-	SeqID    string     `json:"seqId"`
-	PrevSeq  string     `json:"prevSeqId"`
-	Checksum int32      `json:"checksum"`
-	TS       string     `json:"ts"`
-	Action   string     `json:"action"`
+	Asks     [][]string  `json:"asks"`
+	Bids     [][]string  `json:"bids"`
+	SeqID    json.Number `json:"seqId"`
+	PrevSeq  json.Number `json:"prevSeqId"`
+	Checksum int32       `json:"checksum"`
+	TS       string      `json:"ts"`
+	Action   string      `json:"action"`
 }
 
 type symbolMeta struct {
@@ -218,9 +222,30 @@ func (p *Provider) fetchOrderBookSnapshot(ctx context.Context, instID string) (s
 		return schema.BookSnapshotPayload{}, 0, errors.New("okx: empty books response")
 	}
 	entry := payload.Data[0]
-	seq, err := strconv.ParseUint(strings.TrimSpace(entry.SeqID), 10, 64)
-	if err != nil {
-		return schema.BookSnapshotPayload{}, 0, fmt.Errorf("parse books sequence: %w", err)
+	
+	// OKX may not return seqId for full orderbook snapshots, use timestamp as fallback
+	seqStr := entry.SeqID.String()
+	var seq uint64
+	if seqStr != "" {
+		var err error
+		seq, err = strconv.ParseUint(seqStr, 10, 64)
+		if err != nil {
+			return schema.BookSnapshotPayload{}, 0, fmt.Errorf("parse books sequence: %w", err)
+		}
+	} else {
+		// Use timestamp as sequence ID if seqId is missing
+		timestamp := parseMilliTimestamp(entry.TS)
+		if !timestamp.IsZero() {
+			millis := timestamp.UnixMilli()
+			if millis > 0 {
+				seq = uint64(millis) // #nosec G115 -- UnixMilli is always positive for valid timestamps
+			}
+		} else {
+			millis := time.Now().UnixMilli()
+			if millis > 0 {
+				seq = uint64(millis) // #nosec G115 -- UnixMilli is always positive for current time
+			}
+		}
 	}
 	timestamp := parseMilliTimestamp(entry.TS)
 	snapshot := schema.BookSnapshotPayload{
@@ -263,4 +288,226 @@ func parseMilliTimestamp(ts string) time.Time {
 		return time.Time{}
 	}
 	return time.UnixMilli(millis).UTC()
+}
+
+type orderRequest struct {
+	InstID  string `json:"instId"`
+	TdMode  string `json:"tdMode"`
+	Side    string `json:"side"`
+	OrdType string `json:"ordType"`
+	Sz      string `json:"sz"`
+	Px      string `json:"px,omitempty"`
+	ClOrdID string `json:"clOrdId,omitempty"`
+}
+
+type orderResponse struct {
+	Code string           `json:"code"`
+	Msg  string           `json:"msg"`
+	Data []orderResultRow `json:"data"`
+}
+
+type orderResultRow struct {
+	ClOrdID string `json:"clOrdId"`
+	OrdID   string `json:"ordId"`
+	SCode   string `json:"sCode"`
+	SMsg    string `json:"sMsg"`
+}
+
+type accountResponse struct {
+	Code string          `json:"code"`
+	Msg  string          `json:"msg"`
+	Data []accountDetail `json:"data"`
+}
+
+type accountDetail struct {
+	TotalEq string        `json:"totalEq"`
+	Details []balanceItem `json:"details"`
+}
+
+type balanceItem struct {
+	Ccy       string `json:"ccy"`
+	AvailBal  string `json:"availBal"`
+	CashBal   string `json:"cashBal"`
+	FrozenBal string `json:"frozenBal"`
+}
+
+func (p *Provider) submitOrder(ctx context.Context, meta symbolMeta, req schema.OrderRequest) error {
+	if !p.hasTradingCredentials() {
+		return errors.New("okx: missing api credentials for trading")
+	}
+
+	side, err := okxSide(req.Side)
+	if err != nil {
+		return err
+	}
+
+	ordType, err := okxOrderType(req.OrderType)
+	if err != nil {
+		return err
+	}
+
+	quantity := strings.TrimSpace(req.Quantity)
+	if quantity == "" {
+		return errors.New("okx: quantity required")
+	}
+
+	price := ""
+	if req.Price != nil && strings.TrimSpace(*req.Price) != "" {
+		price = strings.TrimSpace(*req.Price)
+	}
+
+	clientOrderID := ""
+	if req.ClientOrderID != "" {
+		clientOrderID = req.ClientOrderID
+	}
+
+	orderReq := orderRequest{
+		InstID:  meta.instID,
+		TdMode:  "cash",
+		Side:    side,
+		OrdType: ordType,
+		Sz:      quantity,
+		Px:      price,
+		ClOrdID: clientOrderID,
+	}
+
+	body, err := json.Marshal(orderReq)
+	if err != nil {
+		return fmt.Errorf("marshal order request: %w", err)
+	}
+
+	endpoint := p.opts.orderEndpoint()
+	if strings.TrimSpace(endpoint) == "" {
+		return errors.New("okx: order endpoint not configured")
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create order request: %w", err)
+	}
+
+	timestamp := p.clock().UTC().Format("2006-01-02T15:04:05.999Z07:00")
+	httpReq.Header.Set("Content-Type", "application/json")
+	p.signRequest(httpReq, timestamp, string(body))
+
+	resp, err := p.httpClient().Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("submit order: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read order response: %w", err)
+	}
+
+	var orderResp orderResponse
+	if err := json.Unmarshal(respBody, &orderResp); err != nil {
+		return fmt.Errorf("decode order response: %w", err)
+	}
+
+	if strings.TrimSpace(orderResp.Code) != "0" {
+		return fmt.Errorf("okx order error code %s: %s", strings.TrimSpace(orderResp.Code), strings.TrimSpace(orderResp.Msg))
+	}
+
+	if len(orderResp.Data) == 0 {
+		return errors.New("okx: empty order response data")
+	}
+
+	result := orderResp.Data[0]
+	if strings.TrimSpace(result.SCode) != "0" {
+		return fmt.Errorf("okx order failed %s: %s", strings.TrimSpace(result.SCode), strings.TrimSpace(result.SMsg))
+	}
+
+	return nil
+}
+
+func (p *Provider) fetchAccountBalances(ctx context.Context) ([]balanceItem, error) {
+	if !p.hasTradingCredentials() {
+		return nil, errors.New("okx: missing api credentials for account balances")
+	}
+
+	endpoint := p.opts.accountEndpoint()
+	if strings.TrimSpace(endpoint) == "" {
+		return nil, errors.New("okx: account endpoint not configured")
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create account request: %w", err)
+	}
+
+	timestamp := p.clock().UTC().Format("2006-01-02T15:04:05.999Z07:00")
+	p.signRequest(httpReq, timestamp, "")
+
+	resp, err := p.httpClient().Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request account: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return nil, fmt.Errorf("account status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload accountResponse
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode account: %w", err)
+	}
+
+	if strings.TrimSpace(payload.Code) != "0" {
+		return nil, fmt.Errorf("account error code %s: %s", strings.TrimSpace(payload.Code), strings.TrimSpace(payload.Msg))
+	}
+
+	if len(payload.Data) == 0 {
+		return nil, errors.New("okx: empty account response")
+	}
+
+	return payload.Data[0].Details, nil
+}
+
+func (p *Provider) signRequest(req *http.Request, timestamp, body string) {
+	method := strings.ToUpper(req.Method)
+	path := req.URL.Path
+	if req.URL.RawQuery != "" {
+		path += "?" + req.URL.RawQuery
+	}
+
+	message := timestamp + method + path + body
+	mac := hmac.New(sha256.New, []byte(p.opts.Config.APISecret))
+	mac.Write([]byte(message))
+	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+
+	req.Header.Set("OK-ACCESS-KEY", p.opts.Config.APIKey)
+	req.Header.Set("OK-ACCESS-SIGN", signature)
+	req.Header.Set("OK-ACCESS-TIMESTAMP", timestamp)
+	req.Header.Set("OK-ACCESS-PASSPHRASE", p.opts.Config.Passphrase)
+}
+
+func okxSide(side schema.TradeSide) (string, error) {
+	switch side {
+	case schema.TradeSideBuy:
+		return "buy", nil
+	case schema.TradeSideSell:
+		return "sell", nil
+	default:
+		return "", fmt.Errorf("okx: unknown trade side %v", side)
+	}
+}
+
+func okxOrderType(orderType schema.OrderType) (string, error) {
+	switch orderType {
+	case schema.OrderTypeMarket:
+		return "market", nil
+	case schema.OrderTypeLimit:
+		return "limit", nil
+	default:
+		return "", fmt.Errorf("okx: unknown order type %v", orderType)
+	}
 }

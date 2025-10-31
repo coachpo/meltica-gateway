@@ -73,6 +73,8 @@ type wsManager struct {
 
 	controlMu       sync.Mutex
 	lastControlSend time.Time
+
+	authFunc func() *wsRequest
 }
 
 func newWSManager(ctx context.Context, baseURL string, handler wsMessageHandler, errs chan<- error) *wsManager {
@@ -92,7 +94,12 @@ func newWSManager(ctx context.Context, baseURL string, handler wsMessageHandler,
 		readyOnce:       sync.Once{},
 		controlMu:       sync.Mutex{},
 		lastControlSend: time.Time{},
+		authFunc:        nil,
 	}
+}
+
+func (sm *wsManager) setAuthFunc(fn func() *wsRequest) {
+	sm.authFunc = fn
 }
 
 func (sm *wsManager) start() error {
@@ -280,6 +287,40 @@ func (sm *wsManager) sendBatchedControlRequests(ctx context.Context, operation s
 		ctx = sm.ctx
 	}
 
+	if len(args) == 1 && strings.ToLower(args[0].Channel) == "login" && sm.authFunc != nil {
+		authReq := sm.authFunc()
+		if authReq == nil {
+			return errors.New("okx: auth function returned nil")
+		}
+
+		data := []byte(authReq.Args[0].Channel)
+
+		sm.controlMu.Lock()
+		if err := sm.waitForControlWindowLocked(ctx); err != nil {
+			sm.controlMu.Unlock()
+			return err
+		}
+
+		sm.connMu.RLock()
+		conn := sm.conn
+		sm.connMu.RUnlock()
+		if conn == nil {
+			sm.controlMu.Unlock()
+			return nil
+		}
+
+		writeCtx, cancel := context.WithTimeout(ctx, okxControlWriteTimeout)
+		err := conn.Write(writeCtx, websocket.MessageText, data)
+		cancel()
+		sm.controlMu.Unlock()
+		if err != nil {
+			return fmt.Errorf("write login request: %w", err)
+		}
+
+		log.Printf("okx ws manager: login request sent")
+		return nil
+	}
+
 	chunks := chunkArguments(args, okxMaxSubscriptionsPerRequest)
 	for _, chunk := range chunks {
 		req := wsRequest{
@@ -415,28 +456,20 @@ func (sm *wsManager) pingLoop(ctx context.Context, conn *websocket.Conn) error {
 }
 
 func (sm *wsManager) writePing(ctx context.Context, conn *websocket.Conn) error {
-	pingPayload := wsRequest{ID: "", Op: "ping", Args: nil}
-	data, err := json.Marshal(pingPayload)
-	if err != nil {
-		return fmt.Errorf("marshal ping: %w", err)
-	}
+	// OKX expects just the string "ping", not a JSON object
 	writeCtx, cancel := context.WithTimeout(ctx, okxPingTimeout)
 	defer cancel()
-	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
+	if err := conn.Write(writeCtx, websocket.MessageText, []byte("ping")); err != nil {
 		return fmt.Errorf("write ping: %w", err)
 	}
 	return nil
 }
 
 func (sm *wsManager) writePong(ctx context.Context, conn *websocket.Conn) error {
-	pongPayload := wsRequest{ID: "", Op: "pong", Args: nil}
-	data, err := json.Marshal(pongPayload)
-	if err != nil {
-		return fmt.Errorf("marshal pong: %w", err)
-	}
+	// OKX expects just the string "pong", not a JSON object
 	writeCtx, cancel := context.WithTimeout(ctx, okxPingTimeout)
 	defer cancel()
-	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
+	if err := conn.Write(writeCtx, websocket.MessageText, []byte("pong")); err != nil {
 		return fmt.Errorf("write pong: %w", err)
 	}
 	return nil

@@ -35,6 +35,15 @@ func RegisterFactory(reg *provider.Registry) {
 			userCfg = nested
 		}
 
+		if raw, ok := stringFromConfig(userCfg, "api_key"); ok {
+			opts.Config.APIKey = raw
+		}
+		if raw, ok := stringFromConfig(userCfg, "api_secret"); ok {
+			opts.Config.APISecret = raw
+		}
+		if raw, ok := stringFromConfig(userCfg, "passphrase"); ok {
+			opts.Config.Passphrase = raw
+		}
 		if depth, ok := intFromConfig(userCfg, "snapshot_depth"); ok {
 			opts.Config.SnapshotDepth = depth
 		}

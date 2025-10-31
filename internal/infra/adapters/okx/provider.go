@@ -2,6 +2,9 @@ package okx
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -56,6 +59,13 @@ type Provider struct {
 	bookMu      sync.Mutex
 	bookSubs    map[string]struct{}
 	bookHandles map[string]*bookHandle
+
+	privateWsMu     sync.Mutex
+	privateWs       *wsManager
+	userStreamReady bool
+
+	balanceMu sync.Mutex
+	balances  map[string]balanceItem
 }
 
 type bookHandle struct {
@@ -89,9 +99,14 @@ func NewProvider(opts Options) *Provider {
 		tradeSubs:     make(map[string]struct{}),
 		tickerMu:      sync.Mutex{},
 		tickerSubs:    make(map[string]struct{}),
-		bookMu:        sync.Mutex{},
-		bookSubs:      make(map[string]struct{}),
-		bookHandles:   make(map[string]*bookHandle),
+		bookMu:          sync.Mutex{},
+		bookSubs:        make(map[string]struct{}),
+		bookHandles:     make(map[string]*bookHandle),
+		privateWsMu:     sync.Mutex{},
+		privateWs:       nil,
+		userStreamReady: false,
+		balanceMu:       sync.Mutex{},
+		balances:        make(map[string]balanceItem),
 	}
 	if p.pools == nil {
 		log.Printf("okx/provider: Pools not injected; provider cannot start without shared PoolManager")
@@ -130,6 +145,10 @@ func (p *Provider) Start(ctx context.Context) error {
 
 	go p.instrumentRefreshLoop()
 
+	if p.hasTradingCredentials() {
+		go p.startUserDataStream()
+	}
+
 	go func() {
 		<-runCtx.Done()
 		p.wsMu.Lock()
@@ -138,6 +157,12 @@ func (p *Provider) Start(ctx context.Context) error {
 			p.ws = nil
 		}
 		p.wsMu.Unlock()
+		p.privateWsMu.Lock()
+		if p.privateWs != nil {
+			p.privateWs.stop()
+			p.privateWs = nil
+		}
+		p.privateWsMu.Unlock()
 		close(p.events)
 		close(p.errs)
 	}()
@@ -145,11 +170,27 @@ func (p *Provider) Start(ctx context.Context) error {
 	return nil
 }
 
-// SubmitOrder proxies order submissions; currently unsupported.
+// SubmitOrder proxies order submissions.
 func (p *Provider) SubmitOrder(ctx context.Context, req schema.OrderRequest) error {
-	_ = ctx
-	_ = req
-	return errors.New("okx: trading not supported")
+	if err := p.ensureRunning(); err != nil {
+		return err
+	}
+	meta, ok := p.metaForInstrument(req.Symbol)
+	if !ok {
+		if err := p.refreshInstruments(p.ctx); err == nil {
+			meta, ok = p.metaForInstrument(req.Symbol)
+		}
+	}
+	if !ok {
+		return fmt.Errorf("okx: instrument %s not found", strings.TrimSpace(req.Symbol))
+	}
+	if !p.hasTradingCredentials() {
+		return errors.New("okx: trading disabled (api credentials missing)")
+	}
+	if ctx == nil {
+		ctx = p.ctx
+	}
+	return p.submitOrder(ctx, meta, req)
 }
 
 // SubscribeRoute activates streaming for the specified route.
@@ -671,22 +712,22 @@ type tickerEvent struct {
 }
 
 type bookEvent struct {
-	InstID    string     `json:"instId"`
-	Asks      [][]string `json:"asks"`
-	Bids      [][]string `json:"bids"`
-	SeqID     string     `json:"seqId"`
-	PrevSeqID string     `json:"prevSeqId"`
-	Checksum  int32      `json:"checksum"`
-	Timestamp string     `json:"ts"`
-	Action    string     `json:"action"`
+	InstID    string        `json:"instId"`
+	Asks      [][]string    `json:"asks"`
+	Bids      [][]string    `json:"bids"`
+	SeqID     json.Number   `json:"seqId"`
+	PrevSeqID json.Number   `json:"prevSeqId"`
+	Checksum  int32         `json:"checksum"`
+	Timestamp string        `json:"ts"`
+	Action    string        `json:"action"`
 }
 
 func (b bookEvent) SequenceID() uint64 {
-	trimmed := strings.TrimSpace(b.SeqID)
-	if trimmed == "" {
+	seqStr := b.SeqID.String()
+	if seqStr == "" {
 		return 0
 	}
-	seq, err := strconv.ParseUint(trimmed, 10, 64)
+	seq, err := strconv.ParseUint(seqStr, 10, 64)
 	if err != nil {
 		return 0
 	}
@@ -764,4 +805,268 @@ func setToSortedSlice(set map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func (p *Provider) hasTradingCredentials() bool {
+	return strings.TrimSpace(p.opts.Config.APIKey) != "" &&
+		strings.TrimSpace(p.opts.Config.APISecret) != "" &&
+		strings.TrimSpace(p.opts.Config.Passphrase) != ""
+}
+
+func (p *Provider) startUserDataStream() {
+	if err := p.ensurePrivateWS(); err != nil {
+		p.reportError(fmt.Errorf("okx: failed to start private ws: %w", err))
+		return
+	}
+
+	if err := p.publishBalanceSnapshot(p.ctx); err != nil {
+		p.reportError(fmt.Errorf("okx: balance snapshot: %w", err))
+	}
+
+	loginArgs := []wsArgument{{Channel: "login", InstID: ""}}
+	if err := p.privateWs.subscribe(loginArgs); err != nil {
+		p.reportError(fmt.Errorf("okx: login failed: %w", err))
+		return
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	subscriptions := []wsArgument{
+		{Channel: "orders", InstID: ""},
+		{Channel: "account", InstID: ""},
+	}
+
+	if err := p.privateWs.subscribe(subscriptions); err != nil {
+		p.reportError(fmt.Errorf("okx: subscribe to user streams: %w", err))
+	}
+}
+
+func (p *Provider) ensurePrivateWS() error {
+	p.privateWsMu.Lock()
+	defer p.privateWsMu.Unlock()
+
+	if p.privateWs != nil {
+		return nil
+	}
+
+	baseURL := p.opts.privateWebsocketURL()
+	if strings.TrimSpace(baseURL) == "" {
+		return errors.New("okx: private websocket url not configured")
+	}
+
+	manager := newWSManager(p.ctx, baseURL, p.handlePrivateWSMessage, p.errs)
+	manager.setAuthFunc(p.generateLoginRequest)
+
+	if err := manager.start(); err != nil {
+		return fmt.Errorf("start private ws manager: %w", err)
+	}
+
+	p.privateWs = manager
+	return nil
+}
+
+func (p *Provider) generateLoginRequest() *wsRequest {
+	timestamp := strconv.FormatInt(p.clock().UTC().Unix(), 10)
+	message := timestamp + "GET" + "/users/self/verify"
+
+	mac := hmac.New(sha256.New, []byte(p.opts.Config.APISecret))
+	mac.Write([]byte(message))
+	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+
+	loginReq := wsLoginRequest{
+		Op: "login",
+		Args: []wsLoginArg{
+			{
+				APIKey:     p.opts.Config.APIKey,
+				Passphrase: p.opts.Config.Passphrase,
+				Timestamp:  timestamp,
+				Sign:       signature,
+			},
+		},
+	}
+
+	data, _ := json.Marshal(loginReq)
+	return &wsRequest{
+		ID:   "",
+		Op:   "login",
+		Args: []wsArgument{{Channel: string(data), InstID: ""}},
+	}
+}
+
+type wsLoginRequest struct {
+	Op   string       `json:"op"`
+	Args []wsLoginArg `json:"args"`
+}
+
+type wsLoginArg struct {
+	APIKey     string `json:"apiKey"`
+	Passphrase string `json:"passphrase"`
+	Timestamp  string `json:"timestamp"`
+	Sign       string `json:"sign"`
+}
+
+func (p *Provider) handlePrivateWSMessage(envelope wsEnvelope) error {
+	channel := strings.ToLower(strings.TrimSpace(envelope.Arg.Channel))
+
+	switch channel {
+	case "orders":
+		return p.handleOrders(envelope)
+	case "account":
+		return p.handleAccount(envelope)
+	case "login":
+		p.privateWsMu.Lock()
+		p.userStreamReady = true
+		p.privateWsMu.Unlock()
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (p *Provider) handleOrders(envelope wsEnvelope) error {
+	for _, raw := range envelope.Data {
+		var order orderUpdateEvent
+		if err := json.Unmarshal(raw, &order); err != nil {
+			return fmt.Errorf("decode order event: %w", err)
+		}
+
+		symbol, ok := p.symbolForInstID(order.InstID)
+		if !ok {
+			continue
+		}
+
+		side := schema.TradeSideBuy
+		if strings.EqualFold(strings.TrimSpace(order.Side), "sell") {
+			side = schema.TradeSideSell
+		}
+
+		state := mapOrderState(order.State)
+
+		payload := schema.ExecReportPayload{
+			ExchangeOrderID:  strings.TrimSpace(order.OrdID),
+			ClientOrderID:    strings.TrimSpace(order.ClOrdID),
+			State:            state,
+			Side:             side,
+			OrderType:        mapOrderType(order.OrdType),
+			Price:            strings.TrimSpace(order.Px),
+			Quantity:         strings.TrimSpace(order.Sz),
+			FilledQuantity:   strings.TrimSpace(order.AccFillSz),
+			RemainingQty:     "",
+			AvgFillPrice:     strings.TrimSpace(order.AvgPx),
+			CommissionAmount: "",
+			CommissionAsset:  "",
+			Timestamp:        parseMilliTimestamp(order.UTime),
+			RejectReason:     nil,
+		}
+
+		p.publisher.PublishExecReport(p.ctx, symbol, payload)
+	}
+	return nil
+}
+
+func (p *Provider) handleAccount(envelope wsEnvelope) error {
+	for _, raw := range envelope.Data {
+		var acct accountUpdateEvent
+		if err := json.Unmarshal(raw, &acct); err != nil {
+			return fmt.Errorf("decode account event: %w", err)
+		}
+
+		for _, detail := range acct.Details {
+			p.balanceMu.Lock()
+			p.balances[strings.ToUpper(strings.TrimSpace(detail.Ccy))] = balanceItem{
+				Ccy:       strings.ToUpper(strings.TrimSpace(detail.Ccy)),
+				AvailBal:  strings.TrimSpace(detail.AvailBal),
+				CashBal:   strings.TrimSpace(detail.CashBal),
+				FrozenBal: strings.TrimSpace(detail.FrozenBal),
+			}
+			p.balanceMu.Unlock()
+
+			payload := schema.BalanceUpdatePayload{
+				Currency:  strings.ToUpper(strings.TrimSpace(detail.Ccy)),
+				Available: strings.TrimSpace(detail.AvailBal),
+				Total:     strings.TrimSpace(detail.CashBal),
+				Timestamp: p.clock(),
+			}
+
+			p.publisher.PublishBalanceUpdate(p.ctx, payload.Currency, payload)
+		}
+	}
+	return nil
+}
+
+func (p *Provider) publishBalanceSnapshot(ctx context.Context) error {
+	balances, err := p.fetchAccountBalances(ctx)
+	if err != nil {
+		return err
+	}
+
+	p.balanceMu.Lock()
+	for _, bal := range balances {
+		currency := strings.ToUpper(strings.TrimSpace(bal.Ccy))
+		p.balances[currency] = bal
+
+		payload := schema.BalanceUpdatePayload{
+			Currency:  currency,
+			Available: strings.TrimSpace(bal.AvailBal),
+			Total:     strings.TrimSpace(bal.CashBal),
+			Timestamp: p.clock(),
+		}
+
+		p.publisher.PublishBalanceUpdate(p.ctx, currency, payload)
+	}
+	p.balanceMu.Unlock()
+
+	return nil
+}
+
+type orderUpdateEvent struct {
+	InstID    string `json:"instId"`
+	OrdID     string `json:"ordId"`
+	ClOrdID   string `json:"clOrdId"`
+	Px        string `json:"px"`
+	Sz        string `json:"sz"`
+	OrdType   string `json:"ordType"`
+	Side      string `json:"side"`
+	State     string `json:"state"`
+	AccFillSz string `json:"accFillSz"`
+	AvgPx     string `json:"avgPx"`
+	UTime     string `json:"uTime"`
+}
+
+type accountUpdateEvent struct {
+	UTime   string                `json:"uTime"`
+	Details []accountDetailUpdate `json:"details"`
+}
+
+type accountDetailUpdate struct {
+	Ccy       string `json:"ccy"`
+	AvailBal  string `json:"availBal"`
+	CashBal   string `json:"cashBal"`
+	FrozenBal string `json:"frozenBal"`
+}
+
+func mapOrderState(state string) schema.ExecReportState {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "live":
+		return schema.ExecReportStateACK
+	case "partially_filled":
+		return schema.ExecReportStatePARTIAL
+	case "filled":
+		return schema.ExecReportStateFILLED
+	case "canceled":
+		return schema.ExecReportStateCANCELLED
+	default:
+		return schema.ExecReportStateACK
+	}
+}
+
+func mapOrderType(ordType string) schema.OrderType {
+	switch strings.ToLower(strings.TrimSpace(ordType)) {
+	case "market":
+		return schema.OrderTypeMarket
+	case "limit":
+		return schema.OrderTypeLimit
+	default:
+		return schema.OrderTypeLimit
+	}
 }
