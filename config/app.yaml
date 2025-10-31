@@ -18,24 +18,6 @@ runtime:
       size: 4096
       wait_queue_size: 4096
 
-  risk:
-    max_position_size: "250"
-    max_notional_value: "50000"
-    notional_currency: "USDT"
-    order_throttle: 5
-    order_burst: 3
-    max_concurrent_orders: 6
-    price_band_percent: 1.0
-    allowed_order_types:
-      - Limit
-      - Market
-    kill_switch_enabled: true
-    max_risk_breaches: 3
-    circuit_breaker:
-      enabled: true
-      threshold: 4
-      cooldown: 90s
-
   api_server:
     addr: ":8880"
 

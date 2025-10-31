@@ -35,6 +35,8 @@ const (
 	riskLimitsPath    = "/risk/limits"
 	runtimeConfigPath = "/config/runtime"
 	configBackupPath  = "/config/backup"
+	swaggerSpecPath   = "/docs/openapi.json"
+	swaggerUIPath     = "/docs"
 )
 
 type handlerFunc func(http.ResponseWriter, *http.Request)
@@ -102,6 +104,11 @@ func NewHandler(environment config.Environment, meta config.MetaConfig, manager 
 	mux.Handle(configBackupPath, server.methodHandlers(map[string]handlerFunc{
 		http.MethodGet: server.exportConfigBackup,
 	}))
+
+	if environment == config.EnvDev {
+		mux.Handle(swaggerSpecPath, http.HandlerFunc(server.serveSwaggerSpec))
+		mux.Handle(swaggerUIPath, http.HandlerFunc(server.serveSwaggerUI))
+	}
 
 	return withCORS(mux)
 }
@@ -446,6 +453,20 @@ func (s *httpServer) exportConfigBackup(w http.ResponseWriter, _ *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *httpServer) serveSwaggerSpec(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(swaggerSpec))
+}
+
+func (s *httpServer) serveSwaggerUI(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != swaggerUIPath {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(swaggerUIHTML))
 }
 
 func (s *httpServer) handleInstance(w http.ResponseWriter, r *http.Request) {
@@ -944,6 +965,306 @@ func cloneValue(value any) any {
 		return value
 	}
 }
+
+const swaggerSpec = `{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Meltica Control API",
+    "version": "1.0.0",
+    "description": "Runtime control surface for Meltica gateway."
+  },
+  "servers": [
+    { "url": "http://localhost:8880", "description": "Local development" }
+  ],
+  "paths": {
+    "/strategies": {
+      "get": {
+        "summary": "List available strategies",
+        "responses": {
+          "200": { "description": "Successful response" }
+        }
+      }
+    },
+    "/strategies/{name}": {
+      "get": {
+        "summary": "Get strategy metadata",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Strategy metadata" },
+          "404": { "description": "Strategy not found" }
+        }
+      }
+    },
+    "/providers": {
+      "get": {
+        "summary": "List providers",
+        "responses": {
+          "200": { "description": "Provider list" }
+        }
+      },
+      "post": {
+        "summary": "Create provider",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Provider created" },
+          "400": { "description": "Validation error" }
+        }
+      }
+    },
+    "/providers/{name}": {
+      "get": {
+        "summary": "Get provider details",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Provider metadata" },
+          "404": { "description": "Provider not found" }
+        }
+      },
+      "put": {
+        "summary": "Update provider",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Provider updated" },
+          "400": { "description": "Validation error" }
+        }
+      },
+      "delete": {
+        "summary": "Delete provider",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Provider removed" },
+          "404": { "description": "Provider not found" }
+        }
+      }
+    },
+    "/providers/{name}/start": {
+      "post": {
+        "summary": "Start provider",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Provider started" }
+        }
+      }
+    },
+    "/providers/{name}/stop": {
+      "post": {
+        "summary": "Stop provider",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Provider stopped" }
+        }
+      }
+    },
+    "/adapters": {
+      "get": {
+        "summary": "List adapter metadata",
+        "responses": {
+          "200": { "description": "Adapter list" }
+        }
+      }
+    },
+    "/adapters/{identifier}": {
+      "get": {
+        "summary": "Get adapter metadata",
+        "parameters": [
+          { "name": "identifier", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Adapter metadata" },
+          "404": { "description": "Adapter not found" }
+        }
+      }
+    },
+    "/strategy/instances": {
+      "get": {
+        "summary": "List strategy instances",
+        "responses": {
+          "200": { "description": "Instance list" }
+        }
+      },
+      "post": {
+        "summary": "Create strategy instance",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Instance created" },
+          "400": { "description": "Validation error" }
+        }
+      }
+    },
+    "/strategy/instances/{id}": {
+      "get": {
+        "summary": "Get instance snapshot",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Instance snapshot" },
+          "404": { "description": "Instance not found" }
+        }
+      },
+      "put": {
+        "summary": "Update instance",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Instance updated" }
+        }
+      },
+      "delete": {
+        "summary": "Delete instance",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Instance removed" }
+        }
+      }
+    },
+    "/strategy/instances/{id}/start": {
+      "post": {
+        "summary": "Start instance",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Instance started" }
+        }
+      }
+    },
+    "/strategy/instances/{id}/stop": {
+      "post": {
+        "summary": "Stop instance",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Instance stopped" }
+        }
+      }
+    },
+    "/risk/limits": {
+      "get": {
+        "summary": "Get risk limits",
+        "responses": {
+          "200": { "description": "Risk limits" }
+        }
+      },
+      "put": {
+        "summary": "Update risk limits",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Risk limits updated" }
+        }
+      }
+    },
+    "/config/runtime": {
+      "get": {
+        "summary": "Export runtime configuration",
+        "responses": {
+          "200": { "description": "Runtime configuration" }
+        }
+      },
+      "put": {
+        "summary": "Import runtime configuration",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Runtime configuration updated" }
+        }
+      }
+    },
+    "/config/backup": {
+      "get": {
+        "summary": "Export configuration backup",
+        "responses": {
+          "200": { "description": "Configuration backup" }
+        }
+      }
+    }
+  }
+}`
+
+var swaggerUIHTML = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Meltica API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin:0; background: #fafafa; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.addEventListener('load', function() {
+      SwaggerUIBundle({
+        url: '%s',
+        dom_id: '#swagger-ui',
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: 'BaseLayout'
+      });
+    });
+  </script>
+</body>
+</html>`, swaggerSpecPath)
 
 func methodNotAllowed(w http.ResponseWriter, allowed ...string) {
 	if len(allowed) > 0 {

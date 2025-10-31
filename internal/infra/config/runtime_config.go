@@ -15,6 +15,27 @@ type RuntimeConfig struct {
 	Telemetry TelemetryConfig `json:"telemetry" yaml:"telemetry"`
 }
 
+// DefaultRiskConfig returns the default risk configuration applied when no overrides are supplied.
+func DefaultRiskConfig() RiskConfig {
+	return RiskConfig{
+		MaxPositionSize:     "250",
+		MaxNotionalValue:    "50000",
+		NotionalCurrency:    "USDT",
+		OrderThrottle:       5,
+		OrderBurst:          3,
+		MaxConcurrentOrders: 6,
+		PriceBandPercent:    1.0,
+		AllowedOrderTypes:   []string{"Limit", "Market"},
+		KillSwitchEnabled:   true,
+		MaxRiskBreaches:     3,
+		CircuitBreaker: CircuitBreakerConfig{
+			Enabled:   true,
+			Threshold: 4,
+			Cooldown:  "90s",
+		},
+	}
+}
+
 // DefaultRuntimeConfig returns the default runtime configuration used when no overrides are supplied.
 func DefaultRuntimeConfig() RuntimeConfig {
 	cfg := RuntimeConfig{
@@ -32,23 +53,7 @@ func DefaultRuntimeConfig() RuntimeConfig {
 				WaitQueueSize: 4096,
 			},
 		},
-		Risk: cloneRiskConfig(RiskConfig{
-			MaxPositionSize:     "250",
-			MaxNotionalValue:    "50000",
-			NotionalCurrency:    "USDT",
-			OrderThrottle:       5,
-			OrderBurst:          3,
-			MaxConcurrentOrders: 6,
-			PriceBandPercent:    1.0,
-			AllowedOrderTypes:   []string{"Limit", "Market"},
-			KillSwitchEnabled:   true,
-			MaxRiskBreaches:     3,
-			CircuitBreaker: CircuitBreakerConfig{
-				Enabled:   true,
-				Threshold: 4,
-				Cooldown:  "90s",
-			},
-		}),
+		Risk:      cloneRiskConfig(DefaultRiskConfig()),
 		APIServer: APIServerConfig{Addr: ":8880"},
 		Telemetry: TelemetryConfig{
 			OTLPEndpoint:  "",
@@ -73,6 +78,14 @@ func (c *RuntimeConfig) Normalise() {
 	if c == nil {
 		return
 	}
+	if isRiskConfigUnset(c.Risk) {
+		c.Risk = cloneRiskConfig(DefaultRiskConfig())
+	}
+	c.Risk.MaxPositionSize = strings.TrimSpace(c.Risk.MaxPositionSize)
+	c.Risk.MaxNotionalValue = strings.TrimSpace(c.Risk.MaxNotionalValue)
+	c.Risk.NotionalCurrency = strings.TrimSpace(c.Risk.NotionalCurrency)
+	c.Risk.CircuitBreaker.Cooldown = strings.TrimSpace(c.Risk.CircuitBreaker.Cooldown)
+
 	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
 	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
 	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
@@ -89,6 +102,37 @@ func (c *RuntimeConfig) Normalise() {
 	for i, ot := range c.Risk.AllowedOrderTypes {
 		c.Risk.AllowedOrderTypes[i] = strings.TrimSpace(ot)
 	}
+}
+
+func isRiskConfigUnset(cfg RiskConfig) bool {
+	if strings.TrimSpace(cfg.MaxPositionSize) != "" {
+		return false
+	}
+	if strings.TrimSpace(cfg.MaxNotionalValue) != "" {
+		return false
+	}
+	if strings.TrimSpace(cfg.NotionalCurrency) != "" {
+		return false
+	}
+	if cfg.OrderThrottle != 0 || cfg.OrderBurst != 0 || cfg.MaxConcurrentOrders != 0 {
+		return false
+	}
+	if cfg.PriceBandPercent != 0 {
+		return false
+	}
+	if len(cfg.AllowedOrderTypes) > 0 {
+		return false
+	}
+	if cfg.KillSwitchEnabled || cfg.MaxRiskBreaches != 0 {
+		return false
+	}
+	if cfg.CircuitBreaker.Enabled || cfg.CircuitBreaker.Threshold != 0 {
+		return false
+	}
+	if strings.TrimSpace(cfg.CircuitBreaker.Cooldown) != "" {
+		return false
+	}
+	return true
 }
 
 // Validate performs semantic validation on runtime configuration fields.

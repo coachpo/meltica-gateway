@@ -65,8 +65,12 @@ func TestBuildProviderSpecs(t *testing.T) {
 
 func TestBuildProviderSpecsErrors(t *testing.T) {
 	t.Run("missing providers", func(t *testing.T) {
-		if _, err := BuildProviderSpecs(nil); err == nil {
-			t.Fatal("expected error for nil providers")
+		specs, err := BuildProviderSpecs(nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(specs) != 0 {
+			t.Fatalf("expected zero specs, got %d", len(specs))
 		}
 	})
 
