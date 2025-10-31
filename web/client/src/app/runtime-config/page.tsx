@@ -15,6 +15,7 @@ export default function RuntimeConfigPage() {
   const [importText, setImportText] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -85,6 +86,31 @@ export default function RuntimeConfigPage() {
     }
   };
 
+  const handleDownloadBackup = async () => {
+    setDownloading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const backup = await apiClient.getConfigBackup();
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: 'application/json',
+      });
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = `meltica-config-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(href);
+      setNotice('Configuration backup downloaded');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download configuration backup');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="space-y-1">
@@ -127,6 +153,9 @@ export default function RuntimeConfigPage() {
             </Button>
             <Button variant="outline" onClick={() => void fetchConfig()} disabled={loading}>
               {loading ? 'Refreshing…' : 'Refresh snapshot'}
+            </Button>
+            <Button variant="secondary" onClick={handleDownloadBackup} disabled={downloading || loading}>
+              {downloading ? 'Preparing backup…' : 'Download backup'}
             </Button>
           </div>
         </CardContent>

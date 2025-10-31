@@ -91,7 +91,7 @@ func main() {
 	}
 	logger.Printf("strategy instances registered: %d", len(lambdaManager.Instances()))
 
-	apiServer := buildAPIServer(runtimeSnapshot.APIServer, runtimeStore, lambdaManager, providerManager)
+	apiServer := buildAPIServer(runtimeSnapshot.APIServer, appCfg.Environment, appCfg.Meta, runtimeStore, lambdaManager, providerManager)
 	startAPIServer(&lifecycle, logger, apiServer)
 	logger.Printf("control API listening on %s", apiServer.Addr)
 
@@ -185,14 +185,15 @@ func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 	if err != nil {
 		return nil, fmt.Errorf("build provider specs: %w", err)
 	}
-	if _, err := manager.Start(ctx, specs); err != nil {
-		return nil, fmt.Errorf("start providers: %w", err)
-	}
-	if len(manager.Providers()) == 0 {
-		return nil, fmt.Errorf("no providers started from configuration")
+	if len(specs) > 0 {
+		if _, err := manager.Start(ctx, specs); err != nil {
+			return nil, fmt.Errorf("start providers: %w", err)
+		}
+		logger.Printf("providers started: %d", len(manager.Providers()))
+	} else {
+		logger.Print("no providers configured; skipping provider bootstrap")
 	}
 
-	logger.Printf("providers started: %d", len(manager.Providers()))
 	return manager, nil
 }
 
@@ -205,8 +206,8 @@ func startLambdaManager(ctx context.Context, appCfg config.AppConfig, runtimeSto
 	return manager, nil
 }
 
-func buildAPIServer(cfg config.APIServerConfig, runtimeStore *config.RuntimeStore, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager) *http.Server {
-	handler := httpserver.NewHandler(lambdaManager, providerManager, runtimeStore)
+func buildAPIServer(cfg config.APIServerConfig, env config.Environment, meta config.MetaConfig, runtimeStore *config.RuntimeStore, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager) *http.Server {
+	handler := httpserver.NewHandler(env, meta, lambdaManager, providerManager, runtimeStore)
 
 	return &http.Server{
 		Addr:                         cfg.Addr,

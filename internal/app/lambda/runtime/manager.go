@@ -318,6 +318,26 @@ func (m *Manager) UpdateRiskLimits(limits risk.Limits) {
 	}
 }
 
+// ManifestSnapshot returns the current lambda manifest snapshot including dynamically created instances.
+func (m *Manager) ManifestSnapshot() config.LambdaManifest {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.specs) == 0 {
+		return config.LambdaManifest{}
+	}
+	manifest := config.LambdaManifest{
+		Lambdas: make([]config.LambdaSpec, 0, len(m.specs)),
+	}
+	for _, spec := range m.specs {
+		cloned := cloneSpec(spec)
+		manifest.Lambdas = append(manifest.Lambdas, sanitizeSpec(cloned))
+	}
+	sort.Slice(manifest.Lambdas, func(i, j int) bool {
+		return manifest.Lambdas[i].ID < manifest.Lambdas[j].ID
+	})
+	return manifest
+}
+
 // ApplyRuntimeConfig synchronises the manager with the supplied runtime configuration snapshot.
 func (m *Manager) ApplyRuntimeConfig(cfg config.RuntimeConfig) error {
 	limits := buildRiskLimits(cfg.Risk, m.logger)

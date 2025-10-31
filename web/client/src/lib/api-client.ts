@@ -159,6 +159,10 @@ class ApiClient {
       body: JSON.stringify(payload),
     });
   }
+
+  async getConfigBackup(): Promise<Record<string, unknown>> {
+    return this.request('/config/backup');
+  }
 }
 
 export const apiClient = new ApiClient();

@@ -15,7 +15,7 @@ type ProviderSpec struct {
 // BuildProviderSpecs converts provider entries from the application configuration into provider specifications.
 func BuildProviderSpecs(providers map[Provider]map[string]any) ([]ProviderSpec, error) {
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("no providers defined in config")
+		return nil, nil
 	}
 
 	specs := make([]ProviderSpec, 0, len(providers))

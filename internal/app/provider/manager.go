@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -478,6 +479,26 @@ func (m *Manager) ProviderMetadataSnapshot() []RuntimeMetadata {
 	m.mu.RUnlock()
 	SortRuntimeMetadata(out)
 	return out
+}
+
+// ProviderSpecsSnapshot returns a copy of the provider specifications known to the manager.
+func (m *Manager) ProviderSpecsSnapshot() []config.ProviderSpec {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.states) == 0 {
+		return nil
+	}
+	specs := make([]config.ProviderSpec, 0, len(m.states))
+	for _, state := range m.states {
+		clone := config.ProviderSpec{
+			Name:    state.spec.Name,
+			Adapter: state.spec.Adapter,
+			Config:  cloneConfigMap(state.spec.Config),
+		}
+		specs = append(specs, clone)
+	}
+	sort.Slice(specs, func(i, j int) bool { return specs[i].Name < specs[j].Name })
+	return specs
 }
 
 // ProviderMetadataFor returns detailed metadata for a provider instance.

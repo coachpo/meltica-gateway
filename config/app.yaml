@@ -1,17 +1,15 @@
-# environment: deployment environment (dev | staging | prod)
 environment: dev
 
 meta:
   name: Meltica Gateway
   version: v1
+  description: Trading control plane
 
 runtime:
-  # eventbus: in-memory event bus sizing
   eventbus:
     buffer_size: 8192
     fanout_workers: 8
 
-  # pools: object pool capacities
   pools:
     event:
       size: 8192
@@ -38,42 +36,11 @@ runtime:
       threshold: 4
       cooldown: 90s
 
-  # api_server: control API bind address (host:port or :port)
   api_server:
     addr: ":8880"
 
-  # telemetry: OTLP exporter configuration
   telemetry:
     otlp_endpoint: http://capy.lan:4318
     service_name: meltica-gateway
     otlp_insecure: true
     enable_metrics: true
-
-providers:
-  # Real exchange wiring example; inject credentials via environment or config secrets.
-  binance-spot:
-    adapter:
-      identifier: binance
-      config:
-        # api_key: "${BINANCE_API_KEY}"
-        # api_secret: "${BINANCE_API_SECRET}"
-        snapshot_depth: 1000
-        http_timeout: 10s
-        instrument_refresh_interval: 30m
-        recv_window: 5s
-        user_stream_keepalive: 15m
-
-# lambda_manifest: inline lambda definitions that will be materialised at startup
-# lambda_manifest:
-#   lambdas:
-#     - id: latency-probe-btc
-#       scope:
-#         binance-spot:
-#           symbols:
-#             - BTC-USDT
-#       strategy:
-#         identifier: logging
-#         config:
-#           dry_run: true
-#           logger_prefix: "[LatencyProbe] "
-#       auto_start: true

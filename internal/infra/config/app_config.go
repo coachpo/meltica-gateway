@@ -289,9 +289,6 @@ func (c AppConfig) Validate() error {
 	default:
 		return fmt.Errorf("environment must be one of dev, staging, prod")
 	}
-	if len(c.Providers) == 0 {
-		return fmt.Errorf("at least one provider must be configured")
-	}
 
 	if err := c.Runtime.Validate(); err != nil {
 		return fmt.Errorf("runtime: %w", err)

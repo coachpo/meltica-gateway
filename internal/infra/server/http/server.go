@@ -34,11 +34,14 @@ const (
 
 	riskLimitsPath    = "/risk/limits"
 	runtimeConfigPath = "/config/runtime"
+	configBackupPath  = "/config/backup"
 )
 
 type handlerFunc func(http.ResponseWriter, *http.Request)
 
 type httpServer struct {
+	environment  config.Environment
+	meta         config.MetaConfig
 	manager      *runtime.Manager
 	providers    *provider.Manager
 	runtimeStore *config.RuntimeStore
@@ -56,8 +59,8 @@ type providerAdapterPayload struct {
 }
 
 // NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(manager *runtime.Manager, providers *provider.Manager, runtimeStore *config.RuntimeStore) http.Handler {
-	server := &httpServer{manager: manager, providers: providers, runtimeStore: runtimeStore}
+func NewHandler(environment config.Environment, meta config.MetaConfig, manager *runtime.Manager, providers *provider.Manager, runtimeStore *config.RuntimeStore) http.Handler {
+	server := &httpServer{environment: environment, meta: meta, manager: manager, providers: providers, runtimeStore: runtimeStore}
 	mux := http.NewServeMux()
 
 	mux.Handle(strategiesPath, server.methodHandlers(map[string]handlerFunc{
@@ -94,6 +97,10 @@ func NewHandler(manager *runtime.Manager, providers *provider.Manager, runtimeSt
 	mux.Handle(runtimeConfigPath, server.methodHandlers(map[string]handlerFunc{
 		http.MethodGet: server.exportRuntimeConfig,
 		http.MethodPut: server.importRuntimeConfig,
+	}))
+
+	mux.Handle(configBackupPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.exportConfigBackup,
 	}))
 
 	return withCORS(mux)
@@ -403,7 +410,42 @@ func (s *httpServer) importRuntimeConfig(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "imported", "runtime": updated})
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (s *httpServer) exportConfigBackup(w http.ResponseWriter, _ *http.Request) {
+	if s.runtimeStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "runtime config store unavailable")
+		return
+	}
+	runtimeSnapshot := s.runtimeStore.Snapshot()
+
+	providersConfig := map[string]map[string]any(nil)
+	if s.providers != nil {
+		specs := s.providers.ProviderSpecsSnapshot()
+		if len(specs) > 0 {
+			providersConfig = buildProviderConfigSnapshot(specs)
+		}
+	}
+
+	manifest := s.manager.ManifestSnapshot()
+
+	payload := map[string]any{
+		"environment": string(s.environment),
+		"runtime":     buildRuntimeBackup(runtimeSnapshot),
+	}
+
+	if meta := buildMetaSnapshot(s.meta); len(meta) > 0 {
+		payload["meta"] = meta
+	}
+	if len(providersConfig) > 0 {
+		payload["providers"] = providersConfig
+	}
+	if len(manifest.Lambdas) > 0 {
+		payload["lambda_manifest"] = buildLambdaManifestBackup(manifest)
+	}
+
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *httpServer) handleInstance(w http.ResponseWriter, r *http.Request) {
@@ -736,6 +778,171 @@ func writeDecodeError(w http.ResponseWriter, err error) {
 func isRequestTooLarge(err error) bool {
 	var maxBytesErr *http.MaxBytesError
 	return errors.As(err, &maxBytesErr)
+}
+
+func buildMetaSnapshot(meta config.MetaConfig) map[string]any {
+	out := make(map[string]any)
+	if strings.TrimSpace(meta.Name) != "" {
+		out["name"] = meta.Name
+	}
+	if strings.TrimSpace(meta.Version) != "" {
+		out["version"] = meta.Version
+	}
+	if strings.TrimSpace(meta.Description) != "" {
+		out["description"] = meta.Description
+	}
+	return out
+}
+
+func buildRuntimeBackup(cfg config.RuntimeConfig) map[string]any {
+	eventbus := map[string]any{
+		"buffer_size": cfg.Eventbus.BufferSize,
+	}
+	if fanout := fanoutWorkerSettingValue(cfg.Eventbus.FanoutWorkers); fanout != nil {
+		eventbus["fanout_workers"] = fanout
+	}
+
+	pools := map[string]any{
+		"event": map[string]any{
+			"size":            cfg.Pools.Event.Size,
+			"wait_queue_size": cfg.Pools.Event.WaitQueueSize,
+		},
+		"order_request": map[string]any{
+			"size":            cfg.Pools.OrderRequest.Size,
+			"wait_queue_size": cfg.Pools.OrderRequest.WaitQueueSize,
+		},
+	}
+
+	allowed := make([]string, len(cfg.Risk.AllowedOrderTypes))
+	for i, raw := range cfg.Risk.AllowedOrderTypes {
+		allowed[i] = strings.TrimSpace(raw)
+	}
+
+	risk := map[string]any{
+		"max_position_size":     cfg.Risk.MaxPositionSize,
+		"max_notional_value":    cfg.Risk.MaxNotionalValue,
+		"notional_currency":     cfg.Risk.NotionalCurrency,
+		"order_throttle":        cfg.Risk.OrderThrottle,
+		"order_burst":           cfg.Risk.OrderBurst,
+		"max_concurrent_orders": cfg.Risk.MaxConcurrentOrders,
+		"price_band_percent":    cfg.Risk.PriceBandPercent,
+		"allowed_order_types":   allowed,
+		"kill_switch_enabled":   cfg.Risk.KillSwitchEnabled,
+		"max_risk_breaches":     cfg.Risk.MaxRiskBreaches,
+		"circuit_breaker": map[string]any{
+			"enabled":   cfg.Risk.CircuitBreaker.Enabled,
+			"threshold": cfg.Risk.CircuitBreaker.Threshold,
+			"cooldown":  cfg.Risk.CircuitBreaker.Cooldown,
+		},
+	}
+
+	telemetry := map[string]any{
+		"otlp_endpoint":  cfg.Telemetry.OTLPEndpoint,
+		"service_name":   cfg.Telemetry.ServiceName,
+		"otlp_insecure":  cfg.Telemetry.OTLPInsecure,
+		"enable_metrics": cfg.Telemetry.EnableMetrics,
+	}
+
+	apiServer := map[string]any{
+		"addr": strings.TrimSpace(cfg.APIServer.Addr),
+	}
+
+	return map[string]any{
+		"eventbus":   eventbus,
+		"pools":      pools,
+		"risk":       risk,
+		"api_server": apiServer,
+		"telemetry":  telemetry,
+	}
+}
+
+func fanoutWorkerSettingValue(setting config.FanoutWorkerSetting) any {
+	bytes, err := setting.MarshalJSON()
+	if err != nil {
+		return nil
+	}
+	var decoded any
+	if err := json.Unmarshal(bytes, &decoded); err != nil {
+		return nil
+	}
+	return decoded
+}
+
+func buildProviderConfigSnapshot(specs []config.ProviderSpec) map[string]map[string]any {
+	if len(specs) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]any, len(specs))
+	for _, spec := range specs {
+		adapter := make(map[string]any)
+		adapter["identifier"] = spec.Adapter
+		for key, value := range spec.Config {
+			switch key {
+			case "provider_name":
+				continue
+			case "identifier":
+				adapter["identifier"] = cloneValue(value)
+			default:
+				adapter[key] = cloneValue(value)
+			}
+		}
+		if id, ok := adapter["identifier"].(string); !ok || strings.TrimSpace(id) == "" {
+			adapter["identifier"] = spec.Adapter
+		}
+		out[spec.Name] = map[string]any{
+			"adapter": adapter,
+		}
+	}
+	return out
+}
+
+func buildLambdaManifestBackup(manifest config.LambdaManifest) map[string]any {
+	lambdas := make([]map[string]any, 0, len(manifest.Lambdas))
+	for _, spec := range manifest.Lambdas {
+		strategy := map[string]any{
+			"identifier": spec.Strategy.Identifier,
+		}
+		if len(spec.Strategy.Config) > 0 {
+			strategy["config"] = cloneValue(spec.Strategy.Config)
+		}
+
+		scope := make(map[string]any, len(spec.ProviderSymbols))
+		for name, assignment := range spec.ProviderSymbols {
+			scope[name] = map[string]any{
+				"symbols": append([]string(nil), assignment.Symbols...),
+			}
+		}
+
+		lambdaEntry := map[string]any{
+			"id":         spec.ID,
+			"strategy":   strategy,
+			"auto_start": spec.AutoStart,
+			"scope":      scope,
+		}
+		lambdas = append(lambdas, lambdaEntry)
+	}
+	return map[string]any{"lambdas": lambdas}
+}
+
+func cloneValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		clone := make(map[string]any, len(v))
+		for key, val := range v {
+			clone[key] = cloneValue(val)
+		}
+		return clone
+	case []any:
+		clone := make([]any, len(v))
+		for i, item := range v {
+			clone[i] = cloneValue(item)
+		}
+		return clone
+	case []string:
+		return append([]string(nil), v...)
+	default:
+		return value
+	}
 }
 
 func methodNotAllowed(w http.ResponseWriter, allowed ...string) {
