@@ -18,6 +18,12 @@ All exchange adapters **MUST** implement WebSocket stream management using the *
 - Ensure object pooling via `pool.PoolManager` to avoid allocations when publishing and returning schema instances, and fail fast (with clear logs) if a provider starts without an injected pool manager so misconfigurations surface immediately.
 - Provide order-submission plumbing (even if initially a stub) so `SubmitOrder` can accept canonical `schema.OrderRequest` payloads and apply symbol/unit conversions.
 
+## Adapter Metadata & Registration
+- Define `publicMetadata` and `privateMetadata` helpers in `options.go`. The public struct should expose the adapter identifier, display name, venue code, and a short description; the private struct centralizes REST and WebSocket base URLs plus per-endpoint paths so future overrides stay isolated.
+- Export a `provider.AdapterMetadata` instance (see `binanceAdapterMetadata`) that advertises capabilities and the `SettingsSchema`. Each entry in the schema must describe user-facing configuration keys (name, type, default, requirement, and purpose) because the control plane renders this metadata verbatim.
+- When calling `RegisterWithMetadata` inside `manifest.go`, pass both the provider factory and the adapter metadata. The registry persists those descriptors for API discovery and config validation, so omitting them will block new adapters from being listed by the control API.
+- Inside the factory, honor optional aliasing via `provider_name`/`name` keys and nest user configuration under `config` to remain consistent with existing manifests. Always run `withDefaults` so unspecified metadata-driven defaults propagate before instantiation.
+
 ## Event Emission Patterns
 ### Tickers
 - Resolve an instrument state (creating it on first access) and advance price via `nextPrice` for deterministic drift.
@@ -38,6 +44,11 @@ All exchange adapters **MUST** implement WebSocket stream management using the *
 1. Request a REST snapshot that includes a sequence identifier. Invoke `OrderBookAssembler.ApplySnapshot`, which resets internal maps, applies the snapshot, and replays any buffered diffs.
 2. Stream diff messages into `ApplyDiff`. The assembler buffers them until the initial snapshot lands, ignores stale sequences, and applies updates atomically.
 3. Consume the returned `schema.BookSnapshotPayload` from each successful `ApplyDiff` as the canonical book. If you detect dropped or out-of-order sequences, fetch a new snapshot and call `ApplySnapshot` again to resynchronize.
+
+## Instrument & Symbol Metadata
+- Populate `symbolMeta`-style structs when building instruments. They should track the canonical symbol (`BTC-USDT`), the uppercase REST symbol (`BTCUSDT`), and the lowercase stream topic (`btcusdt`) so routing logic can translate requests, WebSocket subscriptions, and REST responses without recomputing strings.
+- Store these metadata entries in a provider-level map keyed by canonical symbol and maintain the reverse lookup (`restToCanon`) for REST payloads. Refresh both maps whenever `refreshInstruments` runs to keep aliases and precision changes in sync with the venue.
+- Use the metadata when seeding order books, submitting orders, and wiring stream subscriptions to guarantee that every code path resolves the same venue identifiers.
 
 ## Onboarding Checklist
 - [ ] Implement adapter-specific options (REST/WebSocket clients, authentication, throttling, precision rules).
