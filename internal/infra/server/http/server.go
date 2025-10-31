@@ -79,7 +79,7 @@ func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Hand
 		http.MethodPut: server.updateRiskLimits,
 	}))
 
-	return mux
+	return withCORS(mux)
 }
 
 func (s *httpServer) methodHandlers(handlers map[string]handlerFunc) http.Handler {
@@ -495,4 +495,17 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"status": "error", "error": message})
+}
+
+func withCORS(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
 }
