@@ -584,13 +584,13 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 
 // InstanceSnapshot captures the current state of a lambda instance.
 type InstanceSnapshot struct {
-	ID              string                            `json:"id"`
-	Strategy        config.LambdaStrategySpec         `json:"strategy"`
-	Providers       []string                          `json:"providers"`
-	ProviderSymbols map[string]config.ProviderSymbols `json:"scope"`
-	Symbols         []string                          `json:"symbols"`
-	AutoStart       bool                              `json:"autoStart"`
-	Running         bool                              `json:"running"`
+	ID                string                            `json:"id"`
+	Strategy          config.LambdaStrategySpec         `json:"strategy"`
+	Providers         []string                          `json:"providers"`
+	ProviderSymbols   map[string]config.ProviderSymbols `json:"scope"`
+	AggregatedSymbols []string                          `json:"aggregatedSymbols"`
+	AutoStart         bool                              `json:"autoStart"`
+	Running           bool                              `json:"running"`
 }
 
 // Instances returns snapshots of all lambda instances.
@@ -611,13 +611,13 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 	spec, err := m.specForID(id)
 	if err != nil {
 		return InstanceSnapshot{
-			ID:              "",
-			Strategy:        config.LambdaStrategySpec{Identifier: "", Config: map[string]any{}},
-			Providers:       []string{},
-			ProviderSymbols: map[string]config.ProviderSymbols{},
-			Symbols:         []string{},
-			AutoStart:       false,
-			Running:         false,
+			ID:                "",
+			Strategy:          config.LambdaStrategySpec{Identifier: "", Config: map[string]any{}},
+			Providers:         []string{},
+			ProviderSymbols:   map[string]config.ProviderSymbols{},
+			AggregatedSymbols: []string{},
+			AutoStart:         false,
+			Running:           false,
 		}, false
 	}
 	m.mu.RLock()
@@ -630,14 +630,15 @@ func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
 	strategyConfig := copyMap(spec.Strategy.Config)
 	providers := append([]string(nil), spec.Providers...)
 	assignments := cloneProviderSymbols(spec.ProviderSymbols)
+	aggregated := spec.AllSymbols()
 	return InstanceSnapshot{
-		ID:              spec.ID,
-		Strategy:        config.LambdaStrategySpec{Identifier: spec.Strategy.Identifier, Config: strategyConfig},
-		Providers:       providers,
-		ProviderSymbols: assignments,
-		Symbols:         spec.AllSymbols(),
-		AutoStart:       spec.AutoStart,
-		Running:         running,
+		ID:                spec.ID,
+		Strategy:          config.LambdaStrategySpec{Identifier: spec.Strategy.Identifier, Config: strategyConfig},
+		Providers:         providers,
+		ProviderSymbols:   assignments,
+		AggregatedSymbols: aggregated,
+		AutoStart:         spec.AutoStart,
+		Running:           running,
 	}
 }
 
