@@ -114,6 +114,9 @@ type RouteRegistrar interface {
 type Manager struct {
 	mu sync.RWMutex
 
+	lifecycleMu  sync.RWMutex
+	lifecycleCtx context.Context
+
 	bus         eventbus.Bus
 	pools       *pool.PoolManager
 	providers   ProviderCatalog
@@ -141,19 +144,41 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 	rm := risk.NewManager(buildRiskLimits(cfg.Risk, logger))
 
 	mgr := &Manager{
-		mu:          sync.RWMutex{},
-		bus:         bus,
-		pools:       pools,
-		providers:   providers,
-		logger:      logger,
-		registrar:   registrar,
-		riskManager: rm,
-		strategies:  make(map[string]StrategyDefinition),
-		specs:       make(map[string]config.LambdaSpec),
-		instances:   make(map[string]*lambdaInstance),
+		mu:           sync.RWMutex{},
+		lifecycleMu:  sync.RWMutex{},
+		lifecycleCtx: context.Background(),
+		bus:          bus,
+		pools:        pools,
+		providers:    providers,
+		logger:       logger,
+		registrar:    registrar,
+		riskManager:  rm,
+		strategies:   make(map[string]StrategyDefinition),
+		specs:        make(map[string]config.LambdaSpec),
+		instances:    make(map[string]*lambdaInstance),
 	}
 	mgr.registerDefaults()
 	return mgr
+}
+
+// SetLifecycleContext configures the parent context used to run lambda instances.
+func (m *Manager) SetLifecycleContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	m.lifecycleMu.Lock()
+	m.lifecycleCtx = ctx
+	m.lifecycleMu.Unlock()
+}
+
+func (m *Manager) parentContext() context.Context {
+	m.lifecycleMu.RLock()
+	ctx := m.lifecycleCtx
+	m.lifecycleMu.RUnlock()
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 func (m *Manager) registerDefaults() {
@@ -474,7 +499,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 	base := core.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
 
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(m.parentContext())
 	errs, err := base.Start(runCtx)
 	if err != nil {
 		cancel()

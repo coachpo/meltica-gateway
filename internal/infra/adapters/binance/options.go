@@ -49,8 +49,8 @@ var binanceAdapterMetadata = provider.AdapterMetadata{
 	Description:  binancePublicMetadata.description,
 	Capabilities: []string{"market-data", "orders"},
 	SettingsSchema: []provider.AdapterSetting{
-		{Name: "api_key", Type: "string", Description: "API key used for authenticated REST and user data streams", Required: false},
-		{Name: "api_secret", Type: "string", Description: "API secret used to sign REST requests", Required: false},
+		{Name: "api_key", Type: "string", Description: "API key used for authenticated REST and user data streams", Default: "", Required: false},
+		{Name: "api_secret", Type: "string", Description: "API secret used to sign REST requests", Default: "", Required: false},
 		{Name: "snapshot_depth", Type: "int", Description: "Order book snapshot depth used when seeding local books", Default: defaultSnapshotDepth, Required: false},
 		{Name: "http_timeout", Type: "duration", Description: "HTTP client timeout for REST requests", Default: defaultHTTPTimeout.String(), Required: false},
 		{Name: "instrument_refresh_interval", Type: "duration", Description: "Interval between instrument metadata refreshes", Default: defaultInstrumentRefresh.String(), Required: false},
