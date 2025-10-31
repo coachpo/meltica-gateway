@@ -386,9 +386,6 @@ func (l *BaseLambda) consume(ctx context.Context, subs []subscription, errs chan
 	}
 
 	wg.Wait()
-
-	l.logger.Printf("[%s] stopped", l.id)
-
 	for _, sub := range subs {
 		l.bus.Unsubscribe(sub.id)
 	}
