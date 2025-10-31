@@ -315,7 +315,8 @@ func (m *Manager) StrategyDetail(name string) (strategies.Metadata, bool) {
 	defer m.mu.RUnlock()
 	def, ok := m.strategies[strings.ToLower(strings.TrimSpace(name))]
 	if !ok {
-		return strategies.Metadata{}, false
+		var empty strategies.Metadata
+		return empty, false
 	}
 	return def.Metadata(), true
 }

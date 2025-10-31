@@ -119,7 +119,7 @@ func (p *Provider) buildInstrument(sym exchangeInfoSymbol) (schema.Instrument, s
 		Type:              schema.InstrumentTypeSpot,
 		BaseCurrency:      strings.ToUpper(strings.TrimSpace(sym.BaseAsset)),
 		QuoteCurrency:     strings.ToUpper(strings.TrimSpace(sym.QuoteAsset)),
-		Venue:             p.opts.metadata.venue,
+		Venue:             p.opts.publicMeta.venue,
 		Expiry:            "",
 		ContractValue:     nil,
 		ContractCurrency:  "",

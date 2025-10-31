@@ -21,6 +21,7 @@ type Manager struct {
 	pools         *pool.PoolManager
 	providers     map[string]Instance
 	subscriptions map[string]*shared.SubscriptionManager
+	specs         map[string]config.ProviderSpec
 }
 
 // NewManager creates a new provider manager.
@@ -34,6 +35,7 @@ func NewManager(reg *Registry, pools *pool.PoolManager) *Manager {
 		pools:         pools,
 		providers:     make(map[string]Instance),
 		subscriptions: make(map[string]*shared.SubscriptionManager),
+		specs:         make(map[string]config.ProviderSpec),
 	}
 }
 
@@ -64,6 +66,7 @@ func (m *Manager) addProvider(ctx context.Context, spec config.ProviderSpec) err
 	}
 	m.providers[spec.Name] = instance
 	m.subscriptions[spec.Name] = shared.NewSubscriptionManager(instance)
+	m.specs[spec.Name] = spec
 	return nil
 }
 
@@ -84,6 +87,85 @@ func (m *Manager) Provider(name string) (Instance, bool) {
 	inst, ok := m.providers[name]
 	m.mu.RUnlock()
 	return inst, ok
+}
+
+// ProviderMetadataSnapshot returns metadata for all running providers.
+func (m *Manager) ProviderMetadataSnapshot() []RuntimeMetadata {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]RuntimeMetadata, 0, len(m.providers))
+	for name, inst := range m.providers {
+		spec := m.specs[name]
+		instruments := inst.Instruments()
+		runtime := buildRuntimeMetadata(spec, len(instruments))
+		out = append(out, runtime)
+	}
+	SortRuntimeMetadata(out)
+	return out
+}
+
+// ProviderMetadataFor returns detailed metadata for a provider instance.
+func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
+	m.mu.RLock()
+	inst, ok := m.providers[name]
+	if !ok {
+		m.mu.RUnlock()
+		var empty RuntimeDetail
+		return empty, false
+	}
+	spec := m.specs[name]
+	m.mu.RUnlock()
+	instruments := inst.Instruments()
+	meta := buildRuntimeMetadata(spec, len(instruments))
+	adapterMeta, _ := m.registry.AdapterMetadata(spec.Exchange)
+	return CloneRuntimeDetail(RuntimeDetail{
+		RuntimeMetadata: meta,
+		Instruments:     instruments,
+		AdapterMetadata: adapterMeta,
+	}), true
+}
+
+func buildRuntimeMetadata(spec config.ProviderSpec, instrumentCount int) RuntimeMetadata {
+	settings := extractProviderSettings(spec.Config)
+	meta := RuntimeMetadata{
+		Name:            spec.Name,
+		Exchange:        spec.Exchange,
+		Identifier:      spec.Exchange,
+		Settings:        settings,
+		InstrumentCount: instrumentCount,
+	}
+	return CloneRuntimeMetadata(meta)
+}
+
+func extractProviderSettings(cfg map[string]any) map[string]any {
+	if len(cfg) == 0 {
+		return nil
+	}
+	settings := map[string]any{}
+	for key, value := range cfg {
+		switch key {
+		case "identifier", "provider_name":
+			continue
+		case "config":
+			nested, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			for nk, nv := range nested {
+				settings[nk] = nv
+			}
+		default:
+			settings[key] = value
+		}
+	}
+	if len(settings) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(settings))
+	for k, v := range settings {
+		cloned[k] = v
+	}
+	return cloned
 }
 
 // ActivateRoute applies a route update to the targeted provider only.

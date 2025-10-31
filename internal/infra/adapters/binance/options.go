@@ -4,14 +4,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
 
-type metadata struct {
+type publicMetadata struct {
+	identifier  string
+	displayName string
+	venue       string
+	description string
+}
+
+type privateMetadata struct {
 	apiBaseURL       string
 	websocketBaseURL string
-	identifier       string
-	venue            string
 	exchangeInfoPath string
 	depthPath        string
 	listenKeyPath    string
@@ -19,16 +25,38 @@ type metadata struct {
 	orderPath        string
 }
 
-var binanceMetadata = metadata{
+var binancePublicMetadata = publicMetadata{
+	identifier:  "binance",
+	displayName: "Binance Spot",
+	venue:       "BINANCE",
+	description: "Binance spot market data and order routing adapter",
+}
+
+var binancePrivateMetadata = privateMetadata{
 	apiBaseURL:       "https://api.binance.com",
 	websocketBaseURL: "wss://stream.binance.com/ws",
-	identifier:       "binance",
-	venue:            "BINANCE",
 	exchangeInfoPath: "/api/v3/exchangeInfo",
 	depthPath:        "/api/v3/depth",
 	listenKeyPath:    "/api/v3/userDataStream",
 	accountInfoPath:  "/api/v3/account",
 	orderPath:        "/api/v3/order",
+}
+
+var binanceAdapterMetadata = provider.AdapterMetadata{
+	Identifier:   binancePublicMetadata.identifier,
+	DisplayName:  binancePublicMetadata.displayName,
+	Venue:        binancePublicMetadata.venue,
+	Description:  binancePublicMetadata.description,
+	Capabilities: []string{"market-data", "orders"},
+	SettingsSchema: []provider.AdapterSetting{
+		{Name: "api_key", Type: "string", Description: "API key used for authenticated REST and user data streams", Required: false},
+		{Name: "api_secret", Type: "string", Description: "API secret used to sign REST requests", Required: false},
+		{Name: "snapshot_depth", Type: "int", Description: "Order book snapshot depth used when seeding local books", Default: defaultSnapshotDepth, Required: false},
+		{Name: "http_timeout", Type: "duration", Description: "HTTP client timeout for REST requests", Default: defaultHTTPTimeout.String(), Required: false},
+		{Name: "instrument_refresh_interval", Type: "duration", Description: "Interval between instrument metadata refreshes", Default: defaultInstrumentRefresh.String(), Required: false},
+		{Name: "recv_window", Type: "duration", Description: "REST recvWindow applied to signed requests", Default: defaultRecvWindow.String(), Required: false},
+		{Name: "user_stream_keepalive", Type: "duration", Description: "Interval between user data stream keepalive heartbeats", Default: defaultUserStreamKeepAlive.String(), Required: false},
+	},
 }
 
 const (
@@ -56,13 +84,15 @@ type Options struct {
 	Config Config
 	Pools  *pool.PoolManager
 
-	metadata metadata
+	privateMeta privateMetadata
+	publicMeta  publicMetadata
 }
 
 func withDefaults(in Options) Options {
-	in.metadata = binanceMetadata
+	in.privateMeta = binancePrivateMetadata
+	in.publicMeta = binancePublicMetadata
 	if strings.TrimSpace(in.Config.Name) == "" {
-		in.Config.Name = in.metadata.identifier
+		in.Config.Name = in.publicMeta.identifier
 	}
 	if in.Config.SnapshotDepth <= 0 {
 		in.Config.SnapshotDepth = defaultSnapshotDepth
@@ -83,7 +113,7 @@ func withDefaults(in Options) Options {
 }
 
 func (o Options) restEndpoint(path string) string {
-	base := strings.TrimSuffix(strings.TrimSpace(o.metadata.apiBaseURL), "/")
+	base := strings.TrimSuffix(strings.TrimSpace(o.privateMeta.apiBaseURL), "/")
 	if base == "" {
 		return ""
 	}
@@ -97,23 +127,23 @@ func (o Options) restEndpoint(path string) string {
 }
 
 func (o Options) exchangeInfoEndpoint() string {
-	return o.restEndpoint(o.metadata.exchangeInfoPath)
+	return o.restEndpoint(o.privateMeta.exchangeInfoPath)
 }
 
 func (o Options) depthEndpoint() string {
-	return o.restEndpoint(o.metadata.depthPath)
+	return o.restEndpoint(o.privateMeta.depthPath)
 }
 
 func (o Options) listenKeyEndpoint() string {
-	return o.restEndpoint(o.metadata.listenKeyPath)
+	return o.restEndpoint(o.privateMeta.listenKeyPath)
 }
 
 func (o Options) accountInfoEndpoint() string {
-	return o.restEndpoint(o.metadata.accountInfoPath)
+	return o.restEndpoint(o.privateMeta.accountInfoPath)
 }
 
 func (o Options) orderEndpoint() string {
-	return o.restEndpoint(o.metadata.orderPath)
+	return o.restEndpoint(o.privateMeta.orderPath)
 }
 
 func (o Options) httpTimeoutDuration() time.Duration {
@@ -133,5 +163,5 @@ func (o Options) userStreamKeepAliveDuration() time.Duration {
 }
 
 func (o Options) websocketURL() string {
-	return o.metadata.websocketBaseURL
+	return o.privateMeta.websocketBaseURL
 }

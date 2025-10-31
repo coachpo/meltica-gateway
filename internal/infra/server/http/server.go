@@ -10,25 +10,31 @@ import (
 	json "github.com/goccy/go-json"
 
 	"github.com/coachpo/meltica/internal/app/lambda/runtime"
+	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/app/risk"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
 
 // NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(manager *runtime.Manager) http.Handler {
-	server := &httpServer{manager: manager}
+func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Handler {
+	server := &httpServer{manager: manager, providers: providers}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/strategies", server.handleStrategies)
 	mux.HandleFunc("/strategies/", server.handleStrategy)
 	mux.HandleFunc("/strategy-instances", server.handleInstances)
 	mux.HandleFunc("/strategy-instances/", server.handleInstance)
+	mux.HandleFunc("/providers", server.handleProviders)
+	mux.HandleFunc("/providers/", server.handleProvider)
+	mux.HandleFunc("/adapters", server.handleAdapters)
+	mux.HandleFunc("/adapters/", server.handleAdapter)
 	mux.HandleFunc("/risk/limits", server.handleRiskLimits)
 	return mux
 }
 
 type httpServer struct {
-	manager *runtime.Manager
+	manager   *runtime.Manager
+	providers *provider.Manager
 }
 
 func (s *httpServer) handleStrategies(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +60,88 @@ func (s *httpServer) handleStrategy(w http.ResponseWriter, r *http.Request) {
 	meta, ok := s.manager.StrategyDetail(name)
 	if !ok {
 		writeError(w, http.StatusNotFound, "strategy not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, meta)
+}
+
+func (s *httpServer) handleProviders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.providers == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"providers": []provider.RuntimeMetadata{}})
+		return
+	}
+	metadata := s.providers.ProviderMetadataSnapshot()
+	writeJSON(w, http.StatusOK, map[string]any{"providers": metadata})
+}
+
+func (s *httpServer) handleProvider(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/providers/")
+	name = strings.Trim(name, "/")
+	if name == "" {
+		writeError(w, http.StatusNotFound, "provider name required")
+		return
+	}
+	if s.providers == nil {
+		writeError(w, http.StatusNotFound, "provider not found")
+		return
+	}
+	meta, ok := s.providers.ProviderMetadataFor(name)
+	if !ok {
+		writeError(w, http.StatusNotFound, "provider not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, meta)
+}
+
+func (s *httpServer) handleAdapters(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.providers == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"adapters": []provider.AdapterMetadata{}})
+		return
+	}
+	reg := s.providers.Registry()
+	if reg == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"adapters": []provider.AdapterMetadata{}})
+		return
+	}
+	metadata := reg.AdapterMetadataSnapshot()
+	writeJSON(w, http.StatusOK, map[string]any{"adapters": metadata})
+}
+
+func (s *httpServer) handleAdapter(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	identifier := strings.TrimPrefix(r.URL.Path, "/adapters/")
+	identifier = strings.Trim(identifier, "/")
+	if identifier == "" {
+		writeError(w, http.StatusNotFound, "adapter identifier required")
+		return
+	}
+	if s.providers == nil {
+		writeError(w, http.StatusNotFound, "adapter not found")
+		return
+	}
+	reg := s.providers.Registry()
+	if reg == nil {
+		writeError(w, http.StatusNotFound, "adapter not found")
+		return
+	}
+	meta, ok := reg.AdapterMetadata(identifier)
+	if !ok {
+		writeError(w, http.StatusNotFound, "adapter not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, meta)

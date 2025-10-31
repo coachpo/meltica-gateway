@@ -13,7 +13,7 @@ import (
 
 // RegisterFactory installs the Binance provider factory into the registry.
 func RegisterFactory(reg *provider.Registry) {
-	reg.Register("binance", func(ctx context.Context, pools *pool.PoolManager, cfg map[string]any) (provider.Instance, error) {
+	reg.RegisterWithMetadata(binancePublicMetadata.identifier, func(ctx context.Context, pools *pool.PoolManager, cfg map[string]any) (provider.Instance, error) {
 		if pools == nil {
 			return nil, fmt.Errorf("binance provider requires pool manager")
 		}
@@ -59,7 +59,7 @@ func RegisterFactory(reg *provider.Registry) {
 			return nil, fmt.Errorf("start binance provider: %w", err)
 		}
 		return provider, nil
-	})
+	}, binanceAdapterMetadata)
 }
 
 func stringFromConfig(cfg map[string]any, key string) (string, bool) {

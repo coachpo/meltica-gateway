@@ -45,6 +45,10 @@ var controlAPIRoutes = [...]string{
 	"/strategies/",
 	"/strategy-instances",
 	"/strategy-instances/",
+	"/providers",
+	"/providers/",
+	"/adapters",
+	"/adapters/",
 	"/risk/limits",
 }
 
@@ -93,7 +97,7 @@ func main() {
 	}
 	logger.Printf("strategy instances registered: %d", len(lambdaManager.Instances()))
 
-	apiServer := buildAPIServer(appCfg.APIServer, lambdaManager)
+	apiServer := buildAPIServer(appCfg.APIServer, lambdaManager, providerManager)
 	startAPIServer(&lifecycle, logger, apiServer)
 	logger.Printf("control API listening on %s", apiServer.Addr)
 
@@ -224,8 +228,8 @@ func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventb
 	return manager, nil
 }
 
-func buildAPIServer(cfg config.APIServerConfig, lambdaManager *lambdaruntime.Manager) *http.Server {
-	handler := httpserver.NewHandler(lambdaManager)
+func buildAPIServer(cfg config.APIServerConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager) *http.Server {
+	handler := httpserver.NewHandler(lambdaManager, providerManager)
 
 	mux := http.NewServeMux()
 	for _, route := range controlAPIRoutes {

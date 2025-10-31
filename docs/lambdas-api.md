@@ -1,6 +1,6 @@
-# Strategy Management HTTP API
+# Control API
 
-The gateway exposes REST endpoints for strategy discovery and instance lifecycle management. Handlers are mounted alongside control endpoints on port `:8880`.
+The gateway exposes REST endpoints for strategy discovery, provider metadata, adapter definitions, and instance lifecycle management. Handlers are mounted alongside control endpoints on port `:8880`.
 
 ## Strategy Catalog
 
@@ -25,6 +25,68 @@ Returns available strategy definitions and their configurable fields.
 
 ### `GET /strategies/{name}`
 Returns the metadata for a single strategy.
+
+## Providers Metadata
+
+### `GET /providers`
+Lists all running providers with runtime metadata.
+
+```json
+{
+  "providers": [
+    {
+      "name": "binance-spot",
+      "exchange": "binance",
+      "identifier": "binance",
+      "instrumentCount": 342,
+      "settings": {
+    "api_key": "${BINANCE_API_KEY}",
+    "api_secret": "${BINANCE_API_SECRET}",
+        "snapshot_depth": 1000,
+        "http_timeout": "10s",
+        "instrument_refresh_interval": "30m",
+        "recv_window": "5s",
+        "user_stream_keepalive": "15m"
+      }
+    }
+  ]
+}
+```
+
+### `GET /providers/{name}`
+Returns the detailed metadata, including the current instrument catalogue and underlying adapter definition.
+
+```json
+{
+  "name": "binance-spot",
+  "exchange": "binance",
+  "identifier": "binance",
+  "instrumentCount": 342,
+  "settings": {
+    "snapshot_depth": 1000,
+    "http_timeout": "10s"
+  },
+  "instruments": [
+    {
+      "symbol": "BTC-USDT",
+      "baseAsset": "BTC",
+      "quoteAsset": "USDT",
+      "pricePrecision": 2,
+      "quantityPrecision": 6
+    }
+  ],
+  "adapter": {
+    "identifier": "binance",
+    "displayName": "Binance Spot",
+    "venue": "BINANCE",
+    "capabilities": ["market-data", "orders"],
+    "settingsSchema": [
+      {"name": "snapshot_depth", "type": "int", "default": 1000, "required": false},
+      {"name": "http_timeout", "type": "duration", "default": "10s", "required": false}
+    ]
+  }
+}
+```
 
 ## Strategy Instances
 
@@ -107,5 +169,31 @@ Status codes:
 - `405` method not allowed
 
 ## Authentication & Transport
+
+## Adapters Metadata
+
+### `GET /adapters`
+Returns static metadata for all registered adapters, including supported configuration keys.
+
+```json
+{
+  "adapters": [
+    {
+      "identifier": "binance",
+      "displayName": "Binance Spot",
+      "venue": "BINANCE",
+      "capabilities": ["market-data", "orders"],
+      "settingsSchema": [
+        {"name": "api_key", "type": "string", "required": false},
+        {"name": "api_secret", "type": "string", "required": false},
+        {"name": "snapshot_depth", "type": "int", "default": 1000, "required": false}
+      ]
+    }
+  ]
+}
+```
+
+### `GET /adapters/{identifier}`
+Returns the metadata for a single adapter.
 
 The API is served over HTTP without authentication by default. Place the gateway behind an ingress or service mesh that enforces TLS and access control as needed.
