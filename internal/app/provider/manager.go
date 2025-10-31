@@ -52,19 +52,6 @@ var (
 	ErrProviderRunning = errors.New("provider already running")
 	// ErrProviderNotRunning indicates that the provider is not currently running.
 	ErrProviderNotRunning = errors.New("provider not running")
-
-	providerSensitiveFragments = []string{
-		"secret",
-		"passphrase",
-		"apikey",
-		"wsapikey",
-		"wssecret",
-		"privatekey",
-		"privkey",
-		"token",
-	}
-
-	providerSettingReplacer = strings.NewReplacer("-", "", "_", "", " ", "")
 )
 
 // NewManager creates a new provider manager.
@@ -596,72 +583,6 @@ func extractProviderSettings(cfg map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
-}
-
-func sanitizeProviderSettingsMap(cfg map[string]any) map[string]any {
-	if len(cfg) == 0 {
-		return nil
-	}
-	clean := make(map[string]any)
-	for key, value := range cfg {
-		if shouldOmitProviderSettingKey(key) {
-			continue
-		}
-		sanitized := sanitizeProviderSettingValue(value)
-		if sanitized == nil {
-			continue
-		}
-		clean[key] = sanitized
-	}
-	if len(clean) == 0 {
-		return nil
-	}
-	return clean
-}
-
-func sanitizeProviderSettingValue(value any) any {
-	switch v := value.(type) {
-	case map[string]any:
-		clean := sanitizeProviderSettingsMap(v)
-		if len(clean) == 0 {
-			return nil
-		}
-		return clean
-	case []any:
-		filtered := make([]any, 0, len(v))
-		for _, item := range v {
-			if nested, ok := item.(map[string]any); ok {
-				clean := sanitizeProviderSettingsMap(nested)
-				if len(clean) == 0 {
-					continue
-				}
-				filtered = append(filtered, clean)
-				continue
-			}
-			filtered = append(filtered, item)
-		}
-		if len(filtered) == 0 {
-			return nil
-		}
-		return filtered
-	default:
-		return value
-	}
-}
-
-func shouldOmitProviderSettingKey(key string) bool {
-	trimmed := strings.TrimSpace(key)
-	if trimmed == "" {
-		return false
-	}
-	normalized := strings.ToLower(trimmed)
-	normalized = providerSettingReplacer.Replace(normalized)
-	for _, fragment := range providerSensitiveFragments {
-		if strings.Contains(normalized, fragment) {
-			return true
-		}
-	}
-	return false
 }
 
 // ActivateRoute applies a route update to the targeted provider only.

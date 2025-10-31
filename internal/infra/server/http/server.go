@@ -897,7 +897,11 @@ func buildProviderConfigSnapshot(specs []config.ProviderSpec) map[string]map[str
 	for _, spec := range specs {
 		adapter := make(map[string]any)
 		adapter["identifier"] = spec.Adapter
-		for key, value := range spec.Config {
+		cleanConfig := provider.SanitizeProviderConfig(spec.Config)
+		if cleanConfig == nil {
+			cleanConfig = map[string]any{}
+		}
+		for key, value := range cleanConfig {
 			switch key {
 			case "provider_name":
 				continue
