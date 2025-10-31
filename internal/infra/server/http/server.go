@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	json "github.com/goccy/go-json"
@@ -16,43 +17,101 @@ import (
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
 
-// NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Handler {
-	server := &httpServer{manager: manager, providers: providers}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/strategies", server.handleStrategies)
-	mux.HandleFunc("/strategies/", server.handleStrategy)
-	mux.HandleFunc("/strategy/instances", server.handleInstances)
-	mux.HandleFunc("/strategy/instances/", server.handleInstance)
-	mux.HandleFunc("/providers", server.handleProviders)
-	mux.HandleFunc("/providers/", server.handleProvider)
-	mux.HandleFunc("/adapters", server.handleAdapters)
-	mux.HandleFunc("/adapters/", server.handleAdapter)
-	mux.HandleFunc("/risk/limits", server.handleRiskLimits)
-	return mux
-}
+const (
+	maxJSONBodyBytes int64 = 1 << 20 // 1 MiB
+
+	strategiesPath       = "/strategies"
+	strategyDetailPrefix = strategiesPath + "/"
+
+	providersPath        = "/providers"
+	providerDetailPrefix = providersPath + "/"
+
+	adaptersPath        = "/adapters"
+	adapterDetailPrefix = adaptersPath + "/"
+
+	instancesPath        = "/strategy/instances"
+	instanceDetailPrefix = instancesPath + "/"
+
+	riskLimitsPath = "/risk/limits"
+)
+
+type handlerFunc func(http.ResponseWriter, *http.Request)
 
 type httpServer struct {
 	manager   *runtime.Manager
 	providers *provider.Manager
 }
 
-func (s *httpServer) handleStrategies(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
+// NewHandler creates an HTTP handler for lambda management operations.
+func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Handler {
+	server := &httpServer{manager: manager, providers: providers}
+	mux := http.NewServeMux()
+
+	mux.Handle(strategiesPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.getStrategies,
+	}))
+	mux.Handle(strategyDetailPrefix, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.getStrategy,
+	}))
+
+	mux.Handle(providersPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.listProviders,
+	}))
+	mux.Handle(providerDetailPrefix, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.getProvider,
+	}))
+
+	mux.Handle(adaptersPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.listAdapters,
+	}))
+	mux.Handle(adapterDetailPrefix, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.getAdapter,
+	}))
+
+	mux.Handle(instancesPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet:  server.listInstances,
+		http.MethodPost: server.createInstance,
+	}))
+	mux.Handle(instanceDetailPrefix, http.HandlerFunc(server.handleInstance))
+
+	mux.Handle(riskLimitsPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.getRiskLimits,
+		http.MethodPut: server.updateRiskLimits,
+	}))
+
+	return mux
+}
+
+func (s *httpServer) methodHandlers(handlers map[string]handlerFunc) http.Handler {
+	allowed := allowedMethods(handlers)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if handler, ok := handlers[r.Method]; ok {
+			handler(w, r)
+			return
+		}
+		methodNotAllowed(w, allowed...)
+	})
+}
+
+func allowedMethods(handlers map[string]handlerFunc) []string {
+	if len(handlers) == 0 {
+		return nil
 	}
+	allowed := make([]string, 0, len(handlers))
+	for method := range handlers {
+		allowed = append(allowed, method)
+	}
+	sort.Strings(allowed)
+	return allowed
+}
+
+func (s *httpServer) getStrategies(w http.ResponseWriter, _ *http.Request) {
 	catalog := s.manager.StrategyCatalog()
 	writeJSON(w, http.StatusOK, map[string]any{"strategies": catalog})
 }
 
-func (s *httpServer) handleStrategy(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	name := strings.TrimPrefix(r.URL.Path, "/strategies/")
-	name = strings.Trim(name, "/")
+func (s *httpServer) getStrategy(w http.ResponseWriter, r *http.Request) {
+	name := strings.Trim(strings.TrimPrefix(r.URL.Path, strategyDetailPrefix), "/")
 	if name == "" {
 		writeError(w, http.StatusNotFound, "strategy name required")
 		return
@@ -65,11 +124,7 @@ func (s *httpServer) handleStrategy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, meta)
 }
 
-func (s *httpServer) handleProviders(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+func (s *httpServer) listProviders(w http.ResponseWriter, _ *http.Request) {
 	if s.providers == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"providers": []provider.RuntimeMetadata{}})
 		return
@@ -78,13 +133,8 @@ func (s *httpServer) handleProviders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"providers": metadata})
 }
 
-func (s *httpServer) handleProvider(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	name := strings.TrimPrefix(r.URL.Path, "/providers/")
-	name = strings.Trim(name, "/")
+func (s *httpServer) getProvider(w http.ResponseWriter, r *http.Request) {
+	name := strings.Trim(strings.TrimPrefix(r.URL.Path, providerDetailPrefix), "/")
 	if name == "" {
 		writeError(w, http.StatusNotFound, "provider name required")
 		return
@@ -101,11 +151,7 @@ func (s *httpServer) handleProvider(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, meta)
 }
 
-func (s *httpServer) handleAdapters(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+func (s *httpServer) listAdapters(w http.ResponseWriter, _ *http.Request) {
 	if s.providers == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"adapters": []provider.AdapterMetadata{}})
 		return
@@ -119,13 +165,8 @@ func (s *httpServer) handleAdapters(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"adapters": metadata})
 }
 
-func (s *httpServer) handleAdapter(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	identifier := strings.TrimPrefix(r.URL.Path, "/adapters/")
-	identifier = strings.Trim(identifier, "/")
+func (s *httpServer) getAdapter(w http.ResponseWriter, r *http.Request) {
+	identifier := strings.Trim(strings.TrimPrefix(r.URL.Path, adapterDetailPrefix), "/")
 	if identifier == "" {
 		writeError(w, http.StatusNotFound, "adapter identifier required")
 		return
@@ -147,84 +188,67 @@ func (s *httpServer) handleAdapter(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, meta)
 }
 
-func (s *httpServer) handleInstances(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		instances := s.manager.Instances()
-		writeJSON(w, http.StatusOK, map[string]any{"instances": instances})
-	case http.MethodPost:
-		spec, err := decodeInstanceSpec(r)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		spec.AutoStart = false
-		if _, err := s.manager.Create(r.Context(), spec); err != nil {
-			s.writeManagerError(w, err)
-			return
-		}
-		snapshot, _ := s.manager.Instance(spec.ID)
-		writeJSON(w, http.StatusCreated, snapshot)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
+func (s *httpServer) listInstances(w http.ResponseWriter, _ *http.Request) {
+	instances := s.manager.Instances()
+	writeJSON(w, http.StatusOK, map[string]any{"instances": instances})
 }
 
-func (s *httpServer) handleRiskLimits(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		limits := s.manager.RiskLimits()
-		writeJSON(w, http.StatusOK, map[string]any{"limits": riskConfigFromLimits(limits)})
-	case http.MethodPut:
-		cfg, err := decodeRiskConfig(r)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		limits := s.manager.ApplyRiskConfig(cfg)
-		writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "limits": riskConfigFromLimits(limits)})
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
+func (s *httpServer) createInstance(w http.ResponseWriter, r *http.Request) {
+	limitRequestBody(w, r)
+	spec, err := decodeInstanceSpec(r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
 	}
+	spec.AutoStart = false
+	if _, err := s.manager.Create(r.Context(), spec); err != nil {
+		s.writeManagerError(w, err)
+		return
+	}
+	snapshot, _ := s.manager.Instance(spec.ID)
+	writeJSON(w, http.StatusCreated, snapshot)
+}
+
+func (s *httpServer) getRiskLimits(w http.ResponseWriter, _ *http.Request) {
+	limits := s.manager.RiskLimits()
+	writeJSON(w, http.StatusOK, map[string]any{"limits": riskConfigFromLimits(limits)})
+}
+
+func (s *httpServer) updateRiskLimits(w http.ResponseWriter, r *http.Request) {
+	limitRequestBody(w, r)
+	cfg, err := decodeRiskConfig(r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	limits := s.manager.ApplyRiskConfig(cfg)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "limits": riskConfigFromLimits(limits)})
 }
 
 func (s *httpServer) handleInstance(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/strategy-instances/")
-	rest = strings.Trim(rest, "/")
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, instanceDetailPrefix), "/")
 	if rest == "" {
 		writeError(w, http.StatusNotFound, "instance id required")
 		return
 	}
-	parts := strings.Split(rest, "/")
-	id := parts[0]
 
-	if len(parts) == 2 {
-		action := parts[1]
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		switch action {
-		case "start":
-			if err := s.manager.Start(r.Context(), id); err != nil {
-				s.writeManagerError(w, err)
-				return
-			}
-			snapshot, _ := s.manager.Instance(id)
-			writeJSON(w, http.StatusOK, snapshot)
-		case "stop":
-			if err := s.manager.Stop(id); err != nil {
-				s.writeManagerError(w, err)
-				return
-			}
-			snapshot, _ := s.manager.Instance(id)
-			writeJSON(w, http.StatusOK, snapshot)
-		default:
-			writeError(w, http.StatusNotFound, "unsupported action")
-		}
+	id, action, hasAction := strings.Cut(rest, "/")
+	id = strings.TrimSpace(id)
+	if id == "" {
+		writeError(w, http.StatusNotFound, "instance id required")
 		return
 	}
 
+	if !hasAction {
+		s.handleInstanceResource(w, r, id)
+		return
+	}
+
+	action = strings.TrimSpace(action)
+	s.handleInstanceAction(w, r, id, action)
+}
+
+func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Request, id string) {
 	switch r.Method {
 	case http.MethodGet:
 		snapshot, ok := s.manager.Instance(id)
@@ -234,9 +258,10 @@ func (s *httpServer) handleInstance(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodPut:
+		limitRequestBody(w, r)
 		spec, err := decodeInstanceSpec(r)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeDecodeError(w, err)
 			return
 		}
 		if spec.ID != "" && spec.ID != id {
@@ -258,8 +283,34 @@ func (s *httpServer) handleInstance(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "removed", "id": id})
 	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		methodNotAllowed(w, http.MethodDelete, http.MethodGet, http.MethodPut)
 	}
+}
+
+func (s *httpServer) handleInstanceAction(w http.ResponseWriter, r *http.Request, id, action string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+
+	switch action {
+	case "start":
+		if err := s.manager.Start(r.Context(), id); err != nil {
+			s.writeManagerError(w, err)
+			return
+		}
+	case "stop":
+		if err := s.manager.Stop(id); err != nil {
+			s.writeManagerError(w, err)
+			return
+		}
+	default:
+		writeError(w, http.StatusNotFound, "unsupported action")
+		return
+	}
+
+	snapshot, _ := s.manager.Instance(id)
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 func (s *httpServer) writeManagerError(w http.ResponseWriter, err error) {
@@ -410,6 +461,30 @@ func validateRiskConfig(cfg config.RiskConfig) error {
 		return fmt.Errorf("circuitBreaker.cooldown required when enabled")
 	}
 	return nil
+}
+
+func limitRequestBody(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+}
+
+func writeDecodeError(w http.ResponseWriter, err error) {
+	if isRequestTooLarge(err) {
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return
+	}
+	writeError(w, http.StatusBadRequest, err.Error())
+}
+
+func isRequestTooLarge(err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	return errors.As(err, &maxBytesErr)
+}
+
+func methodNotAllowed(w http.ResponseWriter, allowed ...string) {
+	if len(allowed) > 0 {
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
+	}
+	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

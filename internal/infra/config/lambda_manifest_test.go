@@ -26,10 +26,10 @@ func TestLambdaManifestValidate(t *testing.T) {
 	}
 }
 
-func TestLambdaManifestValidateMissingEntries(t *testing.T) {
+func TestLambdaManifestValidateAllowsEmpty(t *testing.T) {
 	manifest := LambdaManifest{}
-	if err := manifest.Validate(); err == nil {
-		t.Fatal("expected validation error for empty manifest")
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("expected empty manifest to pass validation, got %v", err)
 	}
 }
 

@@ -253,7 +253,7 @@ func normalizeProviderNames(providers []string) []string {
 // Validate performs semantic validation of the manifest definition.
 func (m LambdaManifest) Validate() error {
 	if len(m.Lambdas) == 0 {
-		return fmt.Errorf("lambda manifest requires at least one lambda")
+		return nil
 	}
 	for i := range m.Lambdas {
 		spec := &m.Lambdas[i]

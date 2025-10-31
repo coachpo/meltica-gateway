@@ -40,18 +40,6 @@ const (
 	controlReadHeaderTimeout     = 5 * time.Second
 )
 
-var controlAPIRoutes = [...]string{
-	"/strategies",
-	"/strategies/",
-	"/strategy-instances",
-	"/strategy-instances/",
-	"/providers",
-	"/providers/",
-	"/adapters",
-	"/adapters/",
-	"/risk/limits",
-}
-
 func main() {
 	cfgPathFlag := parseFlags()
 	ctx, cancel := newSignalContext()
@@ -232,14 +220,9 @@ func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventb
 func buildAPIServer(cfg config.APIServerConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager) *http.Server {
 	handler := httpserver.NewHandler(lambdaManager, providerManager)
 
-	mux := http.NewServeMux()
-	for _, route := range controlAPIRoutes {
-		mux.Handle(route, handler)
-	}
-
 	return &http.Server{
 		Addr:                         cfg.Addr,
-		Handler:                      mux,
+		Handler:                      handler,
 		DisableGeneralOptionsHandler: false,
 		TLSConfig:                    nil,
 		ReadTimeout:                  0,
