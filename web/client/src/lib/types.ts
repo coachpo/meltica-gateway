@@ -29,10 +29,21 @@ export interface Provider {
 
 export interface Instrument {
   symbol: string;
-  baseAsset: string;
-  quoteAsset: string;
-  pricePrecision: number;
-  quantityPrecision: number;
+  type?: string;
+  baseAsset?: string | null;
+  base_currency?: string | null;
+  quoteAsset?: string | null;
+  quote_currency?: string | null;
+  pricePrecision?: number | null;
+  price_precision?: number | null;
+  quantityPrecision?: number | null;
+  quantity_precision?: number | null;
+  price_increment?: number | string | null;
+  quantity_increment?: number | string | null;
+  notional_precision?: number | null;
+  min_quantity?: number | string | null;
+  max_quantity?: number | string | null;
+  [key: string]: unknown;
 }
 
 export interface SettingsSchema {

@@ -34,6 +34,27 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 
+const INSTRUMENTS_PAGE_SIZE = 120;
+
+function instrumentBaseValue(instrument: Instrument): string {
+  return instrument.baseAsset ?? instrument.base_currency ?? '';
+}
+
+function instrumentQuoteValue(instrument: Instrument): string {
+  return instrument.quoteAsset ?? instrument.quote_currency ?? '';
+}
+
+function formatInstrumentMetric(value: unknown): string {
+  if (value === undefined || value === null) {
+    return '—';
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed === '' ? '—' : trimmed;
+  }
+  return String(value);
+}
+
 type FormMode = 'create' | 'edit';
 
 type FormState = {
@@ -161,6 +182,7 @@ export default function ProvidersPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(null);
   const [instrumentQuery, setInstrumentQuery] = useState('');
+  const [instrumentPage, setInstrumentPage] = useState(0);
 
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
@@ -202,15 +224,20 @@ export default function ProvidersPage() {
     if (!detailOpen) {
       setSelectedInstrument(null);
       setInstrumentQuery('');
+      setInstrumentPage(0);
     }
   }, [detailOpen]);
 
   useEffect(() => {
     if (!detail) {
       setSelectedInstrument(null);
+      setInstrumentQuery('');
+      setInstrumentPage(0);
       return;
     }
     setInstrumentQuery('');
+    setInstrumentPage(0);
+    setSelectedInstrument(null);
   }, [detail]);
 
   const filteredInstruments = useMemo(() => {
@@ -222,9 +249,9 @@ export default function ProvidersPage() {
       return detail.instruments;
     }
     return detail.instruments.filter((instrument) => {
-      const symbol = instrument.symbol.toLowerCase();
-      const base = instrument.baseAsset.toLowerCase();
-      const quote = instrument.quoteAsset.toLowerCase();
+      const symbol = instrument.symbol?.toLowerCase() ?? '';
+      const base = instrumentBaseValue(instrument).toLowerCase();
+      const quote = instrumentQuoteValue(instrument).toLowerCase();
       return (
         symbol.includes(query) || base.includes(query) || quote.includes(query)
       );
@@ -232,21 +259,83 @@ export default function ProvidersPage() {
   }, [detail, instrumentQuery]);
 
   useEffect(() => {
+    setInstrumentPage(0);
+  }, [instrumentQuery]);
+
+  useEffect(() => {
+    const total = filteredInstruments.length;
+    if (total === 0) {
+      if (instrumentPage !== 0) {
+        setInstrumentPage(0);
+      }
+      return;
+    }
+    const maxPage = Math.max(0, Math.ceil(total / INSTRUMENTS_PAGE_SIZE) - 1);
+    if (instrumentPage > maxPage) {
+      setInstrumentPage(maxPage);
+    }
+  }, [filteredInstruments.length, instrumentPage]);
+
+  useEffect(() => {
     if (!filteredInstruments.length) {
-      setSelectedInstrument(null);
+      if (selectedInstrument !== null) {
+        setSelectedInstrument(null);
+      }
+      return;
+    }
+    const maxPage = Math.max(0, Math.ceil(filteredInstruments.length / INSTRUMENTS_PAGE_SIZE) - 1);
+    const currentPage = Math.min(instrumentPage, maxPage);
+    const start = currentPage * INSTRUMENTS_PAGE_SIZE;
+    const currentSlice = filteredInstruments.slice(start, start + INSTRUMENTS_PAGE_SIZE);
+    if (!currentSlice.length) {
       return;
     }
     if (!selectedInstrument) {
-      setSelectedInstrument(filteredInstruments[0]);
+      setSelectedInstrument(currentSlice[0]);
       return;
     }
-    const stillSelected = filteredInstruments.some(
-      (instrument) => instrument.symbol === selectedInstrument.symbol,
-    );
-    if (!stillSelected) {
-      setSelectedInstrument(filteredInstruments[0]);
+    const match = currentSlice.find((instrument) => instrument.symbol === selectedInstrument.symbol);
+    if (match) {
+      if (match !== selectedInstrument) {
+        setSelectedInstrument(match);
+      }
+      return;
     }
-  }, [filteredInstruments, selectedInstrument]);
+    setSelectedInstrument(currentSlice[0]);
+  }, [filteredInstruments, instrumentPage, selectedInstrument]);
+
+  const totalInstrumentCount = filteredInstruments.length;
+  const totalInstrumentPages = totalInstrumentCount === 0 ? 0 : Math.ceil(totalInstrumentCount / INSTRUMENTS_PAGE_SIZE);
+  const effectiveInstrumentPage = totalInstrumentPages === 0 ? 0 : Math.min(instrumentPage, totalInstrumentPages - 1);
+  const pageStart = effectiveInstrumentPage * INSTRUMENTS_PAGE_SIZE;
+  const currentPageInstruments = filteredInstruments.slice(
+    pageStart,
+    pageStart + INSTRUMENTS_PAGE_SIZE,
+  );
+  const pageDisplayStart = totalInstrumentCount === 0 ? 0 : pageStart + 1;
+  const pageDisplayEnd = totalInstrumentCount === 0 ? 0 : pageStart + currentPageInstruments.length;
+
+  const selectedInstrumentDisplay = useMemo(() => {
+    if (!selectedInstrument) {
+      return null;
+    }
+    return {
+      base: instrumentBaseValue(selectedInstrument) || '—',
+      quote: instrumentQuoteValue(selectedInstrument) || '—',
+      type: selectedInstrument.type ?? '—',
+      pricePrecision: formatInstrumentMetric(
+        selectedInstrument.pricePrecision ?? selectedInstrument.price_precision,
+      ),
+      quantityPrecision: formatInstrumentMetric(
+        selectedInstrument.quantityPrecision ?? selectedInstrument.quantity_precision,
+      ),
+      priceIncrement: formatInstrumentMetric(selectedInstrument.price_increment),
+      quantityIncrement: formatInstrumentMetric(selectedInstrument.quantity_increment),
+      minQuantity: formatInstrumentMetric(selectedInstrument.min_quantity),
+      maxQuantity: formatInstrumentMetric(selectedInstrument.max_quantity),
+      notionalPrecision: formatInstrumentMetric(selectedInstrument.notional_precision),
+    };
+  }, [selectedInstrument]);
 
   useEffect(() => {
     if (!actionNotice) {
@@ -766,55 +855,120 @@ export default function ProvidersPage() {
                         No instruments match your filter.
                       </p>
                     ) : (
-                      <div className="max-h-56 overflow-y-auto space-y-1">
-                        {filteredInstruments.map((instrument) => {
-                      const isSelected = selectedInstrument?.symbol === instrument.symbol;
-                      return (
-                        <button
-                          key={instrument.symbol}
-                          type="button"
-                          onClick={() => setSelectedInstrument(instrument)}
-                          className={cn(
-                            'w-full rounded-md px-2 py-1 text-left text-sm transition-colors',
-                            isSelected
-                              ? 'bg-primary/10 text-primary'
-                              : 'text-muted-foreground hover:bg-muted'
-                          )}
-                        >
-                          <span className="font-medium">{instrument.symbol}</span>{' '}
-                          ({instrument.baseAsset}/{instrument.quoteAsset})
-                        </button>
-                      );
-                        })}
-                      </div>
+                      <>
+                        <div className="max-h-56 overflow-y-auto space-y-1">
+                          {currentPageInstruments.map((instrument) => {
+                            const isSelected = selectedInstrument?.symbol === instrument.symbol;
+                            const baseLabel = instrumentBaseValue(instrument) || '—';
+                            const quoteLabel = instrumentQuoteValue(instrument) || '—';
+                            return (
+                              <button
+                                key={instrument.symbol}
+                                type="button"
+                                onClick={() => setSelectedInstrument(instrument)}
+                                className={cn(
+                                  'w-full rounded-md px-2 py-1 text-left text-sm transition-colors',
+                                  isSelected
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'text-muted-foreground hover:bg-muted'
+                                )}
+                              >
+                                <span className="font-medium">{instrument.symbol ?? '—'}</span>{' '}
+                                ({baseLabel}/{quoteLabel})
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {totalInstrumentPages > 1 && (
+                          <div className="flex flex-col gap-2 pt-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                            <span>
+                              Showing {pageDisplayStart.toLocaleString()}–
+                              {pageDisplayEnd.toLocaleString()} of {totalInstrumentCount.toLocaleString()}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  setInstrumentPage((prev) => Math.max(prev - 1, 0))
+                                }
+                                disabled={effectiveInstrumentPage === 0}
+                              >
+                                Previous
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  setInstrumentPage((prev) =>
+                                    totalInstrumentPages === 0
+                                      ? 0
+                                      : Math.min(prev + 1, totalInstrumentPages - 1),
+                                  )
+                                }
+                                disabled={
+                                  totalInstrumentPages === 0 ||
+                                  effectiveInstrumentPage >= totalInstrumentPages - 1
+                                }
+                              >
+                                Next
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </>
                 )}
               </div>
 
-              {selectedInstrument && (
+              {selectedInstrument && selectedInstrumentDisplay && (
                 <div className="space-y-2 rounded-lg border bg-muted/30 p-4 text-sm">
                   <p className="font-medium text-foreground">Instrument details</p>
                   <div className="grid gap-1 text-muted-foreground">
                     <div className="flex justify-between">
                       <span className="font-medium text-foreground">Symbol</span>
-                      <span>{selectedInstrument.symbol}</span>
+                      <span>{selectedInstrument.symbol ?? '—'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Type</span>
+                      <span>{selectedInstrumentDisplay.type}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="font-medium text-foreground">Base asset</span>
-                      <span>{selectedInstrument.baseAsset}</span>
+                      <span>{selectedInstrumentDisplay.base}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="font-medium text-foreground">Quote asset</span>
-                      <span>{selectedInstrument.quoteAsset}</span>
+                      <span>{selectedInstrumentDisplay.quote}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="font-medium text-foreground">Price precision</span>
-                      <span>{selectedInstrument.pricePrecision}</span>
+                      <span>{selectedInstrumentDisplay.pricePrecision}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="font-medium text-foreground">Quantity precision</span>
-                      <span>{selectedInstrument.quantityPrecision}</span>
+                      <span>{selectedInstrumentDisplay.quantityPrecision}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Price increment</span>
+                      <span>{selectedInstrumentDisplay.priceIncrement}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Quantity increment</span>
+                      <span>{selectedInstrumentDisplay.quantityIncrement}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Min quantity</span>
+                      <span>{selectedInstrumentDisplay.minQuantity}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Max quantity</span>
+                      <span>{selectedInstrumentDisplay.maxQuantity}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-foreground">Notional precision</span>
+                      <span>{selectedInstrumentDisplay.notionalPrecision}</span>
                     </div>
                   </div>
                 </div>
