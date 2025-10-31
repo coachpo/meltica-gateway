@@ -51,6 +51,19 @@ var (
 	ErrProviderRunning = errors.New("provider already running")
 	// ErrProviderNotRunning indicates that the provider is not currently running.
 	ErrProviderNotRunning = errors.New("provider not running")
+
+	providerSensitiveFragments = []string{
+		"secret",
+		"passphrase",
+		"apikey",
+		"wsapikey",
+		"wssecret",
+		"privatekey",
+		"privkey",
+		"token",
+	}
+
+	providerSettingReplacer = strings.NewReplacer("-", "", "_", "", " ", "")
 )
 
 // NewManager creates a new provider manager.
@@ -95,6 +108,28 @@ func (m *Manager) parentContext() context.Context {
 		return context.Background()
 	}
 	return ctx
+}
+
+func (m *Manager) deriveProviderContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	parent := m.parentContext()
+
+	if ctx == nil {
+		return context.WithCancel(parent)
+	}
+
+	if ctx == parent {
+		return context.WithCancel(ctx)
+	}
+
+	providerCtx, cancel := context.WithCancel(ctx)
+	go func(parentCtx, run context.Context, cancelFunc context.CancelFunc) {
+		select {
+		case <-parentCtx.Done():
+			cancelFunc()
+		case <-run.Done():
+		}
+	}(parent, providerCtx, cancel)
+	return providerCtx, cancel
 }
 
 // Registry exposes the underlying factory registry.
@@ -240,7 +275,7 @@ func (m *Manager) StartProvider(ctx context.Context, name string) (RuntimeDetail
 		m.mu.Unlock()
 		return empty, fmt.Errorf("%w: %s", ErrProviderRunning, trimmed)
 	}
-	err := m.startProviderLocked(state)
+	err := m.startProviderLocked(ctx, state)
 	m.mu.Unlock()
 	if err != nil {
 		return empty, err
@@ -279,12 +314,11 @@ func (m *Manager) StopProvider(name string) (RuntimeDetail, error) {
 	return detail, nil
 }
 
-func (m *Manager) startProviderLocked(state *providerState) error {
+func (m *Manager) startProviderLocked(ctx context.Context, state *providerState) error {
 	if state == nil {
 		return fmt.Errorf("provider state required")
 	}
-	parent := m.parentContext()
-	providerCtx, cancel := context.WithCancel(parent)
+	providerCtx, cancel := m.deriveProviderContext(ctx)
 	instance, err := m.registry.Create(providerCtx, m.pools, state.spec)
 	if err != nil {
 		cancel()
@@ -504,9 +538,13 @@ func extractProviderSettings(cfg map[string]any) map[string]any {
 	if len(cfg) == 0 {
 		return nil
 	}
-	settings := map[string]any{}
+	settings := make(map[string]any)
 	for key, value := range cfg {
-		switch key {
+		if shouldOmitProviderSettingKey(key) {
+			continue
+		}
+
+		switch strings.ToLower(strings.TrimSpace(key)) {
 		case "identifier", "provider_name":
 			continue
 		case "config":
@@ -514,11 +552,19 @@ func extractProviderSettings(cfg map[string]any) map[string]any {
 			if !ok {
 				continue
 			}
-			for nk, nv := range nested {
+			clean := sanitizeProviderSettingsMap(nested)
+			if len(clean) == 0 {
+				continue
+			}
+			for nk, nv := range clean {
 				settings[nk] = nv
 			}
 		default:
-			settings[key] = value
+			sanitized := sanitizeProviderSettingValue(value)
+			if sanitized == nil {
+				continue
+			}
+			settings[key] = sanitized
 		}
 	}
 	if len(settings) == 0 {
@@ -529,6 +575,72 @@ func extractProviderSettings(cfg map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+func sanitizeProviderSettingsMap(cfg map[string]any) map[string]any {
+	if len(cfg) == 0 {
+		return nil
+	}
+	clean := make(map[string]any)
+	for key, value := range cfg {
+		if shouldOmitProviderSettingKey(key) {
+			continue
+		}
+		sanitized := sanitizeProviderSettingValue(value)
+		if sanitized == nil {
+			continue
+		}
+		clean[key] = sanitized
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	return clean
+}
+
+func sanitizeProviderSettingValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		clean := sanitizeProviderSettingsMap(v)
+		if len(clean) == 0 {
+			return nil
+		}
+		return clean
+	case []any:
+		filtered := make([]any, 0, len(v))
+		for _, item := range v {
+			if nested, ok := item.(map[string]any); ok {
+				clean := sanitizeProviderSettingsMap(nested)
+				if len(clean) == 0 {
+					continue
+				}
+				filtered = append(filtered, clean)
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		if len(filtered) == 0 {
+			return nil
+		}
+		return filtered
+	default:
+		return value
+	}
+}
+
+func shouldOmitProviderSettingKey(key string) bool {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
+		return false
+	}
+	normalized := strings.ToLower(trimmed)
+	normalized = providerSettingReplacer.Replace(normalized)
+	for _, fragment := range providerSensitiveFragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 // ActivateRoute applies a route update to the targeted provider only.

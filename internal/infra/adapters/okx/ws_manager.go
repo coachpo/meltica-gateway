@@ -74,7 +74,7 @@ type wsManager struct {
 	controlMu       sync.Mutex
 	lastControlSend time.Time
 
-	authFunc func() *wsRequest
+	authFunc func() ([]byte, error)
 }
 
 func newWSManager(ctx context.Context, baseURL string, handler wsMessageHandler, errs chan<- error) *wsManager {
@@ -98,7 +98,7 @@ func newWSManager(ctx context.Context, baseURL string, handler wsMessageHandler,
 	}
 }
 
-func (sm *wsManager) setAuthFunc(fn func() *wsRequest) {
+func (sm *wsManager) setAuthFunc(fn func() ([]byte, error)) {
 	sm.authFunc = fn
 }
 
@@ -288,12 +288,13 @@ func (sm *wsManager) sendBatchedControlRequests(ctx context.Context, operation s
 	}
 
 	if len(args) == 1 && strings.ToLower(args[0].Channel) == "login" && sm.authFunc != nil {
-		authReq := sm.authFunc()
-		if authReq == nil {
-			return errors.New("okx: auth function returned nil")
+		payload, err := sm.authFunc()
+		if err != nil {
+			return fmt.Errorf("okx: generate login payload: %w", err)
 		}
-
-		data := []byte(authReq.Args[0].Channel)
+		if len(payload) == 0 {
+			return errors.New("okx: login payload empty")
+		}
 
 		sm.controlMu.Lock()
 		if err := sm.waitForControlWindowLocked(ctx); err != nil {
@@ -310,7 +311,7 @@ func (sm *wsManager) sendBatchedControlRequests(ctx context.Context, operation s
 		}
 
 		writeCtx, cancel := context.WithTimeout(ctx, okxControlWriteTimeout)
-		err := conn.Write(writeCtx, websocket.MessageText, data)
+		err = conn.Write(writeCtx, websocket.MessageText, payload)
 		cancel()
 		sm.controlMu.Unlock()
 		if err != nil {

@@ -188,6 +188,28 @@ func (m *Manager) parentContext() context.Context {
 	return ctx
 }
 
+func (m *Manager) deriveLaunchContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	parent := m.parentContext()
+
+	if ctx == nil {
+		return context.WithCancel(parent)
+	}
+
+	if ctx == parent {
+		return context.WithCancel(ctx)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	go func(parentCtx, run context.Context, cancelFunc context.CancelFunc) {
+		select {
+		case <-parentCtx.Done():
+			cancelFunc()
+		case <-run.Done():
+		}
+	}(parent, runCtx, cancel)
+	return runCtx, cancel
+}
+
 func (m *Manager) registerDefaults() {
 	m.registerStrategy(StrategyDefinition{
 		meta: strategies.CloneMetadata(strategies.NoOpMetadata),
@@ -521,7 +543,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 	base := core.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
 
-	runCtx, cancel := context.WithCancel(m.parentContext())
+	runCtx, cancel := m.deriveLaunchContext(ctx)
 	errs, err := base.Start(runCtx)
 	if err != nil {
 		cancel()

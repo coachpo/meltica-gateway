@@ -78,27 +78,27 @@ type bookHandle struct {
 func NewProvider(opts Options) *Provider {
 	opts = withDefaults(opts)
 	p := &Provider{
-		name:          opts.Config.Name,
-		opts:          opts,
-		pools:         opts.Pools,
-		clock:         time.Now,
-		client:        nil,
-		events:        make(chan *schema.Event, 2048),
-		errs:          make(chan error, 32),
-		ctx:           nil,
-		cancel:        nil,
-		started:       atomic.Bool{},
-		publisher:     nil,
-		instrumentsMu: sync.RWMutex{},
-		instruments:   make(map[string]schema.Instrument),
-		metas:         make(map[string]symbolMeta),
-		instIDToSym:   make(map[string]string),
-		wsMu:          sync.Mutex{},
-		ws:            nil,
-		tradeMu:       sync.Mutex{},
-		tradeSubs:     make(map[string]struct{}),
-		tickerMu:      sync.Mutex{},
-		tickerSubs:    make(map[string]struct{}),
+		name:            opts.Config.Name,
+		opts:            opts,
+		pools:           opts.Pools,
+		clock:           time.Now,
+		client:          nil,
+		events:          make(chan *schema.Event, 2048),
+		errs:            make(chan error, 32),
+		ctx:             nil,
+		cancel:          nil,
+		started:         atomic.Bool{},
+		publisher:       nil,
+		instrumentsMu:   sync.RWMutex{},
+		instruments:     make(map[string]schema.Instrument),
+		metas:           make(map[string]symbolMeta),
+		instIDToSym:     make(map[string]string),
+		wsMu:            sync.Mutex{},
+		ws:              nil,
+		tradeMu:         sync.Mutex{},
+		tradeSubs:       make(map[string]struct{}),
+		tickerMu:        sync.Mutex{},
+		tickerSubs:      make(map[string]struct{}),
 		bookMu:          sync.Mutex{},
 		bookSubs:        make(map[string]struct{}),
 		bookHandles:     make(map[string]*bookHandle),
@@ -712,14 +712,14 @@ type tickerEvent struct {
 }
 
 type bookEvent struct {
-	InstID    string        `json:"instId"`
-	Asks      [][]string    `json:"asks"`
-	Bids      [][]string    `json:"bids"`
-	SeqID     json.Number   `json:"seqId"`
-	PrevSeqID json.Number   `json:"prevSeqId"`
-	Checksum  int32         `json:"checksum"`
-	Timestamp string        `json:"ts"`
-	Action    string        `json:"action"`
+	InstID    string      `json:"instId"`
+	Asks      [][]string  `json:"asks"`
+	Bids      [][]string  `json:"bids"`
+	SeqID     json.Number `json:"seqId"`
+	PrevSeqID json.Number `json:"prevSeqId"`
+	Checksum  int32       `json:"checksum"`
+	Timestamp string      `json:"ts"`
+	Action    string      `json:"action"`
 }
 
 func (b bookEvent) SequenceID() uint64 {
@@ -865,7 +865,7 @@ func (p *Provider) ensurePrivateWS() error {
 	return nil
 }
 
-func (p *Provider) generateLoginRequest() *wsRequest {
+func (p *Provider) generateLoginRequest() ([]byte, error) {
 	timestamp := strconv.FormatInt(p.clock().UTC().Unix(), 10)
 	message := timestamp + "GET" + "/users/self/verify"
 
@@ -885,12 +885,11 @@ func (p *Provider) generateLoginRequest() *wsRequest {
 		},
 	}
 
-	data, _ := json.Marshal(loginReq)
-	return &wsRequest{
-		ID:   "",
-		Op:   "login",
-		Args: []wsArgument{{Channel: string(data), InstID: ""}},
+	data, err := json.Marshal(loginReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal login request: %w", err)
 	}
+	return data, nil
 }
 
 type wsLoginRequest struct {
