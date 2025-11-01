@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -529,6 +530,23 @@ func extractProviderSettings(cfg map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+// SanitizedProviderSpecs returns provider specifications with sensitive fields removed.
+func (m *Manager) SanitizedProviderSpecs() []config.ProviderSpec {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.states) == 0 {
+		return nil
+	}
+	specs := make([]config.ProviderSpec, 0, len(m.states))
+	for _, state := range m.states {
+		specs = append(specs, SanitizeSpec(state.spec))
+	}
+	sort.Slice(specs, func(i, j int) bool {
+		return specs[i].Name < specs[j].Name
+	})
+	return specs
 }
 
 // ActivateRoute applies a route update to the targeted provider only.

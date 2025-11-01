@@ -2,6 +2,7 @@
 package httpserver
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,14 +33,17 @@ const (
 	instancesPath        = "/strategy/instances"
 	instanceDetailPrefix = instancesPath + "/"
 
-	riskLimitsPath = "/risk/limits"
+	riskLimitsPath    = "/risk/limits"
+	contextBackupPath = "/context/backup"
 )
 
 type handlerFunc func(http.ResponseWriter, *http.Request)
 
 type httpServer struct {
-	manager   *runtime.Manager
-	providers *provider.Manager
+	manager       *runtime.Manager
+	providers     *provider.Manager
+	baseProviders map[string]struct{}
+	baseLambdas   map[string]struct{}
 }
 
 type providerPayload struct {
@@ -53,9 +57,34 @@ type providerAdapterPayload struct {
 	Config     map[string]any `json:"config"`
 }
 
+type contextBackup struct {
+	Providers []config.ProviderSpec `json:"providers,omitempty"`
+	Lambdas   []config.LambdaSpec   `json:"lambdas,omitempty"`
+	Risk      config.RiskConfig     `json:"risk"`
+}
+
 // NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Handler {
-	server := &httpServer{manager: manager, providers: providers}
+func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *provider.Manager) http.Handler {
+	baseProviders := make(map[string]struct{}, len(appCfg.Providers))
+	for name := range appCfg.Providers {
+		normalized := strings.ToLower(strings.TrimSpace(string(name)))
+		if normalized != "" {
+			baseProviders[normalized] = struct{}{}
+		}
+	}
+	baseLambdas := make(map[string]struct{}, len(appCfg.LambdaManifest.Lambdas))
+	for _, lambda := range appCfg.LambdaManifest.Lambdas {
+		normalized := strings.ToLower(strings.TrimSpace(lambda.ID))
+		if normalized != "" {
+			baseLambdas[normalized] = struct{}{}
+		}
+	}
+	server := &httpServer{
+		manager:       manager,
+		providers:     providers,
+		baseProviders: baseProviders,
+		baseLambdas:   baseLambdas,
+	}
 	mux := http.NewServeMux()
 
 	mux.Handle(strategiesPath, server.methodHandlers(map[string]handlerFunc{
@@ -87,6 +116,11 @@ func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Hand
 	mux.Handle(riskLimitsPath, server.methodHandlers(map[string]handlerFunc{
 		http.MethodGet: server.getRiskLimits,
 		http.MethodPut: server.updateRiskLimits,
+	}))
+
+	mux.Handle(contextBackupPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet:  server.handleContextBackupExport,
+		http.MethodPost: server.handleContextBackupRestore,
 	}))
 
 	return withCORS(mux)
@@ -361,6 +395,64 @@ func (s *httpServer) updateRiskLimits(w http.ResponseWriter, r *http.Request) {
 	}
 	limits := s.manager.ApplyRiskConfig(cfg)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "limits": riskConfigFromLimits(limits)})
+}
+
+func (s *httpServer) handleContextBackupExport(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.buildContextBackup())
+}
+
+func (s *httpServer) handleContextBackupRestore(w http.ResponseWriter, r *http.Request) {
+	limitRequestBody(w, r)
+	defer func() { _ = r.Body.Close() }()
+	var payload contextBackup
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if err := s.applyContextBackup(r.Context(), payload); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "restored"})
+}
+
+func (s *httpServer) buildContextBackup() contextBackup {
+	result := contextBackup{Risk: config.RiskConfig{}}
+	if s.manager != nil {
+		result.Risk = riskConfigFromLimits(s.manager.RiskLimits())
+	}
+	if s.providers != nil {
+		sanitized := s.providers.SanitizedProviderSpecs()
+		filtered := make([]config.ProviderSpec, 0, len(sanitized))
+		for _, spec := range sanitized {
+			if s.isBaselineProvider(spec.Name) {
+				continue
+			}
+			filtered = append(filtered, spec)
+		}
+		sort.Slice(filtered, func(i, j int) bool {
+			return filtered[i].Name < filtered[j].Name
+		})
+		result.Providers = filtered
+	}
+	if s.manager != nil {
+		summaries := s.manager.Instances()
+		lambdas := make([]config.LambdaSpec, 0, len(summaries))
+		for _, summary := range summaries {
+			if s.isBaselineLambda(summary.ID) {
+				continue
+			}
+			if snapshot, ok := s.manager.Instance(summary.ID); ok {
+				lambdas = append(lambdas, lambdaSpecFromSnapshot(snapshot))
+			}
+		}
+		sort.Slice(lambdas, func(i, j int) bool {
+			return lambdas[i].ID < lambdas[j].ID
+		})
+		result.Lambdas = lambdas
+	}
+	return result
 }
 
 func (s *httpServer) handleInstance(w http.ResponseWriter, r *http.Request) {
@@ -663,6 +755,193 @@ func validateRiskConfig(cfg config.RiskConfig) error {
 		return fmt.Errorf("circuitBreaker.cooldown required when enabled")
 	}
 	return nil
+}
+
+func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBackup) error {
+	if s.providers == nil || s.manager == nil {
+		return fmt.Errorf("runtime managers unavailable")
+	}
+
+	targetProviders := make(map[string]config.ProviderSpec, len(payload.Providers))
+	orderedProviders := make([]config.ProviderSpec, 0, len(payload.Providers))
+	for _, spec := range payload.Providers {
+		sanitized := provider.SanitizeSpec(spec)
+		sanitized.Name = strings.TrimSpace(sanitized.Name)
+		if sanitized.Name == "" {
+			return fmt.Errorf("provider name required")
+		}
+		if s.isBaselineProvider(sanitized.Name) {
+			continue
+		}
+		targetProviders[strings.ToLower(sanitized.Name)] = sanitized
+		orderedProviders = append(orderedProviders, sanitized)
+	}
+
+	existing := s.providers.SanitizedProviderSpecs()
+	for _, spec := range existing {
+		if s.isBaselineProvider(spec.Name) {
+			continue
+		}
+		if _, ok := targetProviders[strings.ToLower(spec.Name)]; !ok {
+			if err := s.providers.Remove(spec.Name); err != nil && !errors.Is(err, provider.ErrProviderNotFound) {
+				return fmt.Errorf("remove provider %s: %w", spec.Name, err)
+			}
+		}
+	}
+
+	for _, spec := range orderedProviders {
+		if _, exists := s.providers.ProviderMetadataFor(spec.Name); exists {
+			if _, err := s.providers.StopProvider(spec.Name); err != nil && !errors.Is(err, provider.ErrProviderNotRunning) {
+				return fmt.Errorf("stop provider %s: %w", spec.Name, err)
+			}
+			if _, err := s.providers.Update(ctx, spec, false); err != nil {
+				return fmt.Errorf("update provider %s: %w", spec.Name, err)
+			}
+		} else {
+			if _, err := s.providers.Create(ctx, spec, false); err != nil {
+				return fmt.Errorf("create provider %s: %w", spec.Name, err)
+			}
+		}
+	}
+
+	targetLambdas := make(map[string]struct{}, len(payload.Lambdas))
+	manifest := config.LambdaManifest{Lambdas: make([]config.LambdaSpec, 0, len(payload.Lambdas))}
+	for _, spec := range payload.Lambdas {
+		copied := config.LambdaSpec{
+			ID:              strings.TrimSpace(spec.ID),
+			Strategy:        config.LambdaStrategySpec{Identifier: strings.TrimSpace(spec.Strategy.Identifier), Config: cloneAnyMap(spec.Strategy.Config)},
+			AutoStart:       spec.AutoStart,
+			ProviderSymbols: cloneProviderSymbolsMap(spec.ProviderSymbols),
+			Providers:       cloneStringSlice(spec.Providers),
+		}
+		if copied.ID == "" {
+			return fmt.Errorf("lambda id required")
+		}
+		manifest.Lambdas = append(manifest.Lambdas, copied)
+		targetLambdas[strings.ToLower(copied.ID)] = struct{}{}
+	}
+	if len(manifest.Lambdas) > 0 {
+		if err := manifest.Validate(); err != nil {
+			return fmt.Errorf("validate lambdas: %w", err)
+		}
+	}
+
+	summaries := s.manager.Instances()
+	for _, summary := range summaries {
+		if s.isBaselineLambda(summary.ID) {
+			continue
+		}
+		if _, ok := targetLambdas[strings.ToLower(summary.ID)]; !ok {
+			if err := s.manager.Remove(summary.ID); err != nil && !errors.Is(err, runtime.ErrInstanceNotFound) {
+				return fmt.Errorf("remove lambda %s: %w", summary.ID, err)
+			}
+		}
+	}
+
+	restored := make([]config.LambdaSpec, 0, len(manifest.Lambdas))
+	for _, spec := range manifest.Lambdas {
+		if s.isBaselineLambda(spec.ID) {
+			continue
+		}
+		if err := s.manager.Remove(spec.ID); err != nil && !errors.Is(err, runtime.ErrInstanceNotFound) {
+			return fmt.Errorf("prepare lambda %s: %w", spec.ID, err)
+		}
+		spec.AutoStart = false
+		restored = append(restored, spec)
+	}
+
+	if len(restored) > 0 {
+		if err := s.manager.StartFromManifest(ctx, config.LambdaManifest{Lambdas: restored}); err != nil {
+			return fmt.Errorf("restore lambdas: %w", err)
+		}
+	}
+
+	if payload.Risk.MaxPositionSize != "" || payload.Risk.MaxNotionalValue != "" || payload.Risk.NotionalCurrency != "" {
+		s.manager.ApplyRiskConfig(payload.Risk)
+	}
+	return nil
+}
+
+func lambdaSpecFromSnapshot(snapshot runtime.InstanceSnapshot) config.LambdaSpec {
+	return config.LambdaSpec{
+		ID:              snapshot.ID,
+		Strategy:        config.LambdaStrategySpec{Identifier: snapshot.Strategy.Identifier, Config: cloneAnyMap(snapshot.Strategy.Config)},
+		AutoStart:       snapshot.AutoStart,
+		ProviderSymbols: cloneProviderSymbolsMap(snapshot.ProviderSymbols),
+		Providers:       cloneStringSlice(snapshot.Providers),
+	}
+}
+
+func cloneProviderSymbolsMap(input map[string]config.ProviderSymbols) map[string]config.ProviderSymbols {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]config.ProviderSymbols, len(input))
+	for key, symbols := range input {
+		out[key] = config.ProviderSymbols{Symbols: cloneStringSlice(symbols.Symbols)}
+	}
+	return out
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, len(values))
+	copy(out, values)
+	return out
+}
+
+func cloneAnyMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		switch typed := value.(type) {
+		case map[string]any:
+			out[key] = cloneAnyMap(typed)
+		case []any:
+			out[key] = cloneAnySlice(typed)
+		default:
+			out[key] = typed
+		}
+	}
+	return out
+}
+
+func cloneAnySlice(input []any) []any {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(input))
+	for _, value := range input {
+		switch typed := value.(type) {
+		case map[string]any:
+			out = append(out, cloneAnyMap(typed))
+		case []any:
+			out = append(out, cloneAnySlice(typed))
+		default:
+			out = append(out, typed)
+		}
+	}
+	return out
+}
+
+func (s *httpServer) isBaselineProvider(name string) bool {
+	if name == "" {
+		return false
+	}
+	_, ok := s.baseProviders[strings.ToLower(strings.TrimSpace(name))]
+	return ok
+}
+
+func (s *httpServer) isBaselineLambda(id string) bool {
+	if id == "" {
+		return false
+	}
+	_, ok := s.baseLambdas[strings.ToLower(strings.TrimSpace(id))]
+	return ok
 }
 
 func limitRequestBody(w http.ResponseWriter, r *http.Request) {
