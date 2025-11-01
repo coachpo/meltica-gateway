@@ -167,3 +167,62 @@ export interface RuntimeConfig {
   apiServer: ApiServerConfig;
   telemetry: TelemetryConfig;
 }
+
+export interface ProviderRuntimeMetadata {
+  name: string;
+  adapter: string;
+  identifier: string;
+  instrumentCount: number;
+  settings?: Record<string, unknown> | null;
+  running: boolean;
+}
+
+export interface LambdaStrategySpec {
+  identifier: string;
+  config: Record<string, unknown>;
+}
+
+export interface LambdaManifestEntry {
+  id: string;
+  strategy: LambdaStrategySpec;
+  scope: Record<string, ProviderSymbols>;
+  autoStart: boolean;
+}
+
+export interface LambdaInstanceSnapshot {
+  id: string;
+  strategy: LambdaStrategySpec;
+  providers: string[];
+  providerSymbols: Record<string, ProviderSymbols>;
+  aggregatedSymbols: string[];
+  autoStart: boolean;
+  running: boolean;
+}
+
+export interface ConfigBackup {
+  version: string;
+  generatedAt: string;
+  environment: string;
+  meta: {
+    name?: string;
+    version?: string;
+    description?: string;
+  };
+  runtime: RuntimeConfig;
+  providers: {
+    config: Record<string, Record<string, unknown>> | null;
+    runtime: ProviderRuntimeMetadata[];
+  };
+  lambdas: {
+    manifest: {
+      lambdas: LambdaManifestEntry[];
+    };
+    instances: LambdaInstanceSnapshot[];
+  };
+}
+
+export interface RestoreConfigResponse {
+  status: string;
+  providers: number;
+  lambdas: number;
+}

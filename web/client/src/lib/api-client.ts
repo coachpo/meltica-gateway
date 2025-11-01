@@ -9,6 +9,8 @@ import {
   RiskConfig,
   RuntimeConfig,
   ApiError,
+  ConfigBackup,
+  RestoreConfigResponse,
 } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8880';
@@ -160,8 +162,15 @@ class ApiClient {
     });
   }
 
-  async getConfigBackup(): Promise<Record<string, unknown>> {
+  async getConfigBackup(): Promise<ConfigBackup> {
     return this.request('/config/backup');
+  }
+
+  async restoreConfigBackup(payload: ConfigBackup): Promise<RestoreConfigResponse> {
+    return this.request('/config/backup', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 }
 
