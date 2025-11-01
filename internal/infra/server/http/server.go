@@ -372,7 +372,7 @@ func (s *httpServer) createInstance(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	if _, err := s.manager.Create(r.Context(), spec); err != nil {
+	if _, err := s.manager.Create(spec); err != nil {
 		s.writeManagerError(w, err)
 		return
 	}
@@ -847,7 +847,7 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 	}
 
 	if len(restored) > 0 {
-		if err := s.manager.StartFromManifest(ctx, config.LambdaManifest{Lambdas: restored}); err != nil {
+		if err := s.manager.StartFromManifest(config.LambdaManifest{Lambdas: restored}); err != nil {
 			return fmt.Errorf("restore lambdas: %w", err)
 		}
 	}

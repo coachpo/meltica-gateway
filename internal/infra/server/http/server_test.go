@@ -110,7 +110,7 @@ func TestBuildContextBackup(t *testing.T) {
 		},
 	}
 
-	if err := lambdaManager.StartFromManifest(context.Background(), manifest); err != nil {
+	if err := lambdaManager.StartFromManifest(manifest); err != nil {
 		t.Fatalf("StartFromManifest failed: %v", err)
 	}
 

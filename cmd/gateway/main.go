@@ -194,7 +194,7 @@ func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
 	manager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providers, logger, registrar)
 	manager.SetLifecycleContext(ctx)
-	if err := manager.StartFromManifest(ctx, appCfg.LambdaManifest); err != nil {
+	if err := manager.StartFromManifest(appCfg.LambdaManifest); err != nil {
 		return nil, fmt.Errorf("start manifest lambdas: %w", err)
 	}
 	return manager, nil
