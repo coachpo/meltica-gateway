@@ -73,6 +73,8 @@ const defaultFormState: FormState = {
   enabled: false,
 };
 
+const MASKED_SECRET_PLACEHOLDER = '••••••';
+
 function valueToString(value: unknown): string {
   if (value === null || value === undefined) {
     return '';
@@ -148,7 +150,8 @@ function collectConfigPayload(
   const config: Record<string, unknown> = {};
   for (const setting of metadata.settingsSchema) {
     const rawValue = configValues[setting.name] ?? '';
-    if (rawValue.trim() === '') {
+    const normalized = rawValue.trim();
+    if (normalized === '' || normalized === MASKED_SECRET_PLACEHOLDER) {
       if (setting.required) {
         return { config: {}, error: `${setting.name} is required` };
       }
