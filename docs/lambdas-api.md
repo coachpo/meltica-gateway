@@ -107,7 +107,6 @@ Lists all known instances (running or stopped) using a flattened summary payload
       "aggregatedSymbols": [
         "BTC-USDT"
       ],
-      "autoStart": true,
       "running": true
     }
   ]
@@ -119,11 +118,10 @@ Each instance summary includes:
 - `strategyIdentifier` – name of the registered strategy.
 - `providers` – normalized list of providers derived from the scope mapping.
 - `aggregatedSymbols` – deduplicated union of symbols across all providers.
-- `autoStart` – whether the instance would start automatically when loaded from a manifest (runtime-created instances return `false`).
 - `running` – current execution state.
 
 ### `POST /strategy/instances`
-Creates a new instance. Instances default to a stopped state unless `auto_start` is explicitly set to `true`.
+Creates a new instance. Instances are persisted in a stopped state; start them explicitly with `POST /strategy/instances/{id}/start`.
 
 Request body (minimum fields):
 ```json
@@ -140,8 +138,7 @@ Request body (minimum fields):
     "binance-spot": {
       "symbols": ["ETH-USDT"]
     }
-  },
-  "auto_start": false
+  }
 }
 ```
 
@@ -151,7 +148,7 @@ Responses:
 
 Notes:
 - `scope` must supply at least one provider with at least one symbol; providers are inferred from this map.
-- Optional `auto_start` controls whether the instance should start immediately after creation. When omitted, the instance remains stopped until started manually.
+- `POST /strategy/instances/{id}/start` and `/stop` control runtime execution of a saved instance.
 
 ## Instance Item Endpoints
 
@@ -183,7 +180,6 @@ Returns the detailed instance snapshot, including strategy configuration and pro
   "aggregatedSymbols": [
     "BTC-USDT"
   ],
-  "autoStart": true,
   "running": true
 }
 ```
