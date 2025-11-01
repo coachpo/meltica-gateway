@@ -83,7 +83,6 @@ lambdaManifest:
             - BTC-USDT
       strategy:
         identifier: delay
-      auto_start: false
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write temp config: %v", err)
@@ -159,9 +158,6 @@ lambdaManifest:
 	}
 	if manifest.Strategy.Identifier != "delay" {
 		t.Fatalf("unexpected strategy identifier %s", manifest.Strategy.Identifier)
-	}
-	if manifest.AutoStart {
-		t.Fatalf("expected test-lambda autostart disabled")
 	}
 	if len(manifest.Providers) != 1 || manifest.Providers[0] != "binance-spot" {
 		t.Fatalf("unexpected providers: %+v", manifest.Providers)
@@ -278,7 +274,6 @@ lambdaManifest:
             - BTC-USDT
       strategy:
         identifier: delay
-      auto_start: false
 `, fanoutLine)
 
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {

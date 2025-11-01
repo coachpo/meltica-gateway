@@ -71,7 +71,6 @@ func (p *ProviderSymbols) Normalize() {
 type LambdaSpec struct {
 	ID              string                     `yaml:"id" json:"id"`
 	Strategy        LambdaStrategySpec         `yaml:"strategy" json:"strategy"`
-	AutoStart       bool                       `yaml:"auto_start" json:"auto_start"`
 	ProviderSymbols map[string]ProviderSymbols `yaml:"scope" json:"scope"`
 	Providers       []string                   `yaml:"-" json:"-"`
 }
@@ -83,9 +82,8 @@ func (s *LambdaSpec) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	var base struct {
-		ID        string             `yaml:"id"`
-		Strategy  LambdaStrategySpec `yaml:"strategy"`
-		AutoStart bool               `yaml:"auto_start"`
+		ID       string             `yaml:"id"`
+		Strategy LambdaStrategySpec `yaml:"strategy"`
 	}
 	if err := value.Decode(&base); err != nil {
 		return fmt.Errorf("decode lambda spec: %w", err)
@@ -136,7 +134,6 @@ func (s *LambdaSpec) UnmarshalYAML(value *yaml.Node) error {
 	s.ID = base.ID
 	base.Strategy.normalize()
 	s.Strategy = base.Strategy
-	s.AutoStart = base.AutoStart
 	s.ProviderSymbols = assignments
 	s.Providers = normalizeProviderNames(names)
 	return nil

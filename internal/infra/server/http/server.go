@@ -367,7 +367,7 @@ func (s *httpServer) listInstances(w http.ResponseWriter, _ *http.Request) {
 
 func (s *httpServer) createInstance(w http.ResponseWriter, r *http.Request) {
 	limitRequestBody(w, r)
-	spec, _, err := decodeInstanceSpec(r)
+	spec, err := decodeInstanceSpec(r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -488,7 +488,7 @@ func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodPut:
 		limitRequestBody(w, r)
-		spec, hasAutoStart, err := decodeInstanceSpec(r)
+		spec, err := decodeInstanceSpec(r)
 		if err != nil {
 			writeDecodeError(w, err)
 			return
@@ -498,11 +498,6 @@ func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		spec.ID = id
-		if !hasAutoStart {
-			if snapshot, ok := s.manager.Instance(id); ok {
-				spec.AutoStart = snapshot.AutoStart
-			}
-		}
 		if err := s.manager.Update(r.Context(), spec); err != nil {
 			s.writeManagerError(w, err)
 			return
@@ -625,23 +620,14 @@ func buildProviderSpecFromPayload(payload providerPayload) (config.ProviderSpec,
 	return specs[0], enabled, nil
 }
 
-func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, bool, error) {
+func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 	defer func() {
 		_ = r.Body.Close()
 	}()
-	type lambdaRequest struct {
-		config.LambdaSpec
-		AutoStart *bool `json:"auto_start"`
-	}
-	var payload lambdaRequest
+	var spec config.LambdaSpec
 	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&payload); err != nil {
-		return payload.LambdaSpec, false, fmt.Errorf("decode payload: %w", err)
-	}
-	spec := payload.LambdaSpec
-	autoStartProvided := payload.AutoStart != nil
-	if autoStartProvided {
-		spec.AutoStart = *payload.AutoStart
+	if err := decoder.Decode(&spec); err != nil {
+		return spec, fmt.Errorf("decode payload: %w", err)
 	}
 	spec.ID = strings.TrimSpace(spec.ID)
 	spec.Strategy.Normalize()
@@ -659,22 +645,22 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, bool, error) {
 	}
 	spec.RefreshProviders()
 	if spec.ID == "" {
-		return spec, autoStartProvided, fmt.Errorf("id required")
+		return spec, fmt.Errorf("id required")
 	}
 	if spec.Strategy.Identifier == "" {
-		return spec, autoStartProvided, fmt.Errorf("strategy required")
+		return spec, fmt.Errorf("strategy required")
 	}
 	manifest := config.LambdaManifest{
 		Lambdas: []config.LambdaSpec{spec},
 	}
 	if err := manifest.Validate(); err != nil {
-		return spec, autoStartProvided, fmt.Errorf("validate lambda manifest: %w", err)
+		return spec, fmt.Errorf("validate lambda manifest: %w", err)
 	}
 	spec = manifest.Lambdas[0]
 	if len(spec.AllSymbols()) == 0 {
-		return spec, autoStartProvided, fmt.Errorf("symbols required")
+		return spec, fmt.Errorf("symbols required")
 	}
-	return spec, autoStartProvided, nil
+	return spec, nil
 }
 
 func decodeRiskConfig(r *http.Request) (config.RiskConfig, error) {
@@ -822,7 +808,6 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 		copied := config.LambdaSpec{
 			ID:              strings.TrimSpace(spec.ID),
 			Strategy:        config.LambdaStrategySpec{Identifier: strings.TrimSpace(spec.Strategy.Identifier), Config: cloneAnyMap(spec.Strategy.Config)},
-			AutoStart:       spec.AutoStart,
 			ProviderSymbols: cloneProviderSymbolsMap(spec.ProviderSymbols),
 			Providers:       cloneStringSlice(spec.Providers),
 		}
@@ -858,7 +843,6 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 		if err := s.manager.Remove(spec.ID); err != nil && !errors.Is(err, runtime.ErrInstanceNotFound) {
 			return fmt.Errorf("prepare lambda %s: %w", spec.ID, err)
 		}
-		spec.AutoStart = false
 		restored = append(restored, spec)
 	}
 
@@ -878,7 +862,6 @@ func lambdaSpecFromSnapshot(snapshot runtime.InstanceSnapshot) config.LambdaSpec
 	return config.LambdaSpec{
 		ID:              snapshot.ID,
 		Strategy:        config.LambdaStrategySpec{Identifier: snapshot.Strategy.Identifier, Config: cloneAnyMap(snapshot.Strategy.Config)},
-		AutoStart:       snapshot.AutoStart,
 		ProviderSymbols: cloneProviderSymbolsMap(snapshot.ProviderSymbols),
 		Providers:       cloneStringSlice(snapshot.Providers),
 	}

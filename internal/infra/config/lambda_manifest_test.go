@@ -18,7 +18,6 @@ func TestLambdaManifestValidate(t *testing.T) {
 					Symbols: []string{"BTC-USDT"},
 				},
 			},
-			AutoStart: true,
 		}},
 	}
 	if err := manifest.Validate(); err != nil {
@@ -52,9 +51,8 @@ func TestLambdaManifestValidateMissingFields(t *testing.T) {
 
 func TestLambdaManifestProviderSymbols(t *testing.T) {
 	spec := LambdaSpec{
-		ID:        "lambda-map",
-		Strategy:  LambdaStrategySpec{Identifier: "delay"},
-		AutoStart: true,
+		ID:       "lambda-map",
+		Strategy: LambdaStrategySpec{Identifier: "delay"},
 		ProviderSymbols: map[string]ProviderSymbols{
 			"binance": {
 				Symbols: []string{"BTC-USDT", "eth-usdt"},
@@ -90,9 +88,8 @@ func TestLambdaManifestProviderSymbols(t *testing.T) {
 
 func TestLambdaManifestSingleSymbolAssignment(t *testing.T) {
 	spec := LambdaSpec{
-		ID:        "lambda-single",
-		Strategy:  LambdaStrategySpec{Identifier: "delay"},
-		AutoStart: true,
+		ID:       "lambda-single",
+		Strategy: LambdaStrategySpec{Identifier: "delay"},
 		ProviderSymbols: map[string]ProviderSymbols{
 			"binance": {
 				Symbols: []string{"BTC-USDT"},

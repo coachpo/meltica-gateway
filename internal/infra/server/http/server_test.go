@@ -99,9 +99,8 @@ func TestBuildContextBackup(t *testing.T) {
 	manifest := config.LambdaManifest{
 		Lambdas: []config.LambdaSpec{
 			{
-				ID:        "alpha",
-				Strategy:  config.LambdaStrategySpec{Identifier: "logging", Config: map[string]any{}},
-				AutoStart: false,
+				ID:       "alpha",
+				Strategy: config.LambdaStrategySpec{Identifier: "logging", Config: map[string]any{}},
 				ProviderSymbols: map[string]config.ProviderSymbols{
 					"binance": {
 						Symbols: []string{"BTC-USDT"},
@@ -202,9 +201,8 @@ func TestApplyContextBackupRestoresState(t *testing.T) {
 		},
 		Lambdas: []config.LambdaSpec{
 			{
-				ID:        "alpha",
-				Strategy:  config.LambdaStrategySpec{Identifier: "logging", Config: map[string]any{}},
-				AutoStart: true,
+				ID:       "alpha",
+				Strategy: config.LambdaStrategySpec{Identifier: "logging", Config: map[string]any{}},
 				ProviderSymbols: map[string]config.ProviderSymbols{
 					"binance": {
 						Symbols: []string{"BTC-USDT"},

@@ -367,54 +367,15 @@ func (m *Manager) StrategyDetail(name string) (strategies.Metadata, bool) {
 	return def.Metadata(), true
 }
 
-// StartFromManifest starts all lambdas defined in the lambda manifest.
+// StartFromManifest registers all lambdas defined in the lambda manifest without starting them.
 func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaManifest) error {
-	autoStart := make([]config.LambdaSpec, 0, len(manifest.Lambdas))
 	for _, definition := range manifest.Lambdas {
 		spec := sanitizeSpec(definition)
 		if err := m.ensureSpec(spec, false); err != nil {
 			return err
 		}
-		if spec.AutoStart {
-			autoStart = append(autoStart, spec)
-		}
 	}
 
-	if len(autoStart) == 0 {
-		return nil
-	}
-
-	registerImmediately := m.registrar == nil
-	started := make([]string, 0, len(autoStart))
-	batch := make([]dispatcher.LambdaBatchRegistration, 0, len(autoStart))
-
-	for _, spec := range autoStart {
-		_, providers, routes, err := m.launch(ctx, spec, registerImmediately)
-		if err != nil {
-			for _, id := range started {
-				_ = m.Stop(id)
-			}
-			return err
-		}
-		started = append(started, spec.ID)
-		if !registerImmediately && len(routes) > 0 {
-			entry := dispatcher.LambdaBatchRegistration{
-				ID:        spec.ID,
-				Providers: providers,
-				Routes:    routes,
-			}
-			batch = append(batch, entry)
-		}
-	}
-
-	if !registerImmediately && len(batch) > 0 {
-		if err := m.registrar.RegisterLambdaBatch(ctx, batch); err != nil {
-			for _, id := range started {
-				_ = m.Stop(id)
-			}
-			return fmt.Errorf("register lambda batch: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -430,22 +391,7 @@ func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*core.Bas
 	if err := m.ensureSpec(spec, false); err != nil {
 		return nil, err
 	}
-	if !spec.AutoStart {
-		return nil, nil
-	}
-	if err := m.Start(ctx, spec.ID); err != nil {
-		m.mu.Lock()
-		delete(m.specs, spec.ID)
-		m.mu.Unlock()
-		return nil, err
-	}
-	m.mu.RLock()
-	inst := m.instances[spec.ID]
-	m.mu.RUnlock()
-	if inst == nil {
-		return nil, nil
-	}
-	return inst.base, nil
+	return nil, nil
 }
 
 func (m *Manager) ensureSpec(spec config.LambdaSpec, allowReplace bool) error {
@@ -627,7 +573,7 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	if err := m.Stop(spec.ID); err != nil && !errors.Is(err, ErrInstanceNotRunning) {
 		return err
 	}
-	startAfterUpdate := wasRunning || spec.AutoStart
+	startAfterUpdate := wasRunning
 	if startAfterUpdate {
 		if _, _, _, err := m.launch(ctx, spec, true); err != nil {
 			return err
@@ -642,7 +588,6 @@ type InstanceSummary struct {
 	StrategyIdentifier string   `json:"strategyIdentifier"`
 	Providers          []string `json:"providers"`
 	AggregatedSymbols  []string `json:"aggregatedSymbols"`
-	AutoStart          bool     `json:"autoStart"`
 	Running            bool     `json:"running"`
 }
 
@@ -653,7 +598,6 @@ type InstanceSnapshot struct {
 	Providers         []string                          `json:"providers"`
 	ProviderSymbols   map[string]config.ProviderSymbols `json:"scope"`
 	AggregatedSymbols []string                          `json:"aggregatedSymbols"`
-	AutoStart         bool                              `json:"autoStart"`
 	Running           bool                              `json:"running"`
 }
 
@@ -680,7 +624,6 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 			Providers:         []string{},
 			ProviderSymbols:   map[string]config.ProviderSymbols{},
 			AggregatedSymbols: []string{},
-			AutoStart:         false,
 			Running:           false,
 		}, false
 	}
@@ -698,7 +641,6 @@ func summaryOf(spec config.LambdaSpec, running bool) InstanceSummary {
 		StrategyIdentifier: spec.Strategy.Identifier,
 		Providers:          providers,
 		AggregatedSymbols:  aggregated,
-		AutoStart:          spec.AutoStart,
 		Running:            running,
 	}
 }
@@ -714,7 +656,6 @@ func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
 		Providers:         providers,
 		ProviderSymbols:   assignments,
 		AggregatedSymbols: aggregated,
-		AutoStart:         spec.AutoStart,
 		Running:           running,
 	}
 }
