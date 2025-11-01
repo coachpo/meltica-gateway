@@ -865,7 +865,7 @@ func (p *Provider) ensurePrivateWS() error {
 	return nil
 }
 
-func (p *Provider) generateLoginRequest() ([]byte, error) {
+func (p *Provider) generateLoginRequest() *wsRequest {
 	timestamp := strconv.FormatInt(p.clock().UTC().Unix(), 10)
 	message := timestamp + "GET" + "/users/self/verify"
 
@@ -885,11 +885,12 @@ func (p *Provider) generateLoginRequest() ([]byte, error) {
 		},
 	}
 
-	data, err := json.Marshal(loginReq)
-	if err != nil {
-		return nil, fmt.Errorf("marshal login request: %w", err)
+	data, _ := json.Marshal(loginReq)
+	return &wsRequest{
+		ID:   "",
+		Op:   "login",
+		Args: []wsArgument{{Channel: string(data), InstID: ""}},
 	}
-	return data, nil
 }
 
 type wsLoginRequest struct {

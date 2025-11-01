@@ -32,57 +32,14 @@ const (
 	instancesPath        = "/strategy/instances"
 	instanceDetailPrefix = instancesPath + "/"
 
-	riskLimitsPath    = "/risk/limits"
-	runtimeConfigPath = "/config/runtime"
-	configBackupPath  = "/config/backup"
-	swaggerSpecPath   = "/docs/openapi.json"
-	swaggerUIPath     = "/docs"
+	riskLimitsPath = "/risk/limits"
 )
 
 type handlerFunc func(http.ResponseWriter, *http.Request)
 
 type httpServer struct {
-	environment  config.Environment
-	meta         config.MetaConfig
-	manager      *runtime.Manager
-	providers    *provider.Manager
-	runtimeStore *config.RuntimeStore
-	configStore  *config.AppConfigStore
-}
-
-func (s *httpServer) persistProviders(w http.ResponseWriter) bool {
-	if s.configStore == nil || s.providers == nil {
-		return true
-	}
-	specs := s.providers.ProviderSpecsSnapshot()
-	if err := s.configStore.SetProviders(specs); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("persist providers: %v", err))
-		return false
-	}
-	return true
-}
-
-func (s *httpServer) persistLambdaManifest(w http.ResponseWriter) bool {
-	if s.configStore == nil || s.manager == nil {
-		return true
-	}
-	manifest := s.manager.ManifestSnapshot()
-	if err := s.configStore.SetLambdaManifest(manifest); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("persist lambda manifest: %v", err))
-		return false
-	}
-	return true
-}
-
-func (s *httpServer) persistRuntimeConfig(w http.ResponseWriter, cfg config.RuntimeConfig) bool {
-	if s.configStore == nil {
-		return true
-	}
-	if err := s.configStore.SetRuntime(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("persist runtime config: %v", err))
-		return false
-	}
-	return true
+	manager   *runtime.Manager
+	providers *provider.Manager
 }
 
 type providerPayload struct {
@@ -97,8 +54,8 @@ type providerAdapterPayload struct {
 }
 
 // NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(environment config.Environment, meta config.MetaConfig, manager *runtime.Manager, providers *provider.Manager, runtimeStore *config.RuntimeStore, configStore *config.AppConfigStore) http.Handler {
-	server := &httpServer{environment: environment, meta: meta, manager: manager, providers: providers, runtimeStore: runtimeStore, configStore: configStore}
+func NewHandler(manager *runtime.Manager, providers *provider.Manager) http.Handler {
+	server := &httpServer{manager: manager, providers: providers}
 	mux := http.NewServeMux()
 
 	mux.Handle(strategiesPath, server.methodHandlers(map[string]handlerFunc{
@@ -131,21 +88,6 @@ func NewHandler(environment config.Environment, meta config.MetaConfig, manager 
 		http.MethodGet: server.getRiskLimits,
 		http.MethodPut: server.updateRiskLimits,
 	}))
-
-	mux.Handle(runtimeConfigPath, server.methodHandlers(map[string]handlerFunc{
-		http.MethodGet: server.exportRuntimeConfig,
-		http.MethodPut: server.importRuntimeConfig,
-	}))
-
-	mux.Handle(configBackupPath, server.methodHandlers(map[string]handlerFunc{
-		http.MethodGet:  server.exportConfigBackup,
-		http.MethodPost: server.restoreConfigBackup,
-	}))
-
-	if environment == config.EnvDev {
-		mux.Handle(swaggerSpecPath, http.HandlerFunc(server.serveSwaggerSpec))
-		mux.Handle(swaggerUIPath, http.HandlerFunc(server.serveSwaggerUI))
-	}
 
 	return withCORS(mux)
 }
@@ -227,10 +169,6 @@ func (s *httpServer) createProvider(w http.ResponseWriter, r *http.Request) {
 		s.writeProviderError(w, err)
 		return
 	}
-	if !s.persistProviders(w) {
-		_ = s.providers.Remove(spec.Name)
-		return
-	}
 	writeJSON(w, http.StatusCreated, detail)
 }
 
@@ -300,20 +238,9 @@ func (s *httpServer) handleProviderResource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		prevSpecs := s.providers.ProviderSpecsSnapshot()
-		prevMeta, _ := s.providers.ProviderMetadataFor(name)
 		detail, err := s.providers.Update(r.Context(), spec, enabled)
 		if err != nil {
 			s.writeProviderError(w, err)
-			return
-		}
-		if !s.persistProviders(w) {
-			for _, prev := range prevSpecs {
-				if strings.EqualFold(prev.Name, name) {
-					_, _ = s.providers.Update(r.Context(), prev, prevMeta.Running)
-					break
-				}
-			}
 			return
 		}
 		writeJSON(w, http.StatusOK, detail)
@@ -322,19 +249,8 @@ func (s *httpServer) handleProviderResource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
 			return
 		}
-		prevSpecs := s.providers.ProviderSpecsSnapshot()
-		prevMeta, _ := s.providers.ProviderMetadataFor(name)
 		if err := s.providers.Remove(name); err != nil {
 			s.writeProviderError(w, err)
-			return
-		}
-		if !s.persistProviders(w) {
-			for _, prev := range prevSpecs {
-				if strings.EqualFold(prev.Name, name) {
-					_, _ = s.providers.Create(r.Context(), prev, prevMeta.Running)
-					break
-				}
-			}
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "removed", "name": name})
@@ -428,10 +344,6 @@ func (s *httpServer) createInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot, _ := s.manager.Instance(spec.ID)
-	if !s.persistLambdaManifest(w) {
-		_ = s.manager.Remove(spec.ID)
-		return
-	}
 	writeJSON(w, http.StatusCreated, snapshot)
 }
 
@@ -447,120 +359,8 @@ func (s *httpServer) updateRiskLimits(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	limits, err := s.manager.ApplyRiskConfig(cfg)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if s.runtimeStore != nil {
-		snapshot := s.runtimeStore.Snapshot()
-		if !s.persistRuntimeConfig(w, snapshot) {
-			return
-		}
-	}
+	limits := s.manager.ApplyRiskConfig(cfg)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "limits": riskConfigFromLimits(limits)})
-}
-
-func (s *httpServer) exportRuntimeConfig(w http.ResponseWriter, _ *http.Request) {
-	if s.runtimeStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "runtime config store unavailable")
-		return
-	}
-	snapshot := s.runtimeStore.Snapshot()
-	writeJSON(w, http.StatusOK, snapshot)
-}
-
-func (s *httpServer) importRuntimeConfig(w http.ResponseWriter, r *http.Request) {
-	if s.runtimeStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "runtime config store unavailable")
-		return
-	}
-	limitRequestBody(w, r)
-	cfg, err := decodeRuntimeConfig(r)
-	if err != nil {
-		writeDecodeError(w, err)
-		return
-	}
-	updated, err := s.runtimeStore.Replace(cfg)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.manager.ApplyRuntimeConfig(updated); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !s.persistRuntimeConfig(w, updated) {
-		return
-	}
-	writeJSON(w, http.StatusOK, updated)
-}
-
-func (s *httpServer) exportConfigBackup(w http.ResponseWriter, _ *http.Request) {
-	payload, err := buildBackupPayload(s)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, payload)
-}
-
-func (s *httpServer) restoreConfigBackup(w http.ResponseWriter, r *http.Request) {
-	if s.runtimeStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "runtime config store unavailable")
-		return
-	}
-	limitRequestBody(w, r)
-	defer func() {
-		_ = r.Body.Close()
-	}()
-
-	var payload ConfigBackup
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&payload); err != nil {
-		writeDecodeError(w, err)
-		return
-	}
-	if strings.TrimSpace(payload.Version) == "" {
-		payload.Version = backupVersion
-	} else if payload.Version != backupVersion {
-		writeError(w, http.StatusBadRequest, "unsupported backup version")
-		return
-	}
-
-	if err := s.applyBackup(r.Context(), payload); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	lambdaCount := 0
-	if payload.Lambdas.Manifest.Lambdas != nil {
-		lambdaCount = len(payload.Lambdas.Manifest.Lambdas)
-	}
-	providerCount := 0
-	if payload.Providers.Config != nil {
-		providerCount = len(payload.Providers.Config)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":    "restored",
-		"providers": providerCount,
-		"lambdas":   lambdaCount,
-	})
-}
-
-func (s *httpServer) serveSwaggerSpec(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(swaggerSpec))
-}
-
-func (s *httpServer) serveSwaggerUI(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != swaggerUIPath {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(swaggerUIHTML))
 }
 
 func (s *httpServer) handleInstance(w http.ResponseWriter, r *http.Request) {
@@ -613,16 +413,10 @@ func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		snapshot, _ := s.manager.Instance(id)
-		if !s.persistLambdaManifest(w) {
-			return
-		}
 		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodDelete:
 		if err := s.manager.Remove(id); err != nil {
 			s.writeManagerError(w, err)
-			return
-		}
-		if !s.persistLambdaManifest(w) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "removed", "id": id})
@@ -809,19 +603,6 @@ func decodeRiskConfig(r *http.Request) (config.RiskConfig, error) {
 	return cfg, nil
 }
 
-func decodeRuntimeConfig(r *http.Request) (config.RuntimeConfig, error) {
-	defer func() {
-		_ = r.Body.Close()
-	}()
-	var cfg config.RuntimeConfig
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&cfg); err != nil {
-		return cfg, fmt.Errorf("decode payload: %w", err)
-	}
-	cfg.Normalise()
-	return cfg, nil
-}
-
 func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
 	allowed := make([]string, 0, len(limits.AllowedOrderTypes))
 	for _, ot := range limits.AllowedOrderTypes {
@@ -831,7 +612,7 @@ func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
 	if limits.CircuitBreaker.Cooldown > 0 {
 		cooldown = limits.CircuitBreaker.Cooldown.String()
 	}
-	cfg := config.RiskConfig{
+	return config.RiskConfig{
 		MaxPositionSize:     limits.MaxPositionSize.String(),
 		MaxNotionalValue:    limits.MaxNotionalValue.String(),
 		NotionalCurrency:    limits.NotionalCurrency,
@@ -848,8 +629,6 @@ func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
 			Cooldown:  cooldown,
 		},
 	}
-	cfg.MarkAllFieldsSet()
-	return cfg
 }
 
 func validateRiskConfig(cfg config.RiskConfig) error {
@@ -902,359 +681,6 @@ func isRequestTooLarge(err error) bool {
 	var maxBytesErr *http.MaxBytesError
 	return errors.As(err, &maxBytesErr)
 }
-
-func buildProviderConfigSnapshot(specs []config.ProviderSpec) map[string]map[string]any {
-	if len(specs) == 0 {
-		return nil
-	}
-	out := make(map[string]map[string]any, len(specs))
-	for _, spec := range specs {
-		adapter := make(map[string]any)
-		adapter["identifier"] = spec.Adapter
-		cleanConfig := provider.SanitizeProviderConfig(spec.Config)
-		if cleanConfig == nil {
-			cleanConfig = map[string]any{}
-		}
-		for key, value := range cleanConfig {
-			switch key {
-			case "provider_name":
-				continue
-			case "identifier":
-				adapter["identifier"] = cloneValue(value)
-			default:
-				adapter[key] = cloneValue(value)
-			}
-		}
-		if id, ok := adapter["identifier"].(string); !ok || strings.TrimSpace(id) == "" {
-			adapter["identifier"] = spec.Adapter
-		}
-		out[spec.Name] = map[string]any{
-			"adapter": adapter,
-		}
-	}
-	return out
-}
-
-func cloneValue(value any) any {
-	switch v := value.(type) {
-	case map[string]any:
-		clone := make(map[string]any, len(v))
-		for key, val := range v {
-			clone[key] = cloneValue(val)
-		}
-		return clone
-	case []any:
-		clone := make([]any, len(v))
-		for i, item := range v {
-			clone[i] = cloneValue(item)
-		}
-		return clone
-	case []string:
-		return append([]string(nil), v...)
-	default:
-		return value
-	}
-}
-
-const swaggerSpec = `{
-  "openapi": "3.0.3",
-  "info": {
-    "title": "Meltica Control API",
-    "version": "1.0.0",
-    "description": "Runtime control surface for Meltica gateway."
-  },
-  "servers": [
-    { "url": "http://localhost:8880", "description": "Local development" }
-  ],
-  "paths": {
-    "/strategies": {
-      "get": {
-        "summary": "List available strategies",
-        "responses": {
-          "200": { "description": "Successful response" }
-        }
-      }
-    },
-    "/strategies/{name}": {
-      "get": {
-        "summary": "Get strategy metadata",
-        "parameters": [
-          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Strategy metadata" },
-          "404": { "description": "Strategy not found" }
-        }
-      }
-    },
-    "/providers": {
-      "get": {
-        "summary": "List providers",
-        "responses": {
-          "200": { "description": "Provider list" }
-        }
-      },
-      "post": {
-        "summary": "Create provider",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "type": "object" }
-            }
-          }
-        },
-        "responses": {
-          "201": { "description": "Provider created" },
-          "400": { "description": "Validation error" }
-        }
-      }
-    },
-    "/providers/{name}": {
-      "get": {
-        "summary": "Get provider details",
-        "parameters": [
-          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Provider metadata" },
-          "404": { "description": "Provider not found" }
-        }
-      },
-      "put": {
-        "summary": "Update provider",
-        "parameters": [
-          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "type": "object" }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Provider updated" },
-          "400": { "description": "Validation error" }
-        }
-      },
-      "delete": {
-        "summary": "Delete provider",
-        "parameters": [
-          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Provider removed" },
-          "404": { "description": "Provider not found" }
-        }
-      }
-    },
-    "/providers/{name}/start": {
-      "post": {
-        "summary": "Start provider",
-        "parameters": [
-          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Provider started" }
-        }
-      }
-    },
-    "/providers/{name}/stop": {
-      "post": {
-        "summary": "Stop provider",
-        "parameters": [
-          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Provider stopped" }
-        }
-      }
-    },
-    "/adapters": {
-      "get": {
-        "summary": "List adapter metadata",
-        "responses": {
-          "200": { "description": "Adapter list" }
-        }
-      }
-    },
-    "/adapters/{identifier}": {
-      "get": {
-        "summary": "Get adapter metadata",
-        "parameters": [
-          { "name": "identifier", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Adapter metadata" },
-          "404": { "description": "Adapter not found" }
-        }
-      }
-    },
-    "/strategy/instances": {
-      "get": {
-        "summary": "List strategy instances",
-        "responses": {
-          "200": { "description": "Instance list" }
-        }
-      },
-      "post": {
-        "summary": "Create strategy instance",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "type": "object" }
-            }
-          }
-        },
-        "responses": {
-          "201": { "description": "Instance created" },
-          "400": { "description": "Validation error" }
-        }
-      }
-    },
-    "/strategy/instances/{id}": {
-      "get": {
-        "summary": "Get instance snapshot",
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Instance snapshot" },
-          "404": { "description": "Instance not found" }
-        }
-      },
-      "put": {
-        "summary": "Update instance",
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "type": "object" }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Instance updated" }
-        }
-      },
-      "delete": {
-        "summary": "Delete instance",
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Instance removed" }
-        }
-      }
-    },
-    "/strategy/instances/{id}/start": {
-      "post": {
-        "summary": "Start instance",
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Instance started" }
-        }
-      }
-    },
-    "/strategy/instances/{id}/stop": {
-      "post": {
-        "summary": "Stop instance",
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": { "description": "Instance stopped" }
-        }
-      }
-    },
-    "/risk/limits": {
-      "get": {
-        "summary": "Get risk limits",
-        "responses": {
-          "200": { "description": "Risk limits" }
-        }
-      },
-      "put": {
-        "summary": "Update risk limits",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "type": "object" }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Risk limits updated" }
-        }
-      }
-    },
-    "/config/runtime": {
-      "get": {
-        "summary": "Export runtime configuration",
-        "responses": {
-          "200": { "description": "Runtime configuration" }
-        }
-      },
-      "put": {
-        "summary": "Import runtime configuration",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "type": "object" }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Runtime configuration updated" }
-        }
-      }
-    },
-    "/config/backup": {
-      "get": {
-        "summary": "Export configuration backup",
-        "responses": {
-          "200": { "description": "Configuration backup" }
-        }
-      }
-    }
-  }
-}`
-
-var swaggerUIHTML = fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Meltica API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
-  <style>
-    body { margin:0; background: #fafafa; }
-  </style>
-</head>
-<body>
-  <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script>
-    window.addEventListener('load', function() {
-      SwaggerUIBundle({
-        url: '%s',
-        dom_id: '#swagger-ui',
-        presets: [SwaggerUIBundle.presets.apis],
-        layout: 'BaseLayout'
-      });
-    });
-  </script>
-</body>
-</html>`, swaggerSpecPath)
 
 func methodNotAllowed(w http.ResponseWriter, allowed ...string) {
 	if len(allowed) > 0 {

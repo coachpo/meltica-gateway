@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 
@@ -96,28 +95,6 @@ func (m *Manager) parentContext() context.Context {
 		return context.Background()
 	}
 	return ctx
-}
-
-func (m *Manager) deriveProviderContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	parent := m.parentContext()
-
-	if ctx == nil {
-		return context.WithCancel(parent)
-	}
-
-	if ctx == parent {
-		return context.WithCancel(ctx)
-	}
-
-	providerCtx, cancel := context.WithCancel(ctx)
-	go func(parentCtx, run context.Context, cancelFunc context.CancelFunc) {
-		select {
-		case <-parentCtx.Done():
-			cancelFunc()
-		case <-run.Done():
-		}
-	}(parent, providerCtx, cancel)
-	return providerCtx, cancel
 }
 
 // Registry exposes the underlying factory registry.
@@ -263,7 +240,7 @@ func (m *Manager) StartProvider(ctx context.Context, name string) (RuntimeDetail
 		m.mu.Unlock()
 		return empty, fmt.Errorf("%w: %s", ErrProviderRunning, trimmed)
 	}
-	err := m.startProviderLocked(ctx, state)
+	err := m.startProviderLocked(state)
 	m.mu.Unlock()
 	if err != nil {
 		return empty, err
@@ -302,11 +279,12 @@ func (m *Manager) StopProvider(name string) (RuntimeDetail, error) {
 	return detail, nil
 }
 
-func (m *Manager) startProviderLocked(ctx context.Context, state *providerState) error {
+func (m *Manager) startProviderLocked(state *providerState) error {
 	if state == nil {
 		return fmt.Errorf("provider state required")
 	}
-	providerCtx, cancel := m.deriveProviderContext(ctx)
+	parent := m.parentContext()
+	providerCtx, cancel := context.WithCancel(parent)
 	instance, err := m.registry.Create(providerCtx, m.pools, state.spec)
 	if err != nil {
 		cancel()
@@ -468,26 +446,6 @@ func (m *Manager) ProviderMetadataSnapshot() []RuntimeMetadata {
 	return out
 }
 
-// ProviderSpecsSnapshot returns a copy of the provider specifications known to the manager.
-func (m *Manager) ProviderSpecsSnapshot() []config.ProviderSpec {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if len(m.states) == 0 {
-		return nil
-	}
-	specs := make([]config.ProviderSpec, 0, len(m.states))
-	for _, state := range m.states {
-		clone := config.ProviderSpec{
-			Name:    state.spec.Name,
-			Adapter: state.spec.Adapter,
-			Config:  cloneConfigMap(state.spec.Config),
-		}
-		specs = append(specs, clone)
-	}
-	sort.Slice(specs, func(i, j int) bool { return specs[i].Name < specs[j].Name })
-	return specs
-}
-
 // ProviderMetadataFor returns detailed metadata for a provider instance.
 func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 	trimmed := strings.TrimSpace(name)
@@ -546,13 +504,9 @@ func extractProviderSettings(cfg map[string]any) map[string]any {
 	if len(cfg) == 0 {
 		return nil
 	}
-	settings := make(map[string]any)
+	settings := map[string]any{}
 	for key, value := range cfg {
-		if shouldOmitProviderSettingKey(key) {
-			continue
-		}
-
-		switch strings.ToLower(strings.TrimSpace(key)) {
+		switch key {
 		case "identifier", "provider_name":
 			continue
 		case "config":
@@ -560,19 +514,11 @@ func extractProviderSettings(cfg map[string]any) map[string]any {
 			if !ok {
 				continue
 			}
-			clean := sanitizeProviderSettingsMap(nested)
-			if len(clean) == 0 {
-				continue
-			}
-			for nk, nv := range clean {
+			for nk, nv := range nested {
 				settings[nk] = nv
 			}
 		default:
-			sanitized := sanitizeProviderSettingValue(value)
-			if sanitized == nil {
-				continue
-			}
-			settings[key] = sanitized
+			settings[key] = value
 		}
 	}
 	if len(settings) == 0 {

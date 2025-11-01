@@ -13,18 +13,6 @@ type LambdaManifest struct {
 	Lambdas []LambdaSpec `yaml:"lambdas"`
 }
 
-// Clone returns a deep copy of the lambda manifest.
-func (m LambdaManifest) Clone() LambdaManifest {
-	if len(m.Lambdas) == 0 {
-		return LambdaManifest{Lambdas: nil}
-	}
-	clones := make([]LambdaSpec, len(m.Lambdas))
-	for i, spec := range m.Lambdas {
-		clones[i] = cloneLambdaSpec(spec)
-	}
-	return LambdaManifest{Lambdas: clones}
-}
-
 // LambdaStrategySpec defines the strategy identifier and associated configuration payload.
 type LambdaStrategySpec struct {
 	Identifier string         `yaml:"identifier" json:"identifier"`
@@ -83,7 +71,7 @@ func (p *ProviderSymbols) Normalize() {
 type LambdaSpec struct {
 	ID              string                     `yaml:"id" json:"id"`
 	Strategy        LambdaStrategySpec         `yaml:"strategy" json:"strategy"`
-	AutoStart       bool                       `yaml:"auto_start" json:"autoStart"`
+	AutoStart       bool                       `yaml:"auto_start" json:"auto_start"`
 	ProviderSymbols map[string]ProviderSymbols `yaml:"scope" json:"scope"`
 	Providers       []string                   `yaml:"-" json:"-"`
 }
@@ -260,34 +248,6 @@ func normalizeProviderNames(providers []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func cloneLambdaSpec(spec LambdaSpec) LambdaSpec {
-	clone := spec
-	if spec.Strategy.Config != nil {
-		strategyCfg := make(map[string]any, len(spec.Strategy.Config))
-		for key, value := range spec.Strategy.Config {
-			strategyCfg[key] = cloneAny(value)
-		}
-		clone.Strategy.Config = strategyCfg
-	} else {
-		clone.Strategy.Config = nil
-	}
-	if len(spec.Providers) > 0 {
-		clone.Providers = append([]string(nil), spec.Providers...)
-	} else {
-		clone.Providers = nil
-	}
-	if len(spec.ProviderSymbols) > 0 {
-		assignments := make(map[string]ProviderSymbols, len(spec.ProviderSymbols))
-		for name, assignment := range spec.ProviderSymbols {
-			assignments[name] = ProviderSymbols{Symbols: append([]string(nil), assignment.Symbols...)}
-		}
-		clone.ProviderSymbols = assignments
-	} else {
-		clone.ProviderSymbols = nil
-	}
-	return clone
 }
 
 // Validate performs semantic validation of the manifest definition.

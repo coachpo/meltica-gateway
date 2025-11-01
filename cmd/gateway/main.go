@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -48,59 +47,29 @@ func main() {
 
 	logger := newGatewayLogger()
 
-	configPath := resolveConfigPath(cfgPathFlag)
-
-	appCfg, loadedFromFile, err := config.LoadOrDefault(ctx, configPath)
+	appCfg, err := config.Load(ctx, resolveConfigPath(cfgPathFlag))
 	if err != nil {
 		logger.Fatalf("load config: %v", err)
 	}
-	if !loadedFromFile {
-		logger.Printf("configuration file not found, using defaults")
-	}
-	logger.Printf("configuration initialised: env=%s, providers=%d",
+	logger.Printf("configuration loaded: env=%s, providers=%d",
 		appCfg.Environment, len(appCfg.Providers))
 
 	logger.Printf("lambda manifest loaded: lambdas=%d", len(appCfg.LambdaManifest.Lambdas))
 	logger.Printf("providers configured: %d", len(appCfg.Providers))
 
-	appStore, err := config.NewAppConfigStore(appCfg, func(cfg config.AppConfig) error {
-		return config.SaveAppConfig(configPath, cfg)
-	})
-	if err != nil {
-		logger.Fatalf("initialise app config store: %v", err)
-	}
-
-	runtimeSnapshotPath := deriveRuntimeSnapshotPath(configPath)
-	runtimeCfg := appCfg.Runtime
-	if snapshot, err := config.LoadRuntimeSnapshot(runtimeSnapshotPath); err == nil {
-		runtimeCfg = snapshot
-		logger.Printf("runtime snapshot loaded from %s", runtimeSnapshotPath)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		logger.Fatalf("load runtime snapshot: %v", err)
-	}
-
-	runtimeStore, err := config.NewRuntimeStore(runtimeCfg)
-	if err != nil {
-		logger.Fatalf("initialise runtime config: %v", err)
-	}
-	runtimeSnapshot := runtimeStore.Snapshot()
-	if err := appStore.SetRuntime(runtimeSnapshot); err != nil {
-		logger.Fatalf("sync runtime config store: %v", err)
-	}
-
-	telemetryProvider, err := initTelemetry(ctx, logger, appCfg.Environment, runtimeSnapshot.Telemetry)
+	telemetryProvider, err := initTelemetry(ctx, logger, appCfg)
 	if err != nil {
 		logger.Fatalf("initialize telemetry: %v", err)
 	}
 
-	poolMgr, err := buildPoolManager(runtimeSnapshot.Pools)
+	poolMgr, err := buildPoolManager(appCfg.Pools)
 	if err != nil {
 		logger.Fatalf("initialise pools: %v", err)
 	}
 
 	var lifecycle conc.WaitGroup
 
-	bus := newEventBus(runtimeSnapshot.Eventbus, poolMgr)
+	bus := newEventBus(appCfg.Eventbus, poolMgr)
 
 	table := dispatcher.NewTable()
 	providerManager, err := initProviders(ctx, logger, appCfg, poolMgr, table, bus)
@@ -110,13 +79,13 @@ func main() {
 
 	registrar := dispatcher.NewRegistrar(table, providerManager)
 
-	lambdaManager, err := startLambdaManager(ctx, appCfg, runtimeStore, bus, poolMgr, providerManager, registrar, logger)
+	lambdaManager, err := startLambdaManager(ctx, appCfg, bus, poolMgr, providerManager, registrar, logger)
 	if err != nil {
 		logger.Fatalf("initialise lambdas: %v", err)
 	}
 	logger.Printf("strategy instances registered: %d", len(lambdaManager.Instances()))
 
-	apiServer := buildAPIServer(runtimeSnapshot.APIServer, appCfg.Environment, appCfg.Meta, runtimeStore, lambdaManager, providerManager, appStore)
+	apiServer := buildAPIServer(appCfg.APIServer, lambdaManager, providerManager)
 	startAPIServer(&lifecycle, logger, apiServer)
 	logger.Printf("control API listening on %s", apiServer.Addr)
 
@@ -154,17 +123,17 @@ func newGatewayLogger() *log.Logger {
 	return log.New(os.Stdout, gatewayLoggerPrefix, log.LstdFlags|log.Lmicroseconds)
 }
 
-func initTelemetry(ctx context.Context, logger *log.Logger, env config.Environment, cfg config.TelemetryConfig) (*telemetry.Provider, error) {
+func initTelemetry(ctx context.Context, logger *log.Logger, appCfg config.AppConfig) (*telemetry.Provider, error) {
 	telemetryCfg := telemetry.DefaultConfig()
-	if cfg.OTLPEndpoint != "" {
-		telemetryCfg.OTLPEndpoint = cfg.OTLPEndpoint
+	if appCfg.Telemetry.OTLPEndpoint != "" {
+		telemetryCfg.OTLPEndpoint = appCfg.Telemetry.OTLPEndpoint
 	}
-	if cfg.ServiceName != "" {
-		telemetryCfg.ServiceName = cfg.ServiceName
+	if appCfg.Telemetry.ServiceName != "" {
+		telemetryCfg.ServiceName = appCfg.Telemetry.ServiceName
 	}
-	telemetryCfg.Environment = string(env)
-	telemetryCfg.OTLPInsecure = cfg.OTLPInsecure
-	telemetryCfg.EnableMetrics = cfg.EnableMetrics
+	telemetryCfg.Environment = string(appCfg.Environment)
+	telemetryCfg.OTLPInsecure = appCfg.Telemetry.OTLPInsecure
+	telemetryCfg.EnableMetrics = appCfg.Telemetry.EnableMetrics
 
 	provider, err := telemetry.NewProvider(ctx, telemetryCfg)
 	if err != nil {
@@ -210,20 +179,19 @@ func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 	if err != nil {
 		return nil, fmt.Errorf("build provider specs: %w", err)
 	}
-	if len(specs) > 0 {
-		if _, err := manager.Start(ctx, specs); err != nil {
-			return nil, fmt.Errorf("start providers: %w", err)
-		}
-		logger.Printf("providers started: %d", len(manager.Providers()))
-	} else {
-		logger.Print("no providers configured; skipping provider bootstrap")
+	if _, err := manager.Start(ctx, specs); err != nil {
+		return nil, fmt.Errorf("start providers: %w", err)
+	}
+	if len(manager.Providers()) == 0 {
+		return nil, fmt.Errorf("no providers started from configuration")
 	}
 
+	logger.Printf("providers started: %d", len(manager.Providers()))
 	return manager, nil
 }
 
-func startLambdaManager(ctx context.Context, appCfg config.AppConfig, runtimeStore *config.RuntimeStore, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
-	manager := lambdaruntime.NewManager(appCfg, runtimeStore, bus, poolMgr, providers, logger, registrar)
+func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
+	manager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providers, logger, registrar)
 	manager.SetLifecycleContext(ctx)
 	if err := manager.StartFromManifest(ctx, appCfg.LambdaManifest); err != nil {
 		return nil, fmt.Errorf("start manifest lambdas: %w", err)
@@ -231,8 +199,8 @@ func startLambdaManager(ctx context.Context, appCfg config.AppConfig, runtimeSto
 	return manager, nil
 }
 
-func buildAPIServer(cfg config.APIServerConfig, env config.Environment, meta config.MetaConfig, runtimeStore *config.RuntimeStore, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager, appStore *config.AppConfigStore) *http.Server {
-	handler := httpserver.NewHandler(env, meta, lambdaManager, providerManager, runtimeStore, appStore)
+func buildAPIServer(cfg config.APIServerConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager) *http.Server {
+	handler := httpserver.NewHandler(lambdaManager, providerManager)
 
 	return &http.Server{
 		Addr:                         cfg.Addr,
@@ -345,13 +313,4 @@ func resolveConfigPath(flagValue string) string {
 	}
 
 	return filepath.Clean(defaultConfigPath)
-}
-
-func deriveRuntimeSnapshotPath(configPath string) string {
-	cleaned := filepath.Clean(configPath)
-	dir := filepath.Dir(cleaned)
-	if dir == "" {
-		dir = "."
-	}
-	return filepath.Join(dir, "runtime.snapshot.json")
 }

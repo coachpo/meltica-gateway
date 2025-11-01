@@ -117,13 +117,12 @@ type Manager struct {
 	lifecycleMu  sync.RWMutex
 	lifecycleCtx context.Context
 
-	bus          eventbus.Bus
-	pools        *pool.PoolManager
-	providers    ProviderCatalog
-	logger       *log.Logger
-	registrar    RouteRegistrar
-	riskManager  *risk.Manager
-	runtimeStore *config.RuntimeStore
+	bus         eventbus.Bus
+	pools       *pool.PoolManager
+	providers   ProviderCatalog
+	logger      *log.Logger
+	registrar   RouteRegistrar
+	riskManager *risk.Manager
 
 	strategies map[string]StrategyDefinition
 	specs      map[string]config.LambdaSpec
@@ -137,17 +136,12 @@ type lambdaInstance struct {
 }
 
 // NewManager creates a new lambda manager with the specified dependencies.
-func NewManager(cfg config.AppConfig, store *config.RuntimeStore, bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) *Manager {
+func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) *Manager {
 	if logger == nil {
 		logger = log.New(os.Stdout, "lambda-manager ", log.LstdFlags|log.Lmicroseconds)
 	}
 
-	riskCfg := cfg.Runtime.Risk
-	if store != nil {
-		snapshot := store.Snapshot()
-		riskCfg = snapshot.Risk
-	}
-	rm := risk.NewManager(buildRiskLimits(riskCfg, logger))
+	rm := risk.NewManager(buildRiskLimits(cfg.Risk, logger))
 
 	mgr := &Manager{
 		mu:           sync.RWMutex{},
@@ -159,7 +153,6 @@ func NewManager(cfg config.AppConfig, store *config.RuntimeStore, bus eventbus.B
 		logger:       logger,
 		registrar:    registrar,
 		riskManager:  rm,
-		runtimeStore: store,
 		strategies:   make(map[string]StrategyDefinition),
 		specs:        make(map[string]config.LambdaSpec),
 		instances:    make(map[string]*lambdaInstance),
@@ -186,28 +179,6 @@ func (m *Manager) parentContext() context.Context {
 		return context.Background()
 	}
 	return ctx
-}
-
-func (m *Manager) deriveLaunchContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	parent := m.parentContext()
-
-	if ctx == nil {
-		return context.WithCancel(parent)
-	}
-
-	if ctx == parent {
-		return context.WithCancel(ctx)
-	}
-
-	runCtx, cancel := context.WithCancel(ctx)
-	go func(parentCtx, run context.Context, cancelFunc context.CancelFunc) {
-		select {
-		case <-parentCtx.Done():
-			cancelFunc()
-		case <-run.Done():
-		}
-	}(parent, runCtx, cancel)
-	return runCtx, cancel
 }
 
 func (m *Manager) registerDefaults() {
@@ -318,46 +289,11 @@ func (m *Manager) UpdateRiskLimits(limits risk.Limits) {
 	}
 }
 
-// ManifestSnapshot returns the current lambda manifest snapshot including dynamically created instances.
-func (m *Manager) ManifestSnapshot() config.LambdaManifest {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if len(m.specs) == 0 {
-		return config.LambdaManifest{Lambdas: nil}
-	}
-	manifest := config.LambdaManifest{
-		Lambdas: make([]config.LambdaSpec, 0, len(m.specs)),
-	}
-	for _, spec := range m.specs {
-		cloned := cloneSpec(spec)
-		manifest.Lambdas = append(manifest.Lambdas, sanitizeSpec(cloned))
-	}
-	sort.Slice(manifest.Lambdas, func(i, j int) bool {
-		return manifest.Lambdas[i].ID < manifest.Lambdas[j].ID
-	})
-	return manifest
-}
-
-// ApplyRuntimeConfig synchronises the manager with the supplied runtime configuration snapshot.
-func (m *Manager) ApplyRuntimeConfig(cfg config.RuntimeConfig) error {
-	limits := buildRiskLimits(cfg.Risk, m.logger)
-	m.UpdateRiskLimits(limits)
-	return nil
-}
-
 // ApplyRiskConfig converts the supplied risk configuration into limits and applies them.
-func (m *Manager) ApplyRiskConfig(cfg config.RiskConfig) (risk.Limits, error) {
-	effective := cfg
-	if m.runtimeStore != nil {
-		updated, err := m.runtimeStore.UpdateRisk(cfg)
-		if err != nil {
-			return risk.Limits{}, fmt.Errorf("update runtime risk: %w", err)
-		}
-		effective = updated
-	}
-	limits := buildRiskLimits(effective, m.logger)
+func (m *Manager) ApplyRiskConfig(cfg config.RiskConfig) risk.Limits {
+	limits := buildRiskLimits(cfg, m.logger)
 	m.UpdateRiskLimits(limits)
-	return limits, nil
+	return limits
 }
 
 func (m *Manager) registerStrategy(def StrategyDefinition) {
@@ -563,7 +499,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 	base := core.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
 
-	runCtx, cancel := m.deriveLaunchContext(ctx)
+	runCtx, cancel := context.WithCancel(m.parentContext())
 	errs, err := base.Start(runCtx)
 	if err != nil {
 		cancel()
@@ -723,66 +659,6 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 	_, running := m.instances[spec.ID]
 	m.mu.RUnlock()
 	return snapshotOf(spec, running), true
-}
-
-// InstanceSnapshots returns detailed snapshots for all known lambda instances.
-func (m *Manager) InstanceSnapshots() []InstanceSnapshot {
-	m.mu.RLock()
-	ids := make([]string, 0, len(m.specs))
-	for id := range m.specs {
-		ids = append(ids, id)
-	}
-	m.mu.RUnlock()
-
-	sort.Strings(ids)
-
-	snapshots := make([]InstanceSnapshot, 0, len(ids))
-	for _, id := range ids {
-		snapshot, ok := m.Instance(id)
-		if !ok {
-			continue
-		}
-		snapshots = append(snapshots, snapshot)
-	}
-	return snapshots
-}
-
-// Restore replaces the current manifest and running instances with the supplied snapshot.
-func (m *Manager) Restore(ctx context.Context, manifest config.LambdaManifest, running map[string]bool) error {
-	if err := manifest.Validate(); err != nil {
-		return fmt.Errorf("validate manifest: %w", err)
-	}
-
-	summaries := m.Instances()
-	for _, summary := range summaries {
-		if err := m.Remove(summary.ID); err != nil && !errors.Is(err, ErrInstanceNotFound) {
-			return err
-		}
-	}
-
-	specs := make([]config.LambdaSpec, len(manifest.Lambdas))
-	copy(specs, manifest.Lambdas)
-	sort.Slice(specs, func(i, j int) bool { return specs[i].ID < specs[j].ID })
-
-	for _, spec := range specs {
-		sanitized := sanitizeSpec(spec)
-		if err := m.ensureSpec(sanitized, false); err != nil {
-			return err
-		}
-		shouldRun := sanitized.AutoStart
-		if running != nil {
-			normalizedID := strings.ToLower(strings.TrimSpace(sanitized.ID))
-			if run, ok := running[normalizedID]; ok {
-				shouldRun = run
-			}
-		}
-		if shouldRun {
-			if _, _, _, err := m.launch(ctx, sanitized, true); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func summaryOf(spec config.LambdaSpec, running bool) InstanceSummary {

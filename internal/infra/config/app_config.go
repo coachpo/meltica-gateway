@@ -3,7 +3,6 @@ package config
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,21 +11,13 @@ import (
 	"strconv"
 	"strings"
 
-	json "github.com/goccy/go-json"
 	"gopkg.in/yaml.v3"
 )
 
 // EventbusConfig sets in-memory event bus sizing characteristics.
 type EventbusConfig struct {
-	BufferSize    int                 `yaml:"buffer_size" json:"bufferSize"`
-	FanoutWorkers FanoutWorkerSetting `yaml:"fanout_workers" json:"fanoutWorkers"`
-}
-
-// MetaConfig captures descriptive metadata for the configuration bundle.
-type MetaConfig struct {
-	Name        string `yaml:"name" json:"name"`
-	Version     string `yaml:"version" json:"version"`
-	Description string `yaml:"description" json:"description"`
+	BufferSize    int                 `yaml:"bufferSize"`
+	FanoutWorkers FanoutWorkerSetting `yaml:"fanoutWorkers"`
 }
 
 type fanoutWorkerKind int
@@ -83,67 +74,6 @@ func (s *FanoutWorkerSetting) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// MarshalJSON renders the fanout worker setting into JSON preserving symbolic values.
-func (s FanoutWorkerSetting) MarshalJSON() ([]byte, error) {
-	var value any
-	switch s.kind {
-	case fanoutWorkerExplicit:
-		value = s.value
-	case fanoutWorkerAuto:
-		value = "auto"
-	case fanoutWorkerDefault, fanoutWorkerUnset:
-		value = "default"
-	default:
-		value = "default"
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("fanoutWorkers: marshal: %w", err)
-	}
-	return data, nil
-}
-
-// UnmarshalJSON accepts integer, "auto", and "default" values for fanout workers.
-func (s *FanoutWorkerSetting) UnmarshalJSON(data []byte) error {
-	var text string
-	if err := json.Unmarshal(data, &text); err == nil {
-		trimmed := strings.TrimSpace(text)
-		if trimmed == "" {
-			*s = FanoutWorkerSetting{kind: fanoutWorkerUnset, value: 0}
-			return nil
-		}
-		switch strings.ToLower(trimmed) {
-		case "auto":
-			*s = FanoutWorkerSetting{kind: fanoutWorkerAuto, value: 0}
-			return nil
-		case "default":
-			*s = FanoutWorkerSetting{kind: fanoutWorkerDefault, value: 0}
-			return nil
-		}
-
-		val, err := strconv.Atoi(trimmed)
-		if err != nil {
-			return fmt.Errorf("fanoutWorkers: invalid value %q", text)
-		}
-		if val <= 0 {
-			return fmt.Errorf("fanoutWorkers: numeric value must be > 0")
-		}
-		*s = FanoutWorkerSetting{kind: fanoutWorkerExplicit, value: val}
-		return nil
-	}
-
-	var numeric int
-	if err := json.Unmarshal(data, &numeric); err == nil {
-		if numeric <= 0 {
-			return fmt.Errorf("fanoutWorkers: numeric value must be > 0")
-		}
-		*s = FanoutWorkerSetting{kind: fanoutWorkerExplicit, value: numeric}
-		return nil
-	}
-
-	return fmt.Errorf("fanoutWorkers: invalid json value")
-}
-
 // resolve returns the effective worker count derived from the setting.
 func (s FanoutWorkerSetting) resolve() int {
 	switch s.kind {
@@ -168,14 +98,14 @@ func (c EventbusConfig) FanoutWorkerCount() int {
 
 // ObjectPoolConfig describes sizing for a single named pool.
 type ObjectPoolConfig struct {
-	Size          int `yaml:"size" json:"size"`
-	WaitQueueSize int `yaml:"wait_queue_size" json:"waitQueueSize"`
+	Size          int `yaml:"size"`
+	WaitQueueSize int `yaml:"waitQueueSize"`
 }
 
 // PoolConfig controls pooled object capacities.
 type PoolConfig struct {
-	Event        ObjectPoolConfig `yaml:"event" json:"event"`
-	OrderRequest ObjectPoolConfig `yaml:"order_request" json:"orderRequest"`
+	Event        ObjectPoolConfig `yaml:"event"`
+	OrderRequest ObjectPoolConfig `yaml:"orderRequest"`
 }
 
 // QueueSize returns the effective pending borrower queue size, defaulting to Size.
@@ -188,118 +118,51 @@ func (c ObjectPoolConfig) QueueSize() int {
 
 // APIServerConfig configures the gateway's HTTP control surface.
 type APIServerConfig struct {
-	Addr string `yaml:"addr" json:"addr"`
+	Addr string `yaml:"addr"`
 }
 
 // RiskConfig defines risk parameters for a single strategy.
 
 // CircuitBreakerConfig describes cascading halt behaviour for repeated risk breaches.
 type CircuitBreakerConfig struct {
-	Enabled   bool   `yaml:"enabled" json:"enabled"`
-	Threshold int    `yaml:"threshold" json:"threshold"`
-	Cooldown  string `yaml:"cooldown" json:"cooldown"`
+	Enabled   bool   `yaml:"enabled"`
+	Threshold int    `yaml:"threshold"`
+	Cooldown  string `yaml:"cooldown"`
 }
 
 // RiskConfig defines risk parameters for a single strategy.
 type RiskConfig struct {
-	MaxPositionSize     string               `yaml:"max_position_size" json:"maxPositionSize"`
-	MaxNotionalValue    string               `yaml:"max_notional_value" json:"maxNotionalValue"`
-	NotionalCurrency    string               `yaml:"notional_currency" json:"notionalCurrency"`
-	OrderThrottle       float64              `yaml:"order_throttle" json:"orderThrottle"`
-	OrderBurst          int                  `yaml:"order_burst" json:"orderBurst"`
-	MaxConcurrentOrders int                  `yaml:"max_concurrent_orders" json:"maxConcurrentOrders"`
-	PriceBandPercent    float64              `yaml:"price_band_percent" json:"priceBandPercent"`
-	AllowedOrderTypes   []string             `yaml:"allowed_order_types" json:"allowedOrderTypes"`
-	KillSwitchEnabled   bool                 `yaml:"kill_switch_enabled" json:"killSwitchEnabled"`
-	MaxRiskBreaches     int                  `yaml:"max_risk_breaches" json:"maxRiskBreaches"`
-	CircuitBreaker      CircuitBreakerConfig `yaml:"circuit_breaker" json:"circuitBreaker"`
-	presence            riskConfigPresence
-}
-
-type riskConfigPresence struct {
-	MaxPositionSize         bool
-	MaxNotionalValue        bool
-	NotionalCurrency        bool
-	OrderThrottle           bool
-	OrderBurst              bool
-	MaxConcurrentOrders     bool
-	PriceBandPercent        bool
-	AllowedOrderTypes       bool
-	KillSwitchEnabled       bool
-	MaxRiskBreaches         bool
-	CircuitBreakerEnabled   bool
-	CircuitBreakerThreshold bool
-	CircuitBreakerCooldown  bool
-}
-
-func (c *RiskConfig) UnmarshalYAML(node *yaml.Node) error {
-	if node == nil {
-		*c = RiskConfig{}
-		return nil
-	}
-	type riskConfigAlias RiskConfig
-	var alias riskConfigAlias
-	if err := node.Decode(&alias); err != nil {
-		return fmt.Errorf("decode risk config: %w", err)
-	}
-	cfg := RiskConfig(alias)
-	cfg.presence = detectRiskPresenceYAML(node)
-	*c = cfg
-	return nil
-}
-
-func (c *RiskConfig) UnmarshalJSON(data []byte) error {
-	if len(data) == 0 || string(data) == "null" {
-		*c = RiskConfig{}
-		return nil
-	}
-	type riskConfigAlias RiskConfig
-	var alias riskConfigAlias
-	if err := json.Unmarshal(data, &alias); err != nil {
-		return err
-	}
-	cfg := RiskConfig(alias)
-	cfg.presence = detectRiskPresenceJSON(data)
-	*c = cfg
-	return nil
-}
-
-func (c *RiskConfig) MarkAllFieldsSet() {
-	if c == nil {
-		return
-	}
-	c.presence = riskConfigPresence{
-		MaxPositionSize:         true,
-		MaxNotionalValue:        true,
-		NotionalCurrency:        true,
-		OrderThrottle:           true,
-		OrderBurst:              true,
-		MaxConcurrentOrders:     true,
-		PriceBandPercent:        true,
-		AllowedOrderTypes:       true,
-		KillSwitchEnabled:       true,
-		MaxRiskBreaches:         true,
-		CircuitBreakerEnabled:   true,
-		CircuitBreakerThreshold: true,
-		CircuitBreakerCooldown:  true,
-	}
+	MaxPositionSize     string               `yaml:"maxPositionSize"`
+	MaxNotionalValue    string               `yaml:"maxNotionalValue"`
+	NotionalCurrency    string               `yaml:"notionalCurrency"`
+	OrderThrottle       float64              `yaml:"orderThrottle"`
+	OrderBurst          int                  `yaml:"orderBurst"`
+	MaxConcurrentOrders int                  `yaml:"maxConcurrentOrders"`
+	PriceBandPercent    float64              `yaml:"priceBandPercent"`
+	AllowedOrderTypes   []string             `yaml:"allowedOrderTypes"`
+	KillSwitchEnabled   bool                 `yaml:"killSwitchEnabled"`
+	MaxRiskBreaches     int                  `yaml:"maxRiskBreaches"`
+	CircuitBreaker      CircuitBreakerConfig `yaml:"circuitBreaker"`
 }
 
 // TelemetryConfig configures OTLP exporters (metrics only).
 type TelemetryConfig struct {
-	OTLPEndpoint  string `yaml:"otlp_endpoint" json:"otlpEndpoint"`
-	ServiceName   string `yaml:"service_name" json:"serviceName"`
-	OTLPInsecure  bool   `yaml:"otlp_insecure" json:"otlpInsecure"`
-	EnableMetrics bool   `yaml:"enable_metrics" json:"enableMetrics"`
+	OTLPEndpoint  string `yaml:"otlpEndpoint"`
+	ServiceName   string `yaml:"serviceName"`
+	OTLPInsecure  bool   `yaml:"otlpInsecure"`
+	EnableMetrics bool   `yaml:"enableMetrics"`
 }
 
 // AppConfig is the unified Meltica application configuration sourced from YAML.
 type AppConfig struct {
-	Environment    Environment                 `yaml:"environment" json:"environment"`
-	Meta           MetaConfig                  `yaml:"meta" json:"meta"`
-	Runtime        RuntimeConfig               `yaml:"runtime" json:"runtime"`
-	Providers      map[Provider]map[string]any `yaml:"providers" json:"providers"`
-	LambdaManifest LambdaManifest              `yaml:"lambda_manifest" json:"lambdaManifest"`
+	Environment    Environment                 `yaml:"environment"`
+	Providers      map[Provider]map[string]any `yaml:"providers"`
+	Eventbus       EventbusConfig              `yaml:"eventbus"`
+	Pools          PoolConfig                  `yaml:"pools"`
+	Risk           RiskConfig                  `yaml:"risk"`
+	APIServer      APIServerConfig             `yaml:"apiServer"`
+	Telemetry      TelemetryConfig             `yaml:"telemetry"`
+	LambdaManifest LambdaManifest              `yaml:"lambdaManifest"`
 }
 
 // Load reads and validates an AppConfig from the provided YAML file.
@@ -345,11 +208,22 @@ func (c *AppConfig) normalise() error {
 	c.Providers = normalised
 
 	c.Environment = Environment(strings.ToLower(strings.TrimSpace(string(c.Environment))))
-	c.Meta.Name = strings.TrimSpace(c.Meta.Name)
-	c.Meta.Version = strings.TrimSpace(c.Meta.Version)
-	c.Meta.Description = strings.TrimSpace(c.Meta.Description)
+	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
+	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
+	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
 
-	c.Runtime.Normalise()
+	if c.Risk.OrderBurst <= 0 {
+		c.Risk.OrderBurst = 1
+	}
+	if c.Risk.MaxRiskBreaches < 0 {
+		c.Risk.MaxRiskBreaches = 0
+	}
+	if c.Risk.CircuitBreaker.Threshold < 0 {
+		c.Risk.CircuitBreaker.Threshold = 0
+	}
+	for i, ot := range c.Risk.AllowedOrderTypes {
+		c.Risk.AllowedOrderTypes[i] = strings.TrimSpace(ot)
+	}
 	return nil
 }
 
@@ -360,10 +234,69 @@ func (c AppConfig) Validate() error {
 	default:
 		return fmt.Errorf("environment must be one of dev, staging, prod")
 	}
-
-	if err := c.Runtime.Validate(); err != nil {
-		return fmt.Errorf("runtime: %w", err)
+	if len(c.Providers) == 0 {
+		return fmt.Errorf("at least one provider must be configured")
 	}
+
+	if c.Eventbus.BufferSize <= 0 {
+		return fmt.Errorf("eventbus bufferSize must be >0")
+	}
+	if c.Eventbus.FanoutWorkerCount() <= 0 {
+		return fmt.Errorf("eventbus fanoutWorkers must be >0")
+	}
+
+	if c.Pools.Event.Size <= 0 {
+		return fmt.Errorf("pools.event.size must be >0")
+	}
+	if c.Pools.Event.WaitQueueSize < 0 {
+		return fmt.Errorf("pools.event.waitQueueSize must be >=0")
+	}
+	if c.Pools.OrderRequest.Size <= 0 {
+		return fmt.Errorf("pools.orderRequest.size must be >0")
+	}
+	if c.Pools.OrderRequest.WaitQueueSize < 0 {
+		return fmt.Errorf("pools.orderRequest.waitQueueSize must be >=0")
+	}
+
+	if strings.TrimSpace(c.APIServer.Addr) == "" {
+		return fmt.Errorf("apiServer addr required")
+	}
+
+	if c.Risk.MaxPositionSize == "" {
+		return fmt.Errorf("risk maxPositionSize required")
+	}
+	if c.Risk.MaxNotionalValue == "" {
+		return fmt.Errorf("risk maxNotionalValue required")
+	}
+	if c.Risk.NotionalCurrency == "" {
+		return fmt.Errorf("risk notionalCurrency required")
+	}
+	if c.Risk.OrderThrottle <= 0 {
+		return fmt.Errorf("risk orderThrottle must be > 0")
+	}
+	if c.Risk.OrderBurst <= 0 {
+		return fmt.Errorf("risk orderBurst must be > 0")
+	}
+	if c.Risk.MaxConcurrentOrders < 0 {
+		return fmt.Errorf("risk maxConcurrentOrders must be >= 0")
+	}
+	if c.Risk.PriceBandPercent < 0 {
+		return fmt.Errorf("risk priceBandPercent must be >= 0")
+	}
+	if c.Risk.MaxRiskBreaches < 0 {
+		return fmt.Errorf("risk maxRiskBreaches must be >= 0")
+	}
+	if c.Risk.CircuitBreaker.Threshold < 0 {
+		return fmt.Errorf("risk circuitBreaker threshold must be >= 0")
+	}
+	if c.Risk.CircuitBreaker.Enabled && strings.TrimSpace(c.Risk.CircuitBreaker.Cooldown) == "" {
+		return fmt.Errorf("risk circuitBreaker cooldown required when enabled")
+	}
+
+	if strings.TrimSpace(c.Telemetry.ServiceName) == "" {
+		return fmt.Errorf("telemetry serviceName required")
+	}
+
 	if err := c.LambdaManifest.Validate(); err != nil {
 		return fmt.Errorf("lambda manifest: %w", err)
 	}
@@ -380,258 +313,4 @@ func openConfigFile(path string) (io.Reader, func(), error) {
 		return nil, nil, fmt.Errorf("open app config: %w", err)
 	}
 	return file, func() { _ = file.Close() }, nil
-}
-
-// DefaultAppConfig returns the baseline application configuration used when no file is supplied.
-func DefaultAppConfig() AppConfig {
-	return AppConfig{
-		Environment: EnvDev,
-		Meta: MetaConfig{
-			Name:        "",
-			Version:     "",
-			Description: "",
-		},
-		Runtime:   DefaultRuntimeConfig(),
-		Providers: nil,
-		LambdaManifest: LambdaManifest{
-			Lambdas: nil,
-		},
-	}
-}
-
-// Clone returns a deep copy of the application configuration.
-func (c AppConfig) Clone() AppConfig {
-	clone := AppConfig{
-		Environment: c.Environment,
-		Meta: MetaConfig{
-			Name:        c.Meta.Name,
-			Version:     c.Meta.Version,
-			Description: c.Meta.Description,
-		},
-		Runtime:        c.Runtime.Clone(),
-		Providers:      nil,
-		LambdaManifest: LambdaManifest{Lambdas: nil},
-	}
-
-	if len(c.Providers) > 0 {
-		providers := make(map[Provider]map[string]any, len(c.Providers))
-		for name, cfg := range c.Providers {
-			if len(cfg) == 0 {
-				providers[name] = nil
-				continue
-			}
-			providerCfg := make(map[string]any, len(cfg))
-			for key, value := range cfg {
-				providerCfg[key] = cloneAny(value)
-			}
-			providers[name] = providerCfg
-		}
-		clone.Providers = providers
-	}
-
-	clone.LambdaManifest = c.LambdaManifest.Clone()
-	return clone
-}
-
-// LoadOrDefault attempts to load the configuration file, returning defaults when the file is absent.
-func LoadOrDefault(ctx context.Context, configPath string) (AppConfig, bool, error) {
-	cfg, err := Load(ctx, configPath)
-	if err == nil {
-		return cfg, true, nil
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		def := DefaultAppConfig()
-		if err := def.normalise(); err != nil {
-			return AppConfig{}, false, err
-		}
-		if err := def.Validate(); err != nil {
-			return AppConfig{}, false, err
-		}
-		return def, false, nil
-	}
-	return AppConfig{}, false, err
-}
-
-// SaveAppConfig persists the supplied configuration to disk using an atomic write strategy.
-func SaveAppConfig(path string, cfg AppConfig) error {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return fmt.Errorf("config path required")
-	}
-
-	clone := cfg.Clone()
-	if err := clone.normalise(); err != nil {
-		return err
-	}
-	if err := clone.Validate(); err != nil {
-		return err
-	}
-
-	encoded, err := yaml.Marshal(clone)
-	if err != nil {
-		return fmt.Errorf("encode app config: %w", err)
-	}
-
-	dir := filepath.Dir(trimmed)
-	if dir == "" {
-		dir = "."
-	}
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
-	}
-
-	tmp, err := os.CreateTemp(dir, "app-config-*.yaml")
-	if err != nil {
-		return fmt.Errorf("create temp app config: %w", err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(encoded); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("write app config: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("sync app config: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("close app config: %w", err)
-	}
-	if err := os.Rename(tmpPath, trimmed); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("replace app config: %w", err)
-	}
-	return nil
-}
-
-func cloneAny(value any) any {
-	switch v := value.(type) {
-	case map[string]any:
-		if v == nil {
-			return map[string]any(nil)
-		}
-		clone := make(map[string]any, len(v))
-		for key, val := range v {
-			clone[key] = cloneAny(val)
-		}
-		return clone
-	case []any:
-		if v == nil {
-			return []any(nil)
-		}
-		clone := make([]any, len(v))
-		for i, item := range v {
-			clone[i] = cloneAny(item)
-		}
-		return clone
-	case []string:
-		return append([]string(nil), v...)
-	default:
-		return v
-	}
-}
-
-func detectRiskPresenceYAML(node *yaml.Node) riskConfigPresence {
-	var presence riskConfigPresence
-	if node == nil || node.Kind != yaml.MappingNode {
-		return presence
-	}
-	for i := 0; i < len(node.Content)-1; i += 2 {
-		keyNode := node.Content[i]
-		valueNode := node.Content[i+1]
-		key := normalizeRiskKey(keyNode.Value)
-		switch key {
-		case "maxpositionsize":
-			presence.MaxPositionSize = true
-		case "maxnotionalvalue":
-			presence.MaxNotionalValue = true
-		case "notionalcurrency":
-			presence.NotionalCurrency = true
-		case "orderthrottle":
-			presence.OrderThrottle = true
-		case "orderburst":
-			presence.OrderBurst = true
-		case "maxconcurrentorders":
-			presence.MaxConcurrentOrders = true
-		case "pricebandpercent":
-			presence.PriceBandPercent = true
-		case "allowedordertypes":
-			presence.AllowedOrderTypes = true
-		case "killswitchenabled":
-			presence.KillSwitchEnabled = true
-		case "maxriskbreaches":
-			presence.MaxRiskBreaches = true
-		case "circuitbreaker":
-			if valueNode.Kind == yaml.MappingNode {
-				for j := 0; j < len(valueNode.Content)-1; j += 2 {
-					subKey := normalizeRiskKey(valueNode.Content[j].Value)
-					switch subKey {
-					case "enabled":
-						presence.CircuitBreakerEnabled = true
-					case "threshold":
-						presence.CircuitBreakerThreshold = true
-					case "cooldown":
-						presence.CircuitBreakerCooldown = true
-					}
-				}
-			}
-		}
-	}
-	return presence
-}
-
-func detectRiskPresenceJSON(data []byte) riskConfigPresence {
-	var presence riskConfigPresence
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return presence
-	}
-	for key, raw := range payload {
-		normalized := normalizeRiskKey(key)
-		switch normalized {
-		case "maxpositionsize":
-			presence.MaxPositionSize = true
-		case "maxnotionalvalue":
-			presence.MaxNotionalValue = true
-		case "notionalcurrency":
-			presence.NotionalCurrency = true
-		case "orderthrottle":
-			presence.OrderThrottle = true
-		case "orderburst":
-			presence.OrderBurst = true
-		case "maxconcurrentorders":
-			presence.MaxConcurrentOrders = true
-		case "pricebandpercent":
-			presence.PriceBandPercent = true
-		case "allowedordertypes":
-			presence.AllowedOrderTypes = true
-		case "killswitchenabled":
-			presence.KillSwitchEnabled = true
-		case "maxriskbreaches":
-			presence.MaxRiskBreaches = true
-		case "circuitbreaker":
-			var circuit map[string]json.RawMessage
-			if err := json.Unmarshal(raw, &circuit); err != nil {
-				continue
-			}
-			for subKey := range circuit {
-				switch normalizeRiskKey(subKey) {
-				case "enabled":
-					presence.CircuitBreakerEnabled = true
-				case "threshold":
-					presence.CircuitBreakerThreshold = true
-				case "cooldown":
-					presence.CircuitBreakerCooldown = true
-				}
-			}
-		}
-	}
-	return presence
-}
-
-func normalizeRiskKey(key string) string {
-	replaced := strings.ReplaceAll(strings.TrimSpace(key), "_", "")
-	return strings.ToLower(replaced)
 }
