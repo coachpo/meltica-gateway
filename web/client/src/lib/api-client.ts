@@ -83,6 +83,184 @@ const normaliseRuntimeConfigSnapshot = (payload: unknown): RuntimeConfigSnapshot
   };
 };
 
+type PartialRiskConfigResponse = Partial<Omit<RiskConfig, 'circuitBreaker'>> & {
+  circuitBreaker?: Partial<RiskConfig['circuitBreaker']>;
+};
+
+const pickValue = (source: Record<string, unknown>, keys: string[]): unknown => {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      return source[key];
+    }
+  }
+  return undefined;
+};
+
+const toStringValue = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const stringified = String(value).trim();
+  return stringified ? stringified : undefined;
+};
+
+const toNumberValue = (value: unknown): number | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const candidate = typeof value === 'number' ? value : Number(String(value).trim());
+  return Number.isFinite(candidate) ? candidate : undefined;
+};
+
+const toBooleanValue = (value: unknown): boolean | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  if (typeof value === 'string') {
+    const normalised = value.trim().toLowerCase();
+    if (!normalised) {
+      return undefined;
+    }
+    if (['true', '1', 'yes', 'on', 'enabled'].includes(normalised)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'off', 'disabled'].includes(normalised)) {
+      return false;
+    }
+  }
+  return undefined;
+};
+
+const toStringArray = (value: unknown): string[] | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    const items = value
+      .map((entry) => String(entry).trim())
+      .filter((entry) => entry.length > 0);
+    return items.length > 0 ? items : undefined;
+  }
+  if (typeof value === 'string') {
+    const items = value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+    return items.length > 0 ? items : undefined;
+  }
+  return undefined;
+};
+
+const normaliseRiskLimitsResponse = (payload: unknown): PartialRiskConfigResponse => {
+  const source =
+    payload && typeof payload === 'object'
+      ? (payload as Record<string, unknown>)
+      : {};
+
+  const result: PartialRiskConfigResponse = {};
+
+  const maxPositionSize = toStringValue(pickValue(source, ['maxPositionSize', 'MaxPositionSize']));
+  if (maxPositionSize !== undefined) {
+    result.maxPositionSize = maxPositionSize;
+  }
+
+  const maxNotionalValue = toStringValue(pickValue(source, ['maxNotionalValue', 'MaxNotionalValue']));
+  if (maxNotionalValue !== undefined) {
+    result.maxNotionalValue = maxNotionalValue;
+  }
+
+  const notionalCurrency = toStringValue(pickValue(source, ['notionalCurrency', 'NotionalCurrency']));
+  if (notionalCurrency !== undefined) {
+    result.notionalCurrency = notionalCurrency;
+  }
+
+  const orderThrottle = toNumberValue(pickValue(source, ['orderThrottle', 'OrderThrottle']));
+  if (orderThrottle !== undefined) {
+    result.orderThrottle = orderThrottle;
+  }
+
+  const orderBurst = toNumberValue(pickValue(source, ['orderBurst', 'OrderBurst']));
+  if (orderBurst !== undefined) {
+    result.orderBurst = orderBurst;
+  }
+
+  const maxConcurrentOrders = toNumberValue(pickValue(source, ['maxConcurrentOrders', 'MaxConcurrentOrders']));
+  if (maxConcurrentOrders !== undefined) {
+    result.maxConcurrentOrders = maxConcurrentOrders;
+  }
+
+  const priceBandPercent = toNumberValue(pickValue(source, ['priceBandPercent', 'PriceBandPercent']));
+  if (priceBandPercent !== undefined) {
+    result.priceBandPercent = priceBandPercent;
+  }
+
+  const allowedOrderTypes = toStringArray(pickValue(source, ['allowedOrderTypes', 'AllowedOrderTypes']));
+  if (allowedOrderTypes !== undefined) {
+    result.allowedOrderTypes = allowedOrderTypes;
+  }
+
+  const killSwitchEnabled = toBooleanValue(pickValue(source, ['killSwitchEnabled', 'KillSwitchEnabled']));
+  if (killSwitchEnabled !== undefined) {
+    result.killSwitchEnabled = killSwitchEnabled;
+  }
+
+  const maxRiskBreaches = toNumberValue(pickValue(source, ['maxRiskBreaches', 'MaxRiskBreaches']));
+  if (maxRiskBreaches !== undefined) {
+    result.maxRiskBreaches = maxRiskBreaches;
+  }
+
+  const circuitRaw = pickValue(source, ['circuitBreaker', 'CircuitBreaker']);
+  if (circuitRaw && typeof circuitRaw === 'object') {
+    const circuitSource = circuitRaw as Record<string, unknown>;
+    const circuit: Partial<RiskConfig['circuitBreaker']> = {};
+
+    const enabled = toBooleanValue(pickValue(circuitSource, ['enabled', 'Enabled']));
+    if (enabled !== undefined) {
+      circuit.enabled = enabled;
+    }
+
+    const threshold = toNumberValue(pickValue(circuitSource, ['threshold', 'Threshold']));
+    if (threshold !== undefined) {
+      circuit.threshold = threshold;
+    }
+
+    const cooldown = toStringValue(pickValue(circuitSource, ['cooldown', 'Cooldown']));
+    if (cooldown !== undefined) {
+      circuit.cooldown = cooldown;
+    }
+
+    if (Object.keys(circuit).length > 0) {
+      result.circuitBreaker = circuit;
+    }
+  }
+
+  return result;
+};
+
+const serialiseRiskLimitsPayload = (config: RiskConfig): Record<string, unknown> => ({
+  MaxPositionSize: config.maxPositionSize,
+  MaxNotionalValue: config.maxNotionalValue,
+  NotionalCurrency: config.notionalCurrency,
+  OrderThrottle: config.orderThrottle,
+  OrderBurst: config.orderBurst,
+  MaxConcurrentOrders: config.maxConcurrentOrders,
+  PriceBandPercent: config.priceBandPercent,
+  AllowedOrderTypes: config.allowedOrderTypes,
+  KillSwitchEnabled: config.killSwitchEnabled,
+  MaxRiskBreaches: config.maxRiskBreaches,
+  CircuitBreaker: {
+    Enabled: config.circuitBreaker?.enabled ?? false,
+    Threshold: config.circuitBreaker?.threshold ?? 0,
+    Cooldown: config.circuitBreaker?.cooldown ?? '',
+  },
+});
+
 class ApiClient {
   private async request<T>(
     endpoint: string,
@@ -224,17 +402,31 @@ class ApiClient {
   }
 
   // Risk Limits
-  async getRiskLimits(): Promise<{ limits: RiskConfig }> {
-    return this.request('/risk/limits');
+  async getRiskLimits(): Promise<{ status?: string; limits: PartialRiskConfigResponse }> {
+    const payload = await this.request<Record<string, unknown>>('/risk/limits');
+    const rawLimits =
+      payload && typeof payload === 'object' && Object.prototype.hasOwnProperty.call(payload, 'limits')
+        ? (payload.limits as unknown)
+        : payload;
+    const status = typeof payload.status === 'string' ? payload.status : undefined;
+    const limits = normaliseRiskLimitsResponse(rawLimits);
+    return status ? { status, limits } : { limits };
   }
 
   async updateRiskLimits(
     config: RiskConfig
-  ): Promise<{ status: string; limits: RiskConfig }> {
-    return this.request('/risk/limits', {
+  ): Promise<{ status?: string; limits: PartialRiskConfigResponse }> {
+    const payload = await this.request<Record<string, unknown>>('/risk/limits', {
       method: 'PUT',
-      body: JSON.stringify(config),
+      body: JSON.stringify(serialiseRiskLimitsPayload(config)),
     });
+    const rawLimits =
+      payload && typeof payload === 'object' && Object.prototype.hasOwnProperty.call(payload, 'limits')
+        ? (payload.limits as unknown)
+        : payload;
+    const status = typeof payload.status === 'string' ? payload.status : undefined;
+    const limits = normaliseRiskLimitsResponse(rawLimits);
+    return status ? { status, limits } : { limits };
   }
 
   async getRuntimeConfig(): Promise<RuntimeConfigSnapshot> {

@@ -285,7 +285,28 @@ func (m *Manager) RiskLimits() risk.Limits {
 func (m *Manager) UpdateRiskLimits(limits risk.Limits) {
 	m.riskManager.UpdateLimits(limits)
 	if m.logger != nil {
-		m.logger.Printf("risk limits updated: throttle=%.2f, burst=%d", limits.OrderThrottle, limits.OrderBurst)
+		allowed := "none"
+		if len(limits.AllowedOrderTypes) > 0 {
+			names := make([]string, 0, len(limits.AllowedOrderTypes))
+			for _, ot := range limits.AllowedOrderTypes {
+				names = append(names, string(ot))
+			}
+			allowed = strings.Join(names, ",")
+		}
+		m.logger.Printf(
+			"risk limits applied: throttle=%.2f burst=%d maxPosition=%s maxNotional=%s concurrent=%d killSwitch=%t priceBand=%.2f allowedTypes=%s circuitBreaker(enabled=%t threshold=%d cooldown=%s)",
+			limits.OrderThrottle,
+			limits.OrderBurst,
+			limits.MaxPositionSize.String(),
+			limits.MaxNotionalValue.String(),
+			limits.MaxConcurrentOrders,
+			limits.KillSwitchEnabled,
+			limits.PriceBandPercent,
+			allowed,
+			limits.CircuitBreaker.Enabled,
+			limits.CircuitBreaker.Threshold,
+			limits.CircuitBreaker.Cooldown,
+		)
 	}
 }
 

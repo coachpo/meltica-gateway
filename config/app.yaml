@@ -25,17 +25,3 @@ telemetry:
   serviceName: meltica-gateway
   otlpInsecure: true
   enableMetrics: true
-# lambdaManifest: inline lambda definitions that will be materialised at startup
-# lambdaManifest:
-# lambdas:
-# - id: latency-probe-btc
-#   scope:
-#     binance-spot:
-#       symbols:
-#         - BTC-USDT
-#   strategy:
-#     identifier: logging
-#     config:
-#       dry_run: true
-#       logger_prefix: "[LatencyProbe] "
-#   auto_start: true

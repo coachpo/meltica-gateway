@@ -66,7 +66,7 @@ const computePresence = (config?: Partial<RiskConfig> | null): RiskPresence => {
 };
 
 export default function RiskPage() {
-  const normalizeRiskConfig = (config?: RiskConfig | null): RiskConfig => ({
+  const normalizeRiskConfig = (config?: Partial<RiskConfig> | null): RiskConfig => ({
     maxPositionSize: config?.maxPositionSize ?? '',
     maxNotionalValue: config?.maxNotionalValue ?? '',
     notionalCurrency: config?.notionalCurrency ?? '',
