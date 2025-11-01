@@ -602,8 +602,9 @@ func buildProviderSpecFromPayload(payload providerPayload) (config.ProviderSpec,
 	adapterConfig := map[string]any{
 		"identifier": identifier,
 	}
-	if len(payload.Adapter.Config) > 0 {
-		adapterConfig["config"] = payload.Adapter.Config
+	cleanConfig := sanitizeAdapterConfig(payload.Adapter.Config)
+	if len(cleanConfig) > 0 {
+		adapterConfig["config"] = cleanConfig
 	}
 
 	specs, err := config.BuildProviderSpecs(map[config.Provider]map[string]any{
@@ -618,6 +619,68 @@ func buildProviderSpecFromPayload(payload providerPayload) (config.ProviderSpec,
 		return config.ProviderSpec{}, false, fmt.Errorf("provider spec not generated")
 	}
 	return specs[0], enabled, nil
+}
+
+func sanitizeAdapterConfig(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	clean := make(map[string]any, len(input))
+	for key, value := range input {
+		if key == "" {
+			continue
+		}
+		if sanitized, ok := sanitizeConfigValue(value); ok {
+			clean[key] = sanitized
+		}
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	return clean
+}
+
+func sanitizeConfigValue(value any) (any, bool) {
+	switch v := value.(type) {
+	case nil:
+		return nil, false
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return nil, false
+		}
+		return trimmed, true
+	case []any:
+		clean, ok := sanitizeConfigSlice(v)
+		if !ok {
+			return nil, false
+		}
+		return clean, true
+	case map[string]any:
+		clean := sanitizeAdapterConfig(v)
+		if len(clean) == 0 {
+			return nil, false
+		}
+		return clean, true
+	default:
+		return v, true
+	}
+}
+
+func sanitizeConfigSlice(values []any) ([]any, bool) {
+	if len(values) == 0 {
+		return nil, false
+	}
+	clean := make([]any, 0, len(values))
+	for _, elem := range values {
+		if sanitized, ok := sanitizeConfigValue(elem); ok {
+			clean = append(clean, sanitized)
+		}
+	}
+	if len(clean) == 0 {
+		return nil, false
+	}
+	return clean, true
 }
 
 func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {

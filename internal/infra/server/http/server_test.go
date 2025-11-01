@@ -259,6 +259,90 @@ func TestApplyContextBackupRestoresState(t *testing.T) {
 	}
 }
 
+func TestBuildProviderSpecFromPayload_SanitizesEmptyConfig(t *testing.T) {
+	payload := providerPayload{
+		Name: "binance-ui-test",
+		Adapter: providerAdapterPayload{
+			Identifier: "binance",
+			Config: map[string]any{
+				"api_key":     "",
+				"api_secret":  "   ",
+				"recv_window": "5s",
+				"list":        []any{" first ", " ", "second"},
+				"nested": map[string]any{
+					"alpha": "  ",
+					"beta":  "value",
+				},
+			},
+		},
+	}
+
+	spec, enabled, err := buildProviderSpecFromPayload(payload)
+	if err != nil {
+		t.Fatalf("buildProviderSpecFromPayload returned error: %v", err)
+	}
+	if !enabled {
+		t.Fatalf("expected provider to default to enabled")
+	}
+	if spec.Adapter != "binance" {
+		t.Fatalf("expected adapter binance, got %s", spec.Adapter)
+	}
+
+	cfg, ok := spec.Config["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested config map, got %T", spec.Config["config"])
+	}
+	if _, exists := cfg["api_key"]; exists {
+		t.Fatalf("expected empty api_key to be removed, found %v", cfg["api_key"])
+	}
+	if _, exists := cfg["api_secret"]; exists {
+		t.Fatalf("expected empty api_secret to be removed, found %v", cfg["api_secret"])
+	}
+	if recvWindow, ok := cfg["recv_window"].(string); !ok || recvWindow != "5s" {
+		t.Fatalf("expected recv_window to remain trimmed string, got %#v", cfg["recv_window"])
+	}
+	list, ok := cfg["list"].([]any)
+	if !ok {
+		t.Fatalf("expected list to be []any, got %T", cfg["list"])
+	}
+	if len(list) != 2 || list[0] != "first" || list[1] != "second" {
+		t.Fatalf("expected cleaned list [first second], got %#v", list)
+	}
+	nested, ok := cfg["nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested map, got %T", cfg["nested"])
+	}
+	if _, present := nested["alpha"]; present {
+		t.Fatalf("expected empty nested value to be pruned, nested=%#v", nested)
+	}
+	if nested["beta"] != "value" {
+		t.Fatalf("expected nested beta to be preserved, nested=%#v", nested)
+	}
+}
+
+func TestBuildProviderSpecFromPayload_OmitsEmptyConfig(t *testing.T) {
+	payload := providerPayload{
+		Name: "binance-ui-test",
+		Adapter: providerAdapterPayload{
+			Identifier: "binance",
+			Config: map[string]any{
+				"api_key": "",
+				"nested": map[string]any{
+					"secret": " ",
+				},
+			},
+		},
+	}
+
+	spec, _, err := buildProviderSpecFromPayload(payload)
+	if err != nil {
+		t.Fatalf("buildProviderSpecFromPayload returned error: %v", err)
+	}
+	if _, ok := spec.Config["config"]; ok {
+		t.Fatalf("expected empty config map to be omitted, got %#v", spec.Config["config"])
+	}
+}
+
 type ioDiscards struct{}
 
 func (ioDiscards) Write(p []byte) (int, error) {
