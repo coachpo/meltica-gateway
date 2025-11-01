@@ -179,14 +179,15 @@ func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 	if err != nil {
 		return nil, fmt.Errorf("build provider specs: %w", err)
 	}
-	if _, err := manager.Start(ctx, specs); err != nil {
-		return nil, fmt.Errorf("start providers: %w", err)
-	}
-	if len(manager.Providers()) == 0 {
-		return nil, fmt.Errorf("no providers started from configuration")
+	if len(specs) > 0 {
+		if _, err := manager.Start(ctx, specs); err != nil {
+			return nil, fmt.Errorf("start providers: %w", err)
+		}
+		logger.Printf("providers started: %d", len(manager.Providers()))
+	} else {
+		logger.Printf("no providers configured; skipping provider startup")
 	}
 
-	logger.Printf("providers started: %d", len(manager.Providers()))
 	return manager, nil
 }
 

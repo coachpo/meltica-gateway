@@ -1,0 +1,59 @@
+# environment: deployment environment (dev | staging | prod)
+environment: dev
+
+# eventbus: in-memory event bus sizing
+eventbus:
+  bufferSize: 8192
+  fanoutWorkers: 8
+
+# pools: object pool capacities
+pools:
+  event:
+    size: 8192
+    waitQueueSize: 8192
+  orderRequest:
+    size: 4096
+    waitQueueSize: 4096
+
+risk:
+  maxPositionSize: "250"
+  maxNotionalValue: "50000"
+  notionalCurrency: "USDT"
+  orderThrottle: 5
+  orderBurst: 3
+  maxConcurrentOrders: 6
+  priceBandPercent: 1.0
+  allowedOrderTypes:
+    - Limit
+    - Market
+  killSwitchEnabled: true
+  maxRiskBreaches: 3
+  circuitBreaker:
+    enabled: true
+    threshold: 4
+    cooldown: 90s
+
+# apiServer: control API bind address (host:port or :port)
+apiServer:
+  addr: ":8880"
+
+# telemetry: OTLP exporter configuration
+telemetry:
+  otlpEndpoint: http://capy.lan:4318
+  serviceName: meltica-gateway
+  otlpInsecure: true
+  enableMetrics: true
+# lambdaManifest: inline lambda definitions that will be materialised at startup
+# lambdaManifest:
+# lambdas:
+# - id: latency-probe-btc
+#   scope:
+#     binance-spot:
+#       symbols:
+#         - BTC-USDT
+#   strategy:
+#     identifier: logging
+#     config:
+#       dry_run: true
+#       logger_prefix: "[LatencyProbe] "
+#   auto_start: true

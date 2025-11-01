@@ -64,9 +64,21 @@ func TestBuildProviderSpecs(t *testing.T) {
 }
 
 func TestBuildProviderSpecsErrors(t *testing.T) {
-	t.Run("missing providers", func(t *testing.T) {
-		if _, err := BuildProviderSpecs(nil); err == nil {
-			t.Fatal("expected error for nil providers")
+	t.Run("empty providers returns empty slice", func(t *testing.T) {
+		specs, err := BuildProviderSpecs(nil)
+		if err != nil {
+			t.Fatalf("unexpected error for nil providers: %v", err)
+		}
+		if len(specs) != 0 {
+			t.Fatalf("expected zero specs for nil providers, got %d", len(specs))
+		}
+
+		specs, err = BuildProviderSpecs(map[Provider]map[string]any{})
+		if err != nil {
+			t.Fatalf("unexpected error for empty providers: %v", err)
+		}
+		if len(specs) != 0 {
+			t.Fatalf("expected zero specs for empty providers, got %d", len(specs))
 		}
 	})
 

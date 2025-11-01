@@ -234,9 +234,6 @@ func (c AppConfig) Validate() error {
 	default:
 		return fmt.Errorf("environment must be one of dev, staging, prod")
 	}
-	if len(c.Providers) == 0 {
-		return fmt.Errorf("at least one provider must be configured")
-	}
 
 	if c.Eventbus.BufferSize <= 0 {
 		return fmt.Errorf("eventbus bufferSize must be >0")
