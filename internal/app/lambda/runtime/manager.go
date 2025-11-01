@@ -368,7 +368,7 @@ func (m *Manager) StrategyDetail(name string) (strategies.Metadata, bool) {
 }
 
 // StartFromManifest registers all lambdas defined in the lambda manifest without starting them.
-func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaManifest) error {
+func (m *Manager) StartFromManifest(_ context.Context, manifest config.LambdaManifest) error {
 	for _, definition := range manifest.Lambdas {
 		spec := sanitizeSpec(definition)
 		if err := m.ensureSpec(spec, false); err != nil {
@@ -380,7 +380,7 @@ func (m *Manager) StartFromManifest(ctx context.Context, manifest config.LambdaM
 }
 
 // Create creates a new lambda instance from the specification.
-func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*core.BaseLambda, error) {
+func (m *Manager) Create(_ context.Context, spec config.LambdaSpec) (*core.BaseLambda, error) {
 	spec = sanitizeSpec(spec)
 	if spec.ID == "" || len(spec.Providers) == 0 || spec.Strategy.Identifier == "" {
 		return nil, fmt.Errorf("strategy instance requires id, providers, and strategy")

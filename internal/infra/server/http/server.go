@@ -396,7 +396,7 @@ func (s *httpServer) updateRiskLimits(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "limits": riskConfigFromLimits(limits)})
 }
 
-func (s *httpServer) handleContextBackupExport(w http.ResponseWriter, r *http.Request) {
+func (s *httpServer) handleContextBackupExport(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.buildContextBackup())
 }
 
@@ -417,7 +417,7 @@ func (s *httpServer) handleContextBackupRestore(w http.ResponseWriter, r *http.R
 }
 
 func (s *httpServer) buildContextBackup() contextBackup {
-	result := contextBackup{Risk: config.RiskConfig{}}
+	var result contextBackup
 	if s.manager != nil {
 		result.Risk = riskConfigFromLimits(s.manager.RiskLimits())
 	}
