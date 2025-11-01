@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type {
   AdapterMetadata,
@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
 
 const INSTRUMENTS_PAGE_SIZE = 120;
 
@@ -68,7 +69,7 @@ const defaultFormState: FormState = {
   name: '',
   adapter: '',
   configValues: {},
-  enabled: true,
+  enabled: false,
 };
 
 function valueToString(value: unknown): string {
@@ -159,6 +160,65 @@ function collectConfigPayload(
     config[setting.name] = result.value;
   }
   return { config };
+}
+
+const SENSITIVE_SETTING_FRAGMENTS = [
+  'secret',
+  'passphrase',
+  'apikey',
+  'wsapikey',
+  'wssecret',
+  'privatekey',
+  'privkey',
+  'token',
+  'password',
+  'clientsecret',
+  'accesskey',
+  'access_token',
+];
+
+const SETTING_NORMALIZER = /[-_\s]/g;
+
+function isSensitiveSettingKey(key: string): boolean {
+  const normalized = key.trim().toLowerCase().replace(SETTING_NORMALIZER, '');
+  if (!normalized) {
+    return false;
+  }
+  return SENSITIVE_SETTING_FRAGMENTS.some((fragment) =>
+    normalized.includes(fragment.replace(SETTING_NORMALIZER, '')),
+  );
+}
+
+function maskSettingsValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => maskSettingsValue(entry));
+  }
+  if (value && typeof value === 'object') {
+    return maskProviderSettingsForDisplay(value as Record<string, unknown>);
+  }
+  return value;
+}
+
+function maskProviderSettingsForDisplay(settings: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!settings) {
+    return {};
+  }
+  const masked: Record<string, unknown> = {};
+  Object.entries(settings).forEach(([key, value]) => {
+    if (isSensitiveSettingKey(key)) {
+      masked[key] = '••••••';
+      return;
+    }
+    masked[key] = maskSettingsValue(value);
+  });
+  return masked;
+}
+
+function maskProviderDetail(detail: ProviderDetail): ProviderDetail {
+  return {
+    ...detail,
+    settings: maskProviderSettingsForDisplay(detail.settings),
+  };
 }
 
 export default function ProvidersPage() {
@@ -423,7 +483,7 @@ export default function ProvidersPage() {
     setDetail(null);
     try {
       const detailResponse = await apiClient.getProvider(name);
-      setDetail(detailResponse);
+      setDetail(maskProviderDetail(detailResponse));
     } catch (err) {
       setDetailError(err instanceof Error ? err.message : 'Failed to load provider details');
     } finally {
@@ -663,7 +723,7 @@ export default function ProvidersPage() {
       </div>
 
       <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl sm:max-w-3xl sm:max-h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
               {formMode === 'create' ? 'Create provider' : `Edit provider ${formState.name}`}
@@ -679,93 +739,98 @@ export default function ProvidersPage() {
             </Alert>
           )}
 
-          {formLoading ? (
-            <div>Loading provider…</div>
-          ) : (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="provider-name">Name</Label>
-                <Input
-                  id="provider-name"
-                  value={formState.name}
-                  onChange={(event) =>
-                    setFormState((prev) => ({ ...prev, name: event.target.value }))
-                  }
-                  placeholder="binance-spot"
-                  disabled={formMode === 'edit'}
-                />
-              </div>
+          <div className="flex-1 overflow-y-auto pr-1">
+            {formLoading ? (
+              <div className="py-10 text-sm text-muted-foreground">Loading provider…</div>
+            ) : (
+              <div className="space-y-4 pb-4">
+                <div className="space-y-2">
+                  <Label htmlFor="provider-name">Name</Label>
+                  <Input
+                    id="provider-name"
+                    value={formState.name}
+                    onChange={(event) =>
+                      setFormState((prev) => ({ ...prev, name: event.target.value }))
+                    }
+                    placeholder="binance-spot"
+                    disabled={formMode === 'edit'}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label>Adapter</Label>
-                <Select
-                  value={formState.adapter}
-                  onValueChange={handleAdapterChange}
-                  disabled={adapters.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select adapter" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {adapters.map((adapter) => (
-                      <SelectItem key={adapter.identifier} value={adapter.identifier}>
-                        {adapter.displayName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                <div className="space-y-2">
+                  <Label>Adapter</Label>
+                  <Select
+                    value={formState.adapter}
+                    onValueChange={handleAdapterChange}
+                    disabled={adapters.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select adapter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {adapters.map((adapter) => (
+                        <SelectItem key={adapter.identifier} value={adapter.identifier}>
+                          {adapter.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              {selectedAdapter ? (
-                <div className="space-y-4">
-                  <div className="space-y-1 text-sm text-muted-foreground">
-                    Provide adapter-specific settings. Leave optional fields blank to use defaults.
-                  </div>
-                  {selectedAdapter.settingsSchema.map((setting) => (
-                    <div key={setting.name} className="space-y-2">
-                      <Label htmlFor={`setting-${setting.name}`}>
-                        {setting.name}
-                        {setting.required && <span className="text-red-500">*</span>}
-                      </Label>
-                      <Input
-                        id={`setting-${setting.name}`}
-                        type={['int', 'integer', 'float', 'double', 'number'].includes(setting.type.toLowerCase()) ? 'number' : 'text'}
-                        value={formState.configValues[setting.name] ?? ''}
-                        onChange={(event) => handleConfigChange(setting.name, event.target.value)}
-                        placeholder=
-                          {setting.default !== undefined && setting.default !== null
-                            ? `Default: ${valueToString(setting.default)}`
-                            : undefined}
-                      />
-                      <p className="text-xs text-muted-foreground">Type: {setting.type}</p>
+                {selectedAdapter ? (
+                  <div className="space-y-4">
+                    <div className="space-y-1 text-sm text-muted-foreground">
+                      Provide adapter-specific settings. Leave optional fields blank to use defaults.
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  Select an adapter to configure its settings.
-                </div>
-              )}
+                    {selectedAdapter.settingsSchema.map((setting) => (
+                      <div key={setting.name} className="space-y-2">
+                        <Label htmlFor={`setting-${setting.name}`}>
+                          {setting.name}
+                          {setting.required && <span className="text-red-500">*</span>}
+                        </Label>
+                        <Input
+                          id={`setting-${setting.name}`}
+                          type={['int', 'integer', 'float', 'double', 'number'].includes(setting.type.toLowerCase()) ? 'number' : 'text'}
+                          value={formState.configValues[setting.name] ?? ''}
+                          onChange={(event) => handleConfigChange(setting.name, event.target.value)}
+                          placeholder={
+                            setting.default !== undefined && setting.default !== null
+                              ? `Default: ${valueToString(setting.default)}`
+                              : undefined
+                          }
+                        />
+                        <p className="text-xs text-muted-foreground">Type: {setting.type}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">
+                    Select an adapter to configure its settings.
+                  </div>
+                )}
 
-              <div className="space-y-2">
-                <Label>Start provider after saving</Label>
-                <Select
-                  value={formState.enabled ? 'true' : 'false'}
-                  onValueChange={(value) =>
-                    setFormState((prev) => ({ ...prev, enabled: value === 'true' }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="true">Enabled</SelectItem>
-                    <SelectItem value="false">Disabled</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="rounded-md border p-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Start provider after saving</p>
+                      <p className="text-xs text-muted-foreground">
+                        Providers remain stopped until started manually when disabled.
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Checkbox
+                        checked={formState.enabled}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                          setFormState((prev) => ({ ...prev, enabled: event.target.checked }))
+                        }
+                      />
+                      <span>Start immediately</span>
+                    </label>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => handleFormOpenChange(false)} disabled={submitting}>
@@ -779,7 +844,7 @@ export default function ProvidersPage() {
       </Dialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-3xl sm:max-h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Provider details</DialogTitle>
             <DialogDescription>Inspect adapter configuration and subscribed instruments.</DialogDescription>
@@ -791,6 +856,7 @@ export default function ProvidersPage() {
             </Alert>
           )}
 
+          <div className="flex-1 overflow-y-auto pr-1">
           {detailLoading ? (
             <div>Loading provider…</div>
           ) : detail ? (
@@ -811,6 +877,9 @@ export default function ProvidersPage() {
 
               <div>
                 <p className="font-medium text-foreground">Settings</p>
+                <p className="text-xs text-muted-foreground">
+                  Sensitive values are masked and must be re-entered when editing.
+                </p>
                 {Object.keys(detail.settings).length === 0 ? (
                   <p className="text-muted-foreground">No adapter settings configured.</p>
                 ) : (
@@ -973,6 +1042,7 @@ export default function ProvidersPage() {
           ) : (
             <div className="text-muted-foreground">Select a provider to view details.</div>
           )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

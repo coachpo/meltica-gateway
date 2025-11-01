@@ -123,7 +123,7 @@ Each instance summary includes:
 - `running` – current execution state.
 
 ### `POST /strategy/instances`
-Creates and starts a new instance.
+Creates a new instance. Instances default to a stopped state unless `auto_start` is explicitly set to `true`.
 
 Request body (minimum fields):
 ```json
@@ -140,7 +140,8 @@ Request body (minimum fields):
     "binance-spot": {
       "symbols": ["ETH-USDT"]
     }
-  }
+  },
+  "auto_start": false
 }
 ```
 
@@ -150,7 +151,7 @@ Responses:
 
 Notes:
 - `scope` must supply at least one provider with at least one symbol; providers are inferred from this map.
-- Optional `autoStart` is ignored on create—instances are started immediately and returned as a snapshot with `autoStart: false`.
+- Optional `auto_start` controls whether the instance should start immediately after creation. When omitted, the instance remains stopped until started manually.
 
 ## Instance Item Endpoints
 

@@ -367,12 +367,11 @@ func (s *httpServer) listInstances(w http.ResponseWriter, _ *http.Request) {
 
 func (s *httpServer) createInstance(w http.ResponseWriter, r *http.Request) {
 	limitRequestBody(w, r)
-	spec, err := decodeInstanceSpec(r)
+	spec, _, err := decodeInstanceSpec(r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	spec.AutoStart = false
 	if _, err := s.manager.Create(r.Context(), spec); err != nil {
 		s.writeManagerError(w, err)
 		return
@@ -489,7 +488,7 @@ func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodPut:
 		limitRequestBody(w, r)
-		spec, err := decodeInstanceSpec(r)
+		spec, hasAutoStart, err := decodeInstanceSpec(r)
 		if err != nil {
 			writeDecodeError(w, err)
 			return
@@ -499,7 +498,11 @@ func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		spec.ID = id
-		spec.AutoStart = false
+		if !hasAutoStart {
+			if snapshot, ok := s.manager.Instance(id); ok {
+				spec.AutoStart = snapshot.AutoStart
+			}
+		}
 		if err := s.manager.Update(r.Context(), spec); err != nil {
 			s.writeManagerError(w, err)
 			return
@@ -622,14 +625,23 @@ func buildProviderSpecFromPayload(payload providerPayload) (config.ProviderSpec,
 	return specs[0], enabled, nil
 }
 
-func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
+func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, bool, error) {
 	defer func() {
 		_ = r.Body.Close()
 	}()
-	var spec config.LambdaSpec
+	type lambdaRequest struct {
+		config.LambdaSpec
+		AutoStart *bool `json:"auto_start"`
+	}
+	var payload lambdaRequest
 	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&spec); err != nil {
-		return spec, fmt.Errorf("decode payload: %w", err)
+	if err := decoder.Decode(&payload); err != nil {
+		return payload.LambdaSpec, false, fmt.Errorf("decode payload: %w", err)
+	}
+	spec := payload.LambdaSpec
+	autoStartProvided := payload.AutoStart != nil
+	if autoStartProvided {
+		spec.AutoStart = *payload.AutoStart
 	}
 	spec.ID = strings.TrimSpace(spec.ID)
 	spec.Strategy.Normalize()
@@ -647,22 +659,22 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 	}
 	spec.RefreshProviders()
 	if spec.ID == "" {
-		return spec, fmt.Errorf("id required")
+		return spec, autoStartProvided, fmt.Errorf("id required")
 	}
 	if spec.Strategy.Identifier == "" {
-		return spec, fmt.Errorf("strategy required")
+		return spec, autoStartProvided, fmt.Errorf("strategy required")
 	}
 	manifest := config.LambdaManifest{
 		Lambdas: []config.LambdaSpec{spec},
 	}
 	if err := manifest.Validate(); err != nil {
-		return spec, fmt.Errorf("validate lambda manifest: %w", err)
+		return spec, autoStartProvided, fmt.Errorf("validate lambda manifest: %w", err)
 	}
 	spec = manifest.Lambdas[0]
 	if len(spec.AllSymbols()) == 0 {
-		return spec, fmt.Errorf("symbols required")
+		return spec, autoStartProvided, fmt.Errorf("symbols required")
 	}
-	return spec, nil
+	return spec, autoStartProvided, nil
 }
 
 func decodeRiskConfig(r *http.Request) (config.RiskConfig, error) {

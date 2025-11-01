@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { InstanceSummary, Strategy, Provider } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon } from 'lucide-react';
 
 export default function InstancesPage() {
@@ -34,6 +35,7 @@ export default function InstancesPage() {
     strategyIdentifier: '',
     provider: '',
     symbols: '',
+    autoStart: false,
   });
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -74,6 +76,7 @@ export default function InstancesPage() {
       strategyIdentifier: '',
       provider: '',
       symbols: '',
+      autoStart: false,
     });
     setConfigValues({});
     setFormError(null);
@@ -196,6 +199,7 @@ export default function InstancesPage() {
       scope: {
         [newInstance.provider]: { symbols },
       },
+      autoStart: newInstance.autoStart,
     };
 
     const mode = dialogMode;
@@ -320,6 +324,7 @@ export default function InstancesPage() {
         strategyIdentifier: instance.strategy.identifier,
         provider: providerName,
         symbols: symbolsValue,
+        autoStart: Boolean(instance.autoStart),
       });
 
       const strategyMeta = strategies.find((strategy) => strategy.name === instance.strategy.identifier);
@@ -392,7 +397,7 @@ export default function InstancesPage() {
               Create Instance
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl sm:max-w-3xl sm:max-h-[85vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>
                 {dialogMode === 'create' ? 'Create Strategy Instance' : 'Edit Strategy Instance'}
@@ -408,151 +413,172 @@ export default function InstancesPage() {
                 <AlertDescription>{formError}</AlertDescription>
               </Alert>
             )}
-            {instanceLoading ? (
-              <div className="flex items-center justify-center py-10 text-muted-foreground">
-                <Loader2Icon className="mr-2 h-5 w-5 animate-spin" />
-                Loading instance...
-              </div>
-            ) : (
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="id">Instance ID</Label>
-                  <Input
-                    id="id"
-                    value={newInstance.id}
-                    onChange={(e) => {
-                      setFormError(null);
-                      setNewInstance({ ...newInstance, id: e.target.value });
-                    }}
-                    placeholder="my-strategy-instance"
-                    disabled={dialogMode === 'edit'}
-                  />
+            <div className="flex-1 overflow-y-auto pr-1">
+              {instanceLoading ? (
+                <div className="flex items-center justify-center py-10 text-muted-foreground">
+                  <Loader2Icon className="mr-2 h-5 w-5 animate-spin" />
+                  Loading instance...
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="strategy">Strategy</Label>
-                  <Select
-                    value={newInstance.strategyIdentifier}
-                    onValueChange={(value) => {
-                      setFormError(null);
-                      setPrefilledConfig(false);
-                      setNewInstance({ ...newInstance, strategyIdentifier: value });
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select strategy" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {strategies.map((strategy) => (
-                        <SelectItem key={strategy.name} value={strategy.name}>
-                          {strategy.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="provider">
-                    Provider
-                    {dialogMode === 'edit' && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        (cannot be changed)
-                      </span>
-                    )}
-                  </Label>
-                  <Select
-                    value={newInstance.provider}
-                    onValueChange={(value) => {
-                      setFormError(null);
-                      setNewInstance({ ...newInstance, provider: value });
-                    }}
-                    disabled={dialogMode === 'edit'}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select provider" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {providers.map((provider) => (
-                        <SelectItem key={provider.name} value={provider.name}>
-                          {provider.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="symbols">
-                    Symbols (comma-separated)
-                    {dialogMode === 'edit' && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        (cannot be changed)
-                      </span>
-                    )}
-                  </Label>
-                  <Input
-                    id="symbols"
-                    value={newInstance.symbols}
-                    onChange={(e) => {
-                      setFormError(null);
-                      setNewInstance({ ...newInstance, symbols: e.target.value });
-                    }}
-                    placeholder="BTC-USDT, ETH-USDT"
-                    disabled={dialogMode === 'edit'}
-                  />
-                </div>
-                {selectedStrategy && selectedStrategy.config.length > 0 && (
-                  <div className="grid gap-3">
-                    <div className="text-sm font-medium">Configuration</div>
-                    <div className="grid gap-4">
-                      {selectedStrategy.config.map((field) => {
-                        const value = configValues[field.name] ?? '';
-                        return (
-                          <div className="grid gap-2" key={field.name}>
-                            <Label htmlFor={`config-${field.name}`}>
-                              {field.name}
-                              {!field.required && (
-                                <span className="ml-1 text-xs font-normal text-muted-foreground">
-                                  (optional)
-                                </span>
+              ) : (
+                <div className="grid gap-4 py-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="id">Instance ID</Label>
+                    <Input
+                      id="id"
+                      value={newInstance.id}
+                      onChange={(e) => {
+                        setFormError(null);
+                        setNewInstance({ ...newInstance, id: e.target.value });
+                      }}
+                      placeholder="my-strategy-instance"
+                      disabled={dialogMode === 'edit'}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="strategy">Strategy</Label>
+                    <Select
+                      value={newInstance.strategyIdentifier}
+                      onValueChange={(value) => {
+                        setFormError(null);
+                        setPrefilledConfig(false);
+                        setNewInstance({ ...newInstance, strategyIdentifier: value });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select strategy" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {strategies.map((strategy) => (
+                          <SelectItem key={strategy.name} value={strategy.name}>
+                            {strategy.displayName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="provider">
+                      Provider
+                      {dialogMode === 'edit' && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          (cannot be changed)
+                        </span>
+                      )}
+                    </Label>
+                    <Select
+                      value={newInstance.provider}
+                      onValueChange={(value) => {
+                        setFormError(null);
+                        setNewInstance({ ...newInstance, provider: value });
+                      }}
+                      disabled={dialogMode === 'edit'}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {providers.map((provider) => (
+                          <SelectItem key={provider.name} value={provider.name}>
+                            {provider.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="symbols">
+                      Symbols (comma-separated)
+                      {dialogMode === 'edit' && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          (cannot be changed)
+                        </span>
+                      )}
+                    </Label>
+                    <Input
+                      id="symbols"
+                      value={newInstance.symbols}
+                      onChange={(e) => {
+                        setFormError(null);
+                        setNewInstance({ ...newInstance, symbols: e.target.value });
+                      }}
+                      placeholder="BTC-USDT, ETH-USDT"
+                      disabled={dialogMode === 'edit'}
+                    />
+                  </div>
+                  {selectedStrategy && selectedStrategy.config.length > 0 && (
+                    <div className="grid gap-3">
+                      <div className="text-sm font-medium">Configuration</div>
+                      <div className="grid gap-4">
+                        {selectedStrategy.config.map((field) => {
+                          const value = configValues[field.name] ?? '';
+                          return (
+                            <div className="grid gap-2" key={field.name}>
+                              <Label htmlFor={`config-${field.name}`}>
+                                {field.name}
+                                {!field.required && (
+                                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                                    (optional)
+                                  </span>
+                                )}
+                              </Label>
+                              {field.type === 'bool' ? (
+                                <Select
+                                  value={value || 'false'}
+                                  onValueChange={(val) => handleConfigChange(field.name, val)}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select value" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="true">True</SelectItem>
+                                    <SelectItem value="false">False</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <Input
+                                  id={`config-${field.name}`}
+                                  type={field.type === 'int' || field.type === 'float' ? 'number' : 'text'}
+                                  step={field.type === 'float' ? 'any' : undefined}
+                                  value={value}
+                                  onChange={(e) => handleConfigChange(field.name, e.target.value)}
+                                  placeholder={
+                                    field.default !== undefined && field.default !== null
+                                      ? String(field.default)
+                                      : undefined
+                                  }
+                                />
                               )}
-                            </Label>
-                            {field.type === 'bool' ? (
-                              <Select
-                                value={value || 'false'}
-                                onValueChange={(val) => handleConfigChange(field.name, val)}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select value" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="true">True</SelectItem>
-                                  <SelectItem value="false">False</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <Input
-                                id={`config-${field.name}`}
-                                type={field.type === 'int' || field.type === 'float' ? 'number' : 'text'}
-                                step={field.type === 'float' ? 'any' : undefined}
-                                value={value}
-                                onChange={(e) => handleConfigChange(field.name, e.target.value)}
-                                placeholder={
-                                  field.default !== undefined && field.default !== null
-                                    ? String(field.default)
-                                    : undefined
-                                }
-                              />
-                            )}
-                            {field.description && (
-                              <p className="text-xs text-muted-foreground">{field.description}</p>
-                            )}
-                          </div>
-                        );
-                      })}
+                              {field.description && (
+                                <p className="text-xs text-muted-foreground">{field.description}</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  <div className="rounded-md border p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Start automatically</p>
+                        <p className="text-xs text-muted-foreground">
+                          When disabled, the instance remains stopped after saving.
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <Checkbox
+                          checked={newInstance.autoStart}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setNewInstance({ ...newInstance, autoStart: event.target.checked })
+                          }
+                        />
+                        <span>Start after saving</span>
+                      </label>
                     </div>
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
             <DialogFooter>
               <Button
                 variant="outline"
@@ -652,6 +678,12 @@ export default function InstancesPage() {
                       </Badge>
                     ))}
                   </div>
+                </div>
+                <div>
+                  <span className="font-medium">Auto-start:</span>{' '}
+                  <span className="text-muted-foreground">
+                    {instance.autoStart ? 'Enabled' : 'Disabled'}
+                  </span>
                 </div>
               </div>
               <div className="flex gap-2">

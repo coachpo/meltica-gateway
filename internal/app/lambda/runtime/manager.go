@@ -430,7 +430,13 @@ func (m *Manager) Create(ctx context.Context, spec config.LambdaSpec) (*core.Bas
 	if err := m.ensureSpec(spec, false); err != nil {
 		return nil, err
 	}
+	if !spec.AutoStart {
+		return nil, nil
+	}
 	if err := m.Start(ctx, spec.ID); err != nil {
+		m.mu.Lock()
+		delete(m.specs, spec.ID)
+		m.mu.Unlock()
 		return nil, err
 	}
 	m.mu.RLock()
@@ -600,6 +606,7 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 
 	m.mu.RLock()
 	current, ok := m.specs[spec.ID]
+	_, wasRunning := m.instances[spec.ID]
 	m.mu.RUnlock()
 	if !ok {
 		return ErrInstanceNotFound
@@ -613,8 +620,6 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	if current.Strategy.Identifier != spec.Strategy.Identifier {
 		return fmt.Errorf("strategy is immutable for %s", spec.ID)
 	}
-
-	spec.AutoStart = current.AutoStart
 	if err := m.ensureSpec(spec, true); err != nil {
 		return err
 	}
@@ -622,8 +627,11 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	if err := m.Stop(spec.ID); err != nil && !errors.Is(err, ErrInstanceNotRunning) {
 		return err
 	}
-	if _, _, _, err := m.launch(ctx, spec, true); err != nil {
-		return err
+	startAfterUpdate := wasRunning || spec.AutoStart
+	if startAfterUpdate {
+		if _, _, _, err := m.launch(ctx, spec, true); err != nil {
+			return err
+		}
 	}
 	return nil
 }
