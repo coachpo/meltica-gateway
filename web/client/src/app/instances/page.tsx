@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon } from 'lucide-react';
+import { useToast } from '@/components/ui/toast-provider';
 
 export default function InstancesPage() {
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
@@ -19,8 +20,6 @@ export default function InstancesPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create');
   const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
@@ -37,6 +36,7 @@ export default function InstancesPage() {
   });
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const { show: showToast } = useToast();
 
   const selectedStrategy = useMemo(
     () => strategies.find((strategy) => strategy.name === newInstance.strategyIdentifier),
@@ -92,19 +92,6 @@ export default function InstancesPage() {
   useEffect(() => {
     fetchData();
   }, []);
-
-  useEffect(() => {
-    if (!actionMessage) {
-      return;
-    }
-    if (typeof window === 'undefined') {
-      return;
-    }
-    const timeout = window.setTimeout(() => setActionMessage(null), 4000);
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [actionMessage]);
 
   const fetchData = async () => {
     try {
@@ -203,8 +190,6 @@ export default function InstancesPage() {
     try {
       setFormError(null);
       setDialogSaving(true);
-      setActionMessage(null);
-      setActionError(null);
       if (dialogMode === 'edit') {
         if (!editingInstanceId) {
           setFormError('No instance selected for update');
@@ -218,11 +203,11 @@ export default function InstancesPage() {
       setCreateDialogOpen(false);
       resetForm();
       await fetchData();
-      setActionMessage(
-        mode === 'create'
-          ? `Instance ${targetId} created successfully`
-          : `Instance ${targetId} updated successfully`,
-      );
+      showToast({
+        title: mode === 'create' ? 'Instance created' : 'Instance updated',
+        description: `Instance ${targetId} ${mode === 'create' ? 'created' : 'updated'} successfully.`,
+        variant: 'success',
+      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '';
       
@@ -250,35 +235,47 @@ export default function InstancesPage() {
   };
 
   const handleStart = async (id: string) => {
-    setActionMessage(null);
-    setActionError(null);
     setActionInProgress(prev => ({ ...prev, [`start-${id}`]: true }));
     try {
       await apiClient.startInstance(id);
       await fetchData();
-      setActionMessage(`Instance ${id} started`);
+      showToast({
+        title: 'Instance started',
+        description: `${id} is now running.`,
+        variant: 'success',
+      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : `Failed to start ${id}`;
-      if (errorMessage.includes('provider') && errorMessage.includes('unavailable')) {
-        setActionError(`${errorMessage}. Make sure the provider is running before starting this instance.`);
-      } else {
-        setActionError(errorMessage);
-      }
+      const description = errorMessage.includes('provider') && errorMessage.includes('unavailable')
+        ? `${errorMessage}. Start the provider before starting this instance.`
+        : errorMessage;
+      showToast({
+        title: 'Failed to start instance',
+        description,
+        variant: 'destructive',
+      });
     } finally {
       setActionInProgress(prev => ({ ...prev, [`start-${id}`]: false }));
     }
   };
 
   const handleStop = async (id: string) => {
-    setActionMessage(null);
-    setActionError(null);
     setActionInProgress(prev => ({ ...prev, [`stop-${id}`]: true }));
     try {
       await apiClient.stopInstance(id);
       await fetchData();
-      setActionMessage(`Instance ${id} stopped`);
+      showToast({
+        title: 'Instance stopped',
+        description: `${id} is now stopped.`,
+        variant: 'success',
+      });
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : `Failed to stop ${id}`);
+      const message = err instanceof Error ? err.message : `Failed to stop ${id}`;
+      showToast({
+        title: 'Failed to stop instance',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setActionInProgress(prev => ({ ...prev, [`stop-${id}`]: false }));
     }
@@ -288,15 +285,22 @@ export default function InstancesPage() {
     if (!confirm(`Are you sure you want to delete instance "${id}"?`)) {
       return;
     }
-    setActionMessage(null);
-    setActionError(null);
     setActionInProgress(prev => ({ ...prev, [`delete-${id}`]: true }));
     try {
       await apiClient.deleteInstance(id);
       await fetchData();
-      setActionMessage(`Instance ${id} deleted`);
+      showToast({
+        title: 'Instance deleted',
+        description: `${id} has been removed.`,
+        variant: 'success',
+      });
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : `Failed to delete ${id}`);
+      const message = err instanceof Error ? err.message : `Failed to delete ${id}`;
+      showToast({
+        title: 'Failed to delete instance',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setActionInProgress(prev => ({ ...prev, [`delete-${id}`]: false }));
     }
@@ -467,28 +471,38 @@ export default function InstancesPage() {
                         setFormError(null);
                         setNewInstance({ ...newInstance, provider: value });
                       }}
-                      disabled={dialogMode === 'edit'}
+                      disabled={dialogMode === 'edit' || providers.length === 0}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select provider" />
                       </SelectTrigger>
                       <SelectContent>
-                        {providers.map((provider) => (
-                          <SelectItem
-                            key={provider.name}
-                            value={provider.name}
-                            disabled={!provider.running}
-                          >
-                            {provider.running ? provider.name : `${provider.name} (stopped)`}
+                        {providers.length === 0 ? (
+                          <SelectItem value="__no-providers" disabled>
+                            No providers available
                           </SelectItem>
-                        ))}
+                        ) : (
+                          providers.map((provider) => (
+                            <SelectItem
+                              key={provider.name}
+                              value={provider.name}
+                              disabled={!provider.running}
+                            >
+                              {provider.running ? provider.name : `${provider.name} (stopped)`}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
-                    {providers.some((provider) => !provider.running) && (
+                    {providers.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        No providers are configured yet. Create and start a provider from the Providers page before creating an instance.
+                      </p>
+                    ) : providers.some((provider) => !provider.running) ? (
                       <p className="text-xs text-muted-foreground">
                         Start a provider from the Providers page to enable it here.
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="symbols">
@@ -590,40 +604,6 @@ export default function InstancesPage() {
           </DialogContent>
         </Dialog>
       </div>
-
-      {actionMessage && (
-        <Alert>
-          <AlertDescription>
-            <div className="flex items-center justify-between gap-4">
-              <span>{actionMessage}</span>
-              <button
-                type="button"
-                className="text-sm font-medium text-primary hover:underline"
-                onClick={() => setActionMessage(null)}
-              >
-                Dismiss
-              </button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {actionError && (
-        <Alert variant="destructive">
-          <AlertDescription>
-            <div className="flex items-center justify-between gap-4">
-              <span>{actionError}</span>
-              <button
-                type="button"
-                className="text-sm font-medium text-destructive hover:underline"
-                onClick={() => setActionError(null)}
-              >
-                Dismiss
-              </button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {instances.map((instance) => (

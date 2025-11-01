@@ -34,6 +34,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useToast } from '@/components/ui/toast-provider';
 
 const INSTRUMENTS_PAGE_SIZE = 120;
 
@@ -228,8 +229,6 @@ export default function ProvidersPage() {
   const [adapters, setAdapters] = useState<AdapterMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>('create');
@@ -246,7 +245,12 @@ export default function ProvidersPage() {
   const [instrumentQuery, setInstrumentQuery] = useState('');
   const [instrumentPage, setInstrumentPage] = useState(0);
 
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  type ProviderActionType = 'start' | 'stop' | 'delete';
+  const [pendingAction, setPendingAction] = useState<{
+    name: string;
+    type: ProviderActionType;
+  } | null>(null);
+  const { show: showToast } = useToast();
 
   const selectedAdapter = useMemo(
     () => adapters.find((adapter) => adapter.identifier === formState.adapter),
@@ -395,27 +399,17 @@ export default function ProvidersPage() {
     };
   }, [selectedInstrument]);
 
-  useEffect(() => {
-    if (!actionNotice) {
-      return;
-    }
-    if (typeof window === 'undefined') {
-      return;
-    }
-    const timeout = window.setTimeout(() => {
-      setActionNotice(null);
-    }, 4000);
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [actionNotice]);
-
   const refreshProviders = async () => {
     try {
       const response = await apiClient.getProviders();
       setProviders(response.providers);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to refresh providers');
+      const message = err instanceof Error ? err.message : 'Failed to refresh providers';
+      showToast({
+        title: 'Provider refresh failed',
+        description: message,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -495,7 +489,6 @@ export default function ProvidersPage() {
 
   const handleFormSubmit = async () => {
     setFormError(null);
-    setActionNotice(null);
     const mode = formMode;
     const trimmedName = formState.name.trim();
     if (!trimmedName) {
@@ -530,11 +523,11 @@ export default function ProvidersPage() {
         await apiClient.updateProvider(trimmedName, payload);
       }
       await refreshProviders();
-      setActionNotice(
-        mode === 'create'
-          ? `Provider ${trimmedName} created successfully`
-          : `Provider ${trimmedName} updated successfully`,
-      );
+      showToast({
+        title: mode === 'create' ? 'Provider created' : 'Provider updated',
+        description: `Provider ${trimmedName} ${mode === 'create' ? 'created' : 'updated'} successfully.`,
+        variant: 'success',
+      });
       handleFormOpenChange(false);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to save provider');
@@ -544,30 +537,44 @@ export default function ProvidersPage() {
   };
 
   const handleStart = async (name: string) => {
-    setActionError(null);
-    setActionNotice(null);
-    setPendingAction(name);
+    setPendingAction({ name, type: 'start' });
     try {
       await apiClient.startProvider(name);
       await refreshProviders();
-      setActionNotice(`Provider ${name} started`);
+      showToast({
+        title: 'Provider started',
+        description: `${name} is now running.`,
+        variant: 'success',
+      });
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : `Failed to start ${name}`);
+      const message = err instanceof Error ? err.message : `Failed to start ${name}`;
+      showToast({
+        title: 'Start failed',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setPendingAction(null);
     }
   };
 
   const handleStop = async (name: string) => {
-    setActionError(null);
-    setActionNotice(null);
-    setPendingAction(name);
+    setPendingAction({ name, type: 'stop' });
     try {
       await apiClient.stopProvider(name);
       await refreshProviders();
-      setActionNotice(`Provider ${name} stopped`);
+      showToast({
+        title: 'Provider stopped',
+        description: `${name} is now stopped.`,
+        variant: 'success',
+      });
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : `Failed to stop ${name}`);
+      const message = err instanceof Error ? err.message : `Failed to stop ${name}`;
+      showToast({
+        title: 'Stop failed',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setPendingAction(null);
     }
@@ -580,15 +587,22 @@ export default function ProvidersPage() {
         return;
       }
     }
-    setActionError(null);
-    setActionNotice(null);
-    setPendingAction(name);
+    setPendingAction({ name, type: 'delete' });
     try {
       await apiClient.deleteProvider(name);
       await refreshProviders();
-      setActionNotice(`Provider ${name} deleted`);
+      showToast({
+        title: 'Provider deleted',
+        description: `${name} has been removed.`,
+        variant: 'success',
+      });
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : `Failed to delete ${name}`);
+      const message = err instanceof Error ? err.message : `Failed to delete ${name}`;
+      showToast({
+        title: 'Delete failed',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setPendingAction(null);
     }
@@ -618,32 +632,13 @@ export default function ProvidersPage() {
         <Button onClick={handleCreateClick}>Create provider</Button>
       </div>
 
-      {actionNotice && (
-        <Alert>
-          <AlertDescription>
-            <div className="flex items-center justify-between gap-4">
-              <span>{actionNotice}</span>
-              <button
-                type="button"
-                className="text-sm font-medium text-primary hover:underline"
-                onClick={() => setActionNotice(null)}
-              >
-                Dismiss
-              </button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {actionError && (
-        <Alert variant="destructive">
-          <AlertDescription>{actionError}</AlertDescription>
-        </Alert>
-      )}
-
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {providers.map((provider) => {
-          const isPending = pendingAction === provider.name;
+          const isPendingForProvider = pendingAction?.name === provider.name;
+          const isStartPending = isPendingForProvider && pendingAction?.type === 'start';
+          const isStopPending = isPendingForProvider && pendingAction?.type === 'stop';
+          const isDeletePending = isPendingForProvider && pendingAction?.type === 'delete';
+          const disableActions = Boolean(isPendingForProvider);
           const adapterMeta = adapterByIdentifier.get(provider.adapter);
           return (
             <Card key={provider.name}>
@@ -679,38 +674,46 @@ export default function ProvidersPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => handleDetail(provider.name)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDetail(provider.name)}
+                  >
                     Details
                   </Button>
-                  <Button variant="default" size="sm" onClick={() => handleEdit(provider.name)}>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => handleEdit(provider.name)}
+                  >
                     Edit
                   </Button>
                   {provider.running ? (
                     <Button
                       variant="secondary"
                       size="sm"
-                      disabled={isPending}
+                      disabled={disableActions}
                       onClick={() => handleStop(provider.name)}
                     >
-                      {isPending ? 'Stopping…' : 'Stop'}
+                      {isStopPending ? 'Stopping…' : 'Stop'}
                     </Button>
                   ) : (
                     <Button
                       variant="secondary"
                       size="sm"
-                      disabled={isPending}
+                      disabled={disableActions}
                       onClick={() => handleStart(provider.name)}
                     >
-                      {isPending ? 'Starting…' : 'Start'}
+                      {isStartPending ? 'Starting…' : 'Start'}
                     </Button>
                   )}
                   <Button
                     variant="destructive"
                     size="sm"
-                    disabled={isPending}
+                    disabled={disableActions}
                     onClick={() => handleDelete(provider.name)}
                   >
-                    {isPending ? 'Removing…' : 'Delete'}
+                    {isDeletePending ? 'Removing…' : 'Delete'}
                   </Button>
                 </div>
               </CardContent>
