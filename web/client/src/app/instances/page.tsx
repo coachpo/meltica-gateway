@@ -27,6 +27,7 @@ export default function InstancesPage() {
   const [prefilledConfig, setPrefilledConfig] = useState(false);
   const [dialogSaving, setDialogSaving] = useState(false);
   const [instanceLoading, setInstanceLoading] = useState(false);
+  const [actionInProgress, setActionInProgress] = useState<Record<string, boolean>>({});
 
   const [newInstance, setNewInstance] = useState({
     id: '',
@@ -223,13 +224,25 @@ export default function InstancesPage() {
           : `Instance ${targetId} updated successfully`,
       );
     } catch (err) {
-      setFormError(
-        err instanceof Error
-          ? err.message
-          : dialogMode === 'edit'
+      const errorMessage = err instanceof Error ? err.message : '';
+      
+      // Check if error is about provider availability but instance might still be created
+      if (errorMessage.includes('provider') && errorMessage.includes('unavailable')) {
+        setFormError(
+          `${errorMessage}. Note: The instance may have been created in stopped state. Close this dialog and refresh to verify.`
+        );
+      } else if (errorMessage.includes('scope assignments are immutable')) {
+        setFormError(
+          'Provider and symbol assignments cannot be changed after creation. Only strategy configuration can be modified.'
+        );
+      } else {
+        setFormError(
+          errorMessage ||
+          (dialogMode === 'edit'
             ? 'Failed to update instance'
-            : 'Failed to create instance'
-      );
+            : 'Failed to create instance')
+        );
+      }
     } finally {
       setDialogSaving(false);
     }
@@ -238,24 +251,35 @@ export default function InstancesPage() {
   const handleStart = async (id: string) => {
     setActionMessage(null);
     setActionError(null);
+    setActionInProgress(prev => ({ ...prev, [`start-${id}`]: true }));
     try {
       await apiClient.startInstance(id);
       await fetchData();
       setActionMessage(`Instance ${id} started`);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : `Failed to start ${id}`);
+      const errorMessage = err instanceof Error ? err.message : `Failed to start ${id}`;
+      if (errorMessage.includes('provider') && errorMessage.includes('unavailable')) {
+        setActionError(`${errorMessage}. Make sure the provider is running before starting this instance.`);
+      } else {
+        setActionError(errorMessage);
+      }
+    } finally {
+      setActionInProgress(prev => ({ ...prev, [`start-${id}`]: false }));
     }
   };
 
   const handleStop = async (id: string) => {
     setActionMessage(null);
     setActionError(null);
+    setActionInProgress(prev => ({ ...prev, [`stop-${id}`]: true }));
     try {
       await apiClient.stopInstance(id);
       await fetchData();
       setActionMessage(`Instance ${id} stopped`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Failed to stop ${id}`);
+    } finally {
+      setActionInProgress(prev => ({ ...prev, [`stop-${id}`]: false }));
     }
   };
 
@@ -265,12 +289,15 @@ export default function InstancesPage() {
     }
     setActionMessage(null);
     setActionError(null);
+    setActionInProgress(prev => ({ ...prev, [`delete-${id}`]: true }));
     try {
       await apiClient.deleteInstance(id);
       await fetchData();
       setActionMessage(`Instance ${id} deleted`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Failed to delete ${id}`);
+    } finally {
+      setActionInProgress(prev => ({ ...prev, [`delete-${id}`]: false }));
     }
   };
 
@@ -424,13 +451,21 @@ export default function InstancesPage() {
                   </Select>
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="provider">Provider</Label>
+                  <Label htmlFor="provider">
+                    Provider
+                    {dialogMode === 'edit' && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        (cannot be changed)
+                      </span>
+                    )}
+                  </Label>
                   <Select
                     value={newInstance.provider}
                     onValueChange={(value) => {
                       setFormError(null);
                       setNewInstance({ ...newInstance, provider: value });
                     }}
+                    disabled={dialogMode === 'edit'}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select provider" />
@@ -445,7 +480,14 @@ export default function InstancesPage() {
                   </Select>
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="symbols">Symbols (comma-separated)</Label>
+                  <Label htmlFor="symbols">
+                    Symbols (comma-separated)
+                    {dialogMode === 'edit' && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        (cannot be changed)
+                      </span>
+                    )}
+                  </Label>
                   <Input
                     id="symbols"
                     value={newInstance.symbols}
@@ -454,6 +496,7 @@ export default function InstancesPage() {
                       setNewInstance({ ...newInstance, symbols: e.target.value });
                     }}
                     placeholder="BTC-USDT, ETH-USDT"
+                    disabled={dialogMode === 'edit'}
                   />
                 </div>
                 {selectedStrategy && selectedStrategy.config.length > 0 && (
@@ -576,7 +619,10 @@ export default function InstancesPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>{instance.id}</CardTitle>
-                <Badge variant={instance.running ? 'default' : 'secondary'}>
+                <Badge 
+                  variant={instance.running ? 'default' : 'secondary'}
+                  className={instance.running ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-500 hover:bg-gray-600'}
+                >
                   {instance.running ? 'Running' : 'Stopped'}
                 </Badge>
               </div>
@@ -613,6 +659,7 @@ export default function InstancesPage() {
                   size="sm"
                   variant="outline"
                   onClick={() => handleEdit(instance.id)}
+                  disabled={Object.values(actionInProgress).some(Boolean)}
                 >
                   <PencilIcon className="mr-1 h-3 w-3" />
                   Edit
@@ -622,8 +669,13 @@ export default function InstancesPage() {
                     size="sm"
                     variant="outline"
                     onClick={() => handleStop(instance.id)}
+                    disabled={actionInProgress[`stop-${instance.id}`] || Object.values(actionInProgress).some(Boolean)}
                   >
-                    <CircleStopIcon className="mr-1 h-3 w-3" />
+                    {actionInProgress[`stop-${instance.id}`] ? (
+                      <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <CircleStopIcon className="mr-1 h-3 w-3" />
+                    )}
                     Stop
                   </Button>
                 ) : (
@@ -631,8 +683,13 @@ export default function InstancesPage() {
                     size="sm"
                     variant="outline"
                     onClick={() => handleStart(instance.id)}
+                    disabled={actionInProgress[`start-${instance.id}`] || Object.values(actionInProgress).some(Boolean)}
                   >
-                    <PlayIcon className="mr-1 h-3 w-3" />
+                    {actionInProgress[`start-${instance.id}`] ? (
+                      <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <PlayIcon className="mr-1 h-3 w-3" />
+                    )}
                     Start
                   </Button>
                 )}
@@ -640,8 +697,13 @@ export default function InstancesPage() {
                   size="sm"
                   variant="destructive"
                   onClick={() => handleDelete(instance.id)}
+                  disabled={actionInProgress[`delete-${instance.id}`] || Object.values(actionInProgress).some(Boolean)}
                 >
-                  <TrashIcon className="mr-1 h-3 w-3" />
+                  {actionInProgress[`delete-${instance.id}`] ? (
+                    <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <TrashIcon className="mr-1 h-3 w-3" />
+                  )}
                   Delete
                 </Button>
               </div>
