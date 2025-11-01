@@ -25,6 +25,8 @@ export interface Provider {
   instrumentCount: number;
   settings: ProviderSettings;
   running: boolean;
+  dependentInstances: string[];
+  dependentInstanceCount: number;
 }
 
 export interface Instrument {

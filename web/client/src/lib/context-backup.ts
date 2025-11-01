@@ -9,6 +9,13 @@ const ensureArray = (value: unknown, context: string): unknown[] => {
   return value;
 };
 
+const normalizeArray = (value: unknown, context: string): unknown[] => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  return ensureArray(value, context);
+};
+
 const ensureRecord = (value: unknown, context: string): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${context} must be an object`);
@@ -46,8 +53,8 @@ const sanitizeRecord = (value: unknown, context: string): Record<string, unknown
 export const sanitizeContextBackupPayload = (input: unknown): ContextBackupPayload => {
   const source = ensureRecord(input, 'Backup payload');
 
-  const providersRaw = ensureArray(source.providers, 'Backup payload providers');
-  const lambdasRaw = ensureArray(source.lambdas, 'Backup payload lambdas');
+  const providersRaw = normalizeArray(source.providers, 'Backup payload providers');
+  const lambdasRaw = normalizeArray(source.lambdas, 'Backup payload lambdas');
   const riskRaw = sanitizeRecord(source.risk, 'Backup payload risk');
 
   const providers = providersRaw.map((entry, index) =>

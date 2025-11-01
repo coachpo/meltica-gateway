@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type {
   AdapterMetadata,
@@ -249,10 +249,23 @@ export default function ProvidersPage() {
   const [instrumentPage, setInstrumentPage] = useState(0);
 
   type ProviderActionType = 'start' | 'stop' | 'delete';
-  const [pendingAction, setPendingAction] = useState<{
-    name: string;
-    type: ProviderActionType;
-  } | null>(null);
+  type ProviderActionState = Record<ProviderActionType, string | null>;
+  const [pendingActions, setPendingActions] = useState<ProviderActionState>({
+    start: null,
+    stop: null,
+    delete: null,
+  });
+  const setPending = useCallback(
+    (type: ProviderActionType, name: string | null) => {
+      setPendingActions((prev) => {
+        if (prev[type] === name) {
+          return prev;
+        }
+        return { ...prev, [type]: name };
+      });
+    },
+    [],
+  );
   const { show: showToast } = useToast();
 
   const selectedAdapter = useMemo(
@@ -540,7 +553,7 @@ export default function ProvidersPage() {
   };
 
   const handleStart = async (name: string) => {
-    setPendingAction({ name, type: 'start' });
+    setPending('start', name);
     try {
       await apiClient.startProvider(name);
       await refreshProviders();
@@ -557,12 +570,12 @@ export default function ProvidersPage() {
         variant: 'destructive',
       });
     } finally {
-      setPendingAction(null);
+      setPending('start', null);
     }
   };
 
   const handleStop = async (name: string) => {
-    setPendingAction({ name, type: 'stop' });
+    setPending('stop', name);
     try {
       await apiClient.stopProvider(name);
       await refreshProviders();
@@ -579,7 +592,7 @@ export default function ProvidersPage() {
         variant: 'destructive',
       });
     } finally {
-      setPendingAction(null);
+      setPending('stop', null);
     }
   };
 
@@ -590,7 +603,7 @@ export default function ProvidersPage() {
         return;
       }
     }
-    setPendingAction({ name, type: 'delete' });
+    setPending('delete', name);
     try {
       await apiClient.deleteProvider(name);
       await refreshProviders();
@@ -607,7 +620,7 @@ export default function ProvidersPage() {
         variant: 'destructive',
       });
     } finally {
-      setPendingAction(null);
+      setPending('delete', null);
     }
   };
 
@@ -637,11 +650,14 @@ export default function ProvidersPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {providers.map((provider) => {
-          const isPendingForProvider = pendingAction?.name === provider.name;
-          const isStartPending = isPendingForProvider && pendingAction?.type === 'start';
-          const isStopPending = isPendingForProvider && pendingAction?.type === 'stop';
-          const isDeletePending = isPendingForProvider && pendingAction?.type === 'delete';
-          const disableActions = Boolean(isPendingForProvider);
+          const isStartPending = pendingActions.start === provider.name;
+          const isStopPending = pendingActions.stop === provider.name;
+          const isDeletePending = pendingActions.delete === provider.name;
+          const disableActions = isStartPending || isStopPending || isDeletePending;
+          const dependentInstances = provider.dependentInstances ?? [];
+          const dependentCount = provider.dependentInstanceCount ?? dependentInstances.length;
+          const deleteDisabled =
+            dependentCount > 0 || isDeletePending || isStartPending || isStopPending;
           const adapterMeta = adapterByIdentifier.get(provider.adapter);
           return (
             <Card key={provider.name}>
@@ -675,7 +691,24 @@ export default function ProvidersPage() {
                     <span className="font-medium text-foreground">Instruments:</span>{' '}
                     {provider.instrumentCount}
                   </div>
+                  <div>
+                    <span className="font-medium text-foreground">In use by:</span>{' '}
+                    {dependentCount === 0 ? (
+                      <span className="text-muted-foreground">No instances</span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {dependentCount}{' '}
+                        {dependentCount === 1 ? 'instance' : 'instances'}
+                      </span>
+                    )}
+                  </div>
                 </div>
+                {dependentInstances.length > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    {dependentCount === 1 ? 'Instance:' : 'Instances:'}{' '}
+                    {dependentInstances.join(', ')}
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
@@ -713,7 +746,7 @@ export default function ProvidersPage() {
                   <Button
                     variant="destructive"
                     size="sm"
-                    disabled={disableActions}
+                    disabled={deleteDisabled}
                     onClick={() => handleDelete(provider.name)}
                   >
                     {isDeletePending ? 'Removing…' : 'Delete'}
@@ -820,9 +853,9 @@ export default function ProvidersPage() {
                 <div className="rounded-md border p-3">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-sm font-medium text-foreground">Start provider after saving</p>
+                      <p className="text-sm font-medium text-foreground">Start provider immediately</p>
                       <p className="text-xs text-muted-foreground">
-                        Providers remain stopped until started manually when disabled.
+                        Providers are created stopped by default. Enable this toggle to launch the provider as soon as it is saved.
                       </p>
                     </div>
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -869,20 +902,48 @@ export default function ProvidersPage() {
             <div>Loading provider…</div>
           ) : detail ? (
             <div className="space-y-4 text-sm">
-              <div>
-                <p className="font-medium text-foreground">Adapter</p>
-                <p className="text-muted-foreground">
-                  {detail.adapter.displayName} ({detail.adapter.identifier})
-                </p>
-                {detail.adapter.description && (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {detail.adapter.description}
-                  </p>
-                )}
-              </div>
+              {(() => {
+                const dependentInstances = detail.dependentInstances ?? [];
+                const dependentCount = detail.dependentInstanceCount ?? dependentInstances.length;
+                return (
+                  <>
+                    <div>
+                      <p className="font-medium text-foreground">Adapter</p>
+                      <p className="text-muted-foreground">
+                        {detail.adapter.displayName} ({detail.adapter.identifier})
+                      </p>
+                      {detail.adapter.description && (
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {detail.adapter.description}
+                        </p>
+                      )}
+                    </div>
 
-              <Separator />
+                    <Separator />
 
+                    <div>
+                      <p className="font-medium text-foreground">Dependent instances</p>
+                      {dependentCount === 0 ? (
+                        <p className="text-muted-foreground">No instances depend on this provider.</p>
+                      ) : (
+                        <div className="space-y-1 text-muted-foreground">
+                          <p>
+                            {dependentCount}{' '}
+                            {dependentCount === 1 ? 'instance' : 'instances'} requiring this provider
+                          </p>
+                          <ul className="list-disc space-y-1 pl-5">
+                            {dependentInstances.map((instance) => (
+                              <li key={instance}>{instance}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    <Separator />
+                  </>
+                );
+              })()}
               <div>
                 <p className="font-medium text-foreground">Settings</p>
                 <p className="text-xs text-muted-foreground">

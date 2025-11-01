@@ -15,17 +15,19 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { useToast } from '@/components/ui/toast-provider';
 
 export default function ContextBackupPage() {
   const [snapshot, setSnapshot] = useState<ContextBackupPayload | null>(null);
   const [loadingSnapshot, setLoadingSnapshot] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [importText, setImportText] = useState('');
   const [sanitizedPreview, setSanitizedPreview] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  const { show: showToast } = useToast();
 
   const sensitivePatterns = useMemo(() => getSensitiveKeyFragments().join(', '), []);
 
@@ -38,26 +40,33 @@ export default function ContextBackupPage() {
       const data = await apiClient.getContextBackup();
       setSnapshot(data);
       if (showNotice) {
-        setNotice('Context snapshot refreshed');
+        showToast({
+          title: 'Snapshot refreshed',
+          description: 'Fetched the latest providers, lambdas, and risk settings.',
+        });
       }
       return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load context backup snapshot';
       setError(message);
+      showToast({
+        title: 'Snapshot refresh failed',
+        description: message,
+        variant: 'destructive',
+      });
       return null;
     } finally {
       if (!silent) {
         setLoadingSnapshot(false);
       }
     }
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     void loadSnapshot();
   }, [loadSnapshot]);
 
   const handleRefresh = async () => {
-    setNotice(null);
     await loadSnapshot(true);
   };
 
@@ -67,7 +76,6 @@ export default function ContextBackupPage() {
   }, [snapshot, loadSnapshot]);
 
   const handleDownload = async () => {
-    setNotice(null);
     setError(null);
     setDownloading(true);
     try {
@@ -85,17 +93,24 @@ export default function ContextBackupPage() {
       anchor.click();
       document.body.removeChild(anchor);
       URL.revokeObjectURL(href);
-      setNotice('Context backup downloaded');
+      showToast({
+        title: 'Download started',
+        description: 'Context backup JSON downloaded successfully.',
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to download context backup';
       setError(message);
+      showToast({
+        title: 'Download failed',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setDownloading(false);
     }
   };
 
   const handleCopy = async () => {
-    setNotice(null);
     setError(null);
     try {
       if (typeof navigator === 'undefined' || !navigator.clipboard) {
@@ -106,10 +121,18 @@ export default function ContextBackupPage() {
         return;
       }
       await navigator.clipboard.writeText(formatContextBackupPayload(data));
-      setNotice('Context backup copied to clipboard');
+      showToast({
+        title: 'Copied to clipboard',
+        description: 'Context backup JSON copied to clipboard.',
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to copy context backup';
       setError(message);
+      showToast({
+        title: 'Copy failed',
+        description: message,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -129,10 +152,18 @@ export default function ContextBackupPage() {
       setImportText(text);
       setValidationError(null);
       setSanitizedPreview('');
-      setNotice(`Loaded backup file ${file.name}`);
+      showToast({
+        title: 'Backup file loaded',
+        description: `Loaded backup file ${file.name}.`,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to read selected file';
       setError(message);
+      showToast({
+        title: 'File import failed',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       event.target.value = '';
     }
@@ -158,16 +189,17 @@ export default function ContextBackupPage() {
   };
 
   const handleValidate = () => {
-    setNotice(null);
     setError(null);
     const sanitized = sanitizeInputPayload();
     if (sanitized) {
-      setNotice('Payload sanitized. Review the preview below before restoring.');
+      showToast({
+        title: 'Payload sanitized',
+        description: 'Review the sanitized preview before restoring.',
+      });
     }
   };
 
   const handleRestore = async () => {
-    setNotice(null);
     setError(null);
     setRestoring(true);
     const sanitized = sanitizeInputPayload();
@@ -177,11 +209,19 @@ export default function ContextBackupPage() {
     }
     try {
       await apiClient.restoreContextBackup(sanitized);
-      setNotice('Context restored. Providers and lambdas were recreated stopped. Start them manually after validation.');
+      showToast({
+        title: 'Context restored',
+        description: 'Providers and lambdas were recreated stopped. Start them manually after validation.',
+      });
       await loadSnapshot(false, true);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to restore context backup';
       setError(message);
+      showToast({
+        title: 'Restore failed',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setRestoring(false);
     }
@@ -208,12 +248,6 @@ export default function ContextBackupPage() {
           {' '}fragments are stripped automatically.
         </AlertDescription>
       </Alert>
-
-      {notice && (
-        <Alert>
-          <AlertDescription>{notice}</AlertDescription>
-        </Alert>
-      )}
 
       {error && (
         <Alert variant="destructive">

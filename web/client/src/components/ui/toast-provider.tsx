@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -117,16 +117,8 @@ interface ToastViewportProps {
 }
 
 function ToastViewport({ toasts, onDismiss }: ToastViewportProps) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    return () => {
-      setMounted(false);
-    };
-  }, []);
-
-  if (!mounted) {
+  const portalTarget = typeof document !== 'undefined' ? document.body : null;
+  if (!portalTarget) {
     return null;
   }
 
@@ -168,6 +160,6 @@ function ToastViewport({ toasts, onDismiss }: ToastViewportProps) {
         </div>
       ))}
     </div>,
-    document.body,
+    portalTarget,
   );
 }

@@ -35,13 +35,11 @@ function applyThemeClass(theme: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('light');
+  const [theme, setThemeState] = useState<Theme>(() => getPreferredTheme());
 
   useEffect(() => {
-    const initial = getPreferredTheme();
-    setThemeState(initial);
-    applyThemeClass(initial);
-  }, []);
+    applyThemeClass(theme);
+  }, [theme]);
 
   const updateTheme = useCallback((value: Theme) => {
     setThemeState(value);
