@@ -165,6 +165,33 @@ type AppConfig struct {
 	LambdaManifest LambdaManifest              `yaml:"lambdaManifest"`
 }
 
+func defaultRiskConfig() RiskConfig {
+	return RiskConfig{
+		MaxPositionSize:     "250",
+		MaxNotionalValue:    "50000",
+		NotionalCurrency:    "USDT",
+		OrderThrottle:       5,
+		OrderBurst:          3,
+		MaxConcurrentOrders: 6,
+		PriceBandPercent:    1.0,
+		AllowedOrderTypes:   []string{"Limit", "Market"},
+		KillSwitchEnabled:   true,
+		MaxRiskBreaches:     3,
+		CircuitBreaker: CircuitBreakerConfig{
+			Enabled:   true,
+			Threshold: 4,
+			Cooldown:  "90s",
+		},
+	}
+}
+
+func (c *AppConfig) applyRiskDefaults(riskProvided bool) {
+	if riskProvided {
+		return
+	}
+	c.Risk = defaultRiskConfig()
+}
+
 // Load reads and validates an AppConfig from the provided YAML file.
 func Load(ctx context.Context, configPath string) (AppConfig, error) {
 	_ = ctx
@@ -180,10 +207,28 @@ func Load(ctx context.Context, configPath string) (AppConfig, error) {
 		return AppConfig{}, fmt.Errorf("read config: %w", err)
 	}
 
+	var envelope map[string]any
+	if err := yaml.Unmarshal(bytes, &envelope); err != nil {
+		return AppConfig{}, fmt.Errorf("unmarshal config: %w", err)
+	}
+	riskProvided := false
+	if rawRisk, ok := envelope["risk"]; ok && rawRisk != nil {
+		switch typed := rawRisk.(type) {
+		case map[string]any:
+			if len(typed) > 0 {
+				riskProvided = true
+			}
+		default:
+			riskProvided = true
+		}
+	}
+
 	var cfg AppConfig
 	if err := yaml.Unmarshal(bytes, &cfg); err != nil {
 		return AppConfig{}, fmt.Errorf("unmarshal config: %w", err)
 	}
+
+	cfg.applyRiskDefaults(riskProvided)
 
 	if err := cfg.normalise(); err != nil {
 		return AppConfig{}, err

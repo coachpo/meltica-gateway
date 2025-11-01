@@ -15,24 +15,6 @@ pools:
     size: 4096
     waitQueueSize: 4096
 
-risk:
-  maxPositionSize: "250"
-  maxNotionalValue: "50000"
-  notionalCurrency: "USDT"
-  orderThrottle: 5
-  orderBurst: 3
-  maxConcurrentOrders: 6
-  priceBandPercent: 1.0
-  allowedOrderTypes:
-    - Limit
-    - Market
-  killSwitchEnabled: true
-  maxRiskBreaches: 3
-  circuitBreaker:
-    enabled: true
-    threshold: 4
-    cooldown: 90s
-
 # apiServer: control API bind address (host:port or :port)
 apiServer:
   addr: ":8880"

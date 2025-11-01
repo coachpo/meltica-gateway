@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -196,6 +197,43 @@ func TestFanoutWorkersMissing(t *testing.T) {
 	cfg := loadConfigWithFanout(t, "")
 	if workers := cfg.Eventbus.FanoutWorkerCount(); workers != 4 {
 		t.Fatalf("expected missing fanout workers to default to 4, got %d", workers)
+	}
+}
+
+func TestLoadAppliesRiskDefaultsWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.yaml")
+	yaml := `
+environment: dev
+eventbus:
+  bufferSize: 256
+  fanoutWorkers: 4
+pools:
+  event:
+    size: 128
+    waitQueueSize: 128
+  orderRequest:
+    size: 64
+    waitQueueSize: 64
+apiServer:
+  addr: ":8080"
+telemetry:
+  otlpEndpoint: ""
+  serviceName: default-service
+  otlpInsecure: false
+  enableMetrics: true
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	cfg, err := Load(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if !reflect.DeepEqual(cfg.Risk, defaultRiskConfig()) {
+		t.Fatalf("expected risk config defaults: %#v", cfg.Risk)
 	}
 }
 
