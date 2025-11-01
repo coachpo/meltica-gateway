@@ -8,12 +8,80 @@ import {
   InstanceSpec,
   RiskConfig,
   RuntimeConfig,
+  RuntimeConfigSnapshot,
+  RuntimeConfigSource,
   ApiError,
   ConfigBackup,
   RestoreConfigResponse,
 } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8880';
+
+const isRuntimeConfig = (value: unknown): value is RuntimeConfig =>
+  Boolean(
+    value &&
+      typeof value === 'object' &&
+      'eventbus' in (value as Record<string, unknown>) &&
+      'pools' in (value as Record<string, unknown>) &&
+      'risk' in (value as Record<string, unknown>) &&
+      'apiServer' in (value as Record<string, unknown>) &&
+      'telemetry' in (value as Record<string, unknown>)
+  );
+
+const normaliseRuntimeConfigSnapshot = (payload: unknown): RuntimeConfigSnapshot => {
+  if (!payload) {
+    throw new Error('Empty runtime configuration payload');
+  }
+  if (isRuntimeConfig(payload)) {
+    return {
+      config: payload,
+      source: 'runtime',
+    };
+  }
+
+  if (typeof payload !== 'object') {
+    throw new Error('Malformed runtime configuration payload');
+  }
+
+  const data = payload as Record<string, unknown>;
+  const configCandidate = [data.config, data.runtime].find(isRuntimeConfig);
+
+  if (!configCandidate) {
+    throw new Error('Runtime configuration missing from response');
+  }
+
+  const sourceRaw = typeof data.source === 'string' ? (data.source as RuntimeConfigSource) : undefined;
+  const source: RuntimeConfigSource = ['runtime', 'file', 'bootstrap'].includes(String(sourceRaw))
+    ? (sourceRaw as RuntimeConfigSource)
+    : 'runtime';
+
+  const persistedAt =
+    typeof data.persistedAt === 'string'
+      ? (data.persistedAt as string)
+      : typeof data.persisted_at === 'string'
+        ? (data.persisted_at as string)
+        : null;
+
+  const filePath =
+    typeof data.filePath === 'string'
+      ? (data.filePath as string)
+      : typeof data.path === 'string'
+        ? (data.path as string)
+        : null;
+
+  const metadata =
+    data.metadata && typeof data.metadata === 'object'
+      ? (data.metadata as Record<string, unknown>)
+      : null;
+
+  return {
+    config: configCandidate,
+    source,
+    persistedAt,
+    filePath,
+    metadata,
+  };
+};
 
 class ApiClient {
   private async request<T>(
@@ -29,12 +97,30 @@ class ApiClient {
       },
     });
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-      const error: ApiError = await response.json();
-      throw new Error(error.error || 'Request failed');
+      let message = 'Request failed';
+      if (responseText) {
+        try {
+          const error: ApiError = JSON.parse(responseText);
+          message = error.error || message;
+        } catch {
+          message = responseText;
+        }
+      }
+      throw new Error(message);
     }
 
-    return response.json();
+    if (!responseText) {
+      return undefined as T;
+    }
+
+    try {
+      return JSON.parse(responseText) as T;
+    } catch {
+      throw new Error('Invalid JSON response');
+    }
   }
 
   // Strategy Catalog
@@ -151,15 +237,32 @@ class ApiClient {
     });
   }
 
-  async getRuntimeConfig(): Promise<RuntimeConfig> {
-    return this.request('/config/runtime');
+  async getRuntimeConfig(): Promise<RuntimeConfigSnapshot> {
+    const payload = await this.request<unknown>('/config/runtime');
+    return normaliseRuntimeConfigSnapshot(payload);
   }
 
-  async updateRuntimeConfig(payload: RuntimeConfig): Promise<RuntimeConfig> {
-    return this.request('/config/runtime', {
+  async updateRuntimeConfig(payload: RuntimeConfig): Promise<RuntimeConfigSnapshot> {
+    const response = await this.request<unknown>('/config/runtime', {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+    if (response === undefined) {
+      const fallback = await this.request<unknown>('/config/runtime');
+      return normaliseRuntimeConfigSnapshot(fallback);
+    }
+    return normaliseRuntimeConfigSnapshot(response);
+  }
+
+  async revertRuntimeConfig(): Promise<RuntimeConfigSnapshot> {
+    const response = await this.request<unknown>('/config/runtime', {
+      method: 'DELETE',
+    });
+    if (response === undefined) {
+      const fallback = await this.request<unknown>('/config/runtime');
+      return normaliseRuntimeConfigSnapshot(fallback);
+    }
+    return normaliseRuntimeConfigSnapshot(response);
   }
 
   async getConfigBackup(): Promise<ConfigBackup> {

@@ -168,6 +168,16 @@ export interface RuntimeConfig {
   telemetry: TelemetryConfig;
 }
 
+export type RuntimeConfigSource = 'runtime' | 'file' | 'bootstrap';
+
+export interface RuntimeConfigSnapshot {
+  config: RuntimeConfig;
+  source: RuntimeConfigSource;
+  persistedAt?: string | null;
+  filePath?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
 export interface ProviderRuntimeMetadata {
   name: string;
   adapter: string;

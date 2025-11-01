@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { apiClient } from '@/lib/api-client';
-import type { ConfigBackup, RuntimeConfig } from '@/lib/types';
+import type { ConfigBackup, RuntimeConfig, RuntimeConfigSnapshot } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -55,6 +55,13 @@ const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   },
 };
 
+const cloneRuntimeConfig = (config: RuntimeConfig | null): RuntimeConfig | null => {
+  if (!config) {
+    return null;
+  }
+  return JSON.parse(JSON.stringify(config)) as RuntimeConfig;
+};
+
 const formatJson = (value: unknown) => JSON.stringify(value, null, 2);
 
 const parseAllowedOrderTypes = (value: string): string[] =>
@@ -77,7 +84,7 @@ const hasListEntries = (record: Record<string, unknown> | null | undefined): boo
   Boolean(record && Object.keys(record).length > 0);
 
 export default function RuntimeConfigPage() {
-  const [runtime, setRuntime] = useState<RuntimeConfig | null>(null);
+  const [runtimeSnapshot, setRuntimeSnapshot] = useState<RuntimeConfigSnapshot | null>(null);
   const [runtimeDraft, setRuntimeDraft] = useState<RuntimeConfig | null>(null);
   const [allowedOrderTypesInput, setAllowedOrderTypesInput] = useState('');
   const [backup, setBackup] = useState<ConfigBackup | null>(null);
@@ -86,8 +93,19 @@ export default function RuntimeConfigPage() {
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [reverting, setReverting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const runtime = runtimeSnapshot?.config ?? null;
+  const runtimeSource = runtimeSnapshot?.source ?? 'runtime';
+  const runtimeSourceLabel = runtimeSource === 'file'
+    ? 'Configuration file'
+    : runtimeSource === 'bootstrap'
+      ? 'Bootstrap defaults'
+      : 'Runtime overrides';
+  const runtimePersistedAt = runtimeSnapshot?.persistedAt ?? null;
+  const runtimeFilePath = runtimeSnapshot?.filePath ?? null;
 
   const syncAllowedOrderTypes = useCallback((source: RuntimeConfig | null) => {
     if (!source) {
@@ -101,13 +119,14 @@ export default function RuntimeConfigPage() {
     setError(null);
     setNotice(null);
     try {
-      const [runtimeConfig, fullBackup] = await Promise.all([
+      const [runtimeConfigSnapshot, fullBackup] = await Promise.all([
         apiClient.getRuntimeConfig(),
         apiClient.getConfigBackup(),
       ]);
-      setRuntime(runtimeConfig);
-      setRuntimeDraft(runtimeConfig);
-      syncAllowedOrderTypes(runtimeConfig);
+      setRuntimeSnapshot(runtimeConfigSnapshot);
+      const draft = cloneRuntimeConfig(runtimeConfigSnapshot.config);
+      setRuntimeDraft(draft);
+      syncAllowedOrderTypes(draft);
       setBackup(fullBackup);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load runtime configuration');
@@ -301,10 +320,11 @@ export default function RuntimeConfigPage() {
     setError(null);
     setNotice(null);
     try {
-      const updated = await apiClient.updateRuntimeConfig(runtimeDraft);
-      setRuntime(updated);
-      setRuntimeDraft(updated);
-      syncAllowedOrderTypes(updated);
+      const updatedSnapshot = await apiClient.updateRuntimeConfig(runtimeDraft);
+      setRuntimeSnapshot(updatedSnapshot);
+      const draft = cloneRuntimeConfig(updatedSnapshot.config);
+      setRuntimeDraft(draft);
+      syncAllowedOrderTypes(draft);
       const latestBackup = await apiClient.getConfigBackup();
       setBackup(latestBackup);
       setNotice('Runtime configuration updated and persisted');
@@ -335,7 +355,32 @@ export default function RuntimeConfigPage() {
     }
   };
 
-const handleBackupFile = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleRevertRuntime = async () => {
+    setReverting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const snapshot = await apiClient.revertRuntimeConfig();
+      setRuntimeSnapshot(snapshot);
+      const draft = cloneRuntimeConfig(snapshot.config);
+      setRuntimeDraft(draft);
+      syncAllowedOrderTypes(draft);
+      const latestBackup = await apiClient.getConfigBackup();
+      setBackup(latestBackup);
+      setNotice('Runtime overrides cleared. Gateway now using configuration file values.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to revert runtime configuration';
+      if (/not allow/i.test(message) || /405/.test(message)) {
+        setError('Runtime revert is not supported by the connected gateway version. Update the backend and try again.');
+      } else {
+        setError(message);
+      }
+    } finally {
+      setReverting(false);
+    }
+  };
+
+  const handleBackupFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -359,14 +404,26 @@ const handleBackupFile = async (event: ChangeEvent<HTMLInputElement>) => {
   const lambdaInstances = backup?.lambdas?.instances ?? [];
   const lambdaCount = lambdaManifest.length;
 
-  const hasCustomConfig = useMemo(() => {
-    if (!backup) {
+  const runtimeOverridesActive = useMemo(() => {
+    if (runtimeSnapshot) {
+      if (runtimeSnapshot.source === 'file') {
+        return false;
+      }
+      if (runtimeSnapshot.source === 'bootstrap') {
+        return !deepEqualRuntime(runtimeSnapshot.config, DEFAULT_RUNTIME_CONFIG);
+      }
+      return true;
+    }
+    if (!runtime) {
       return false;
     }
-    const providerConfigDefined = hasListEntries((backup.providers?.config as Record<string, unknown>) ?? null);
-    const runtimeOverrides = runtime ? !deepEqualRuntime(runtime, DEFAULT_RUNTIME_CONFIG) : false;
-    return providerConfigDefined || lambdaCount > 0 || runtimeOverrides;
-  }, [backup, lambdaCount, runtime]);
+    return !deepEqualRuntime(runtime, DEFAULT_RUNTIME_CONFIG);
+  }, [runtimeSnapshot, runtime]);
+
+  const hasCustomConfig = useMemo(() => {
+    const providerConfigDefined = hasListEntries((backup?.providers?.config as Record<string, unknown>) ?? null);
+    return providerConfigDefined || lambdaCount > 0 || runtimeOverridesActive;
+  }, [backup, lambdaCount, runtimeOverridesActive]);
 
   const runningProviders = providerRuntime.filter((provider) => provider.running).length;
   const definedProviders = providerRuntime.length;
@@ -396,6 +453,11 @@ const handleBackupFile = async (event: ChangeEvent<HTMLInputElement>) => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-3">
+              <Badge
+                variant={runtimeSource === 'runtime' ? 'default' : runtimeSource === 'file' ? 'secondary' : 'outline'}
+              >
+                Source: {runtimeSourceLabel}
+              </Badge>
               <Badge variant={hasCustomConfig ? 'default' : 'secondary'}>
                 {hasCustomConfig ? 'Custom configuration active' : 'Running on defaults'}
               </Badge>
@@ -415,6 +477,18 @@ const handleBackupFile = async (event: ChangeEvent<HTMLInputElement>) => {
                 <span className="font-medium text-foreground">API server:</span>{' '}
                 {runtime?.apiServer.addr ?? '—'}
               </li>
+              {runtimePersistedAt && (
+                <li>
+                  <span className="font-medium text-foreground">Persisted at:</span>{' '}
+                  {new Date(runtimePersistedAt).toLocaleString()}
+                </li>
+              )}
+              {runtimeFilePath && (
+                <li>
+                  <span className="font-medium text-foreground">Config file:</span>{' '}
+                  {runtimeFilePath}
+                </li>
+              )}
               <li>
                 <span className="font-medium text-foreground">Providers running:</span>{' '}
                 {runningProviders}/{definedProviders}
@@ -425,12 +499,19 @@ const handleBackupFile = async (event: ChangeEvent<HTMLInputElement>) => {
               </li>
             </ul>
             <p className="text-sm text-muted-foreground">
-              Meltica persists any edits made below to <code>config/app.yaml</code> automatically. No manual file
-              management is required.
+              Meltica persists any edits made below to <code>config/app.yaml</code> automatically. Use revert to drop
+              overrides and follow the configuration file on restart.
             </p>
             <div className="flex flex-wrap gap-3">
               <Button variant="secondary" onClick={handleCopyRuntime} disabled={!runtime || loading}>
                 Copy runtime JSON
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleRevertRuntime}
+                disabled={reverting || runtimeSource === 'file' || runtimeSource === 'bootstrap' || !runtimeSnapshot}
+              >
+                {reverting ? 'Reverting…' : 'Revert to config file'}
               </Button>
               <Button
                 variant="ghost"
