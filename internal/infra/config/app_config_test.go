@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -14,6 +15,30 @@ func TestLoadMissingFile(t *testing.T) {
 	_, err := Load(context.Background(), filepath.Join(t.TempDir(), "missing.yaml"))
 	if err == nil {
 		t.Fatalf("expected error when config file missing")
+	}
+}
+
+func TestLoadOrDefaultReturnsDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "absent.yaml")
+	cfg, loaded, err := LoadOrDefault(context.Background(), path)
+	if err != nil {
+		t.Fatalf("LoadOrDefault returned error: %v", err)
+	}
+	if loaded {
+		t.Fatalf("expected loaded=false for missing configuration file")
+	}
+	def := DefaultAppConfig()
+	if cfg.Environment != def.Environment {
+		t.Fatalf("expected default environment %s, got %s", def.Environment, cfg.Environment)
+	}
+	if !reflect.DeepEqual(cfg.Runtime, def.Runtime) {
+		t.Fatalf("expected default runtime config, got %#v", cfg.Runtime)
+	}
+	if cfg.Providers != nil && len(cfg.Providers) != 0 {
+		t.Fatalf("expected providers to be empty, got %#v", cfg.Providers)
+	}
+	if len(cfg.LambdaManifest.Lambdas) != 0 {
+		t.Fatalf("expected no lambdas in default manifest")
 	}
 }
 

@@ -2,8 +2,12 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+
+	json "github.com/goccy/go-json"
 )
 
 // RuntimeConfig captures mutable configuration managed at runtime.
@@ -201,12 +205,23 @@ func (c RuntimeConfig) Validate() error {
 
 // RuntimeStore provides concurrency-safe access to runtime configuration.
 type RuntimeStore struct {
-	mu  sync.RWMutex
-	cfg RuntimeConfig
+	mu      sync.RWMutex
+	cfg     RuntimeConfig
+	persist func(RuntimeConfig) error
 }
 
 // NewRuntimeStore constructs a runtime configuration store using the supplied initial configuration.
 func NewRuntimeStore(initial RuntimeConfig) (*RuntimeStore, error) {
+	return newRuntimeStore(initial, nil)
+}
+
+// NewRuntimeStoreWithPersistence constructs a runtime configuration store that invokes the provided
+// persistence callback every time the configuration is updated.
+func NewRuntimeStoreWithPersistence(initial RuntimeConfig, persist func(RuntimeConfig) error) (*RuntimeStore, error) {
+	return newRuntimeStore(initial, persist)
+}
+
+func newRuntimeStore(initial RuntimeConfig, persist func(RuntimeConfig) error) (*RuntimeStore, error) {
 	cfg := initial.Clone()
 	cfg.Normalise()
 	if strings.TrimSpace(cfg.Telemetry.ServiceName) == "" {
@@ -215,7 +230,82 @@ func NewRuntimeStore(initial RuntimeConfig) (*RuntimeStore, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	return &RuntimeStore{mu: sync.RWMutex{}, cfg: cfg}, nil
+	return &RuntimeStore{mu: sync.RWMutex{}, cfg: cfg, persist: persist}, nil
+}
+
+// LoadRuntimeSnapshot loads a runtime configuration snapshot from the supplied path.
+func LoadRuntimeSnapshot(path string) (RuntimeConfig, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return RuntimeConfig{}, fmt.Errorf("runtime snapshot path required")
+	}
+	data, err := os.ReadFile(trimmed) // #nosec G304 -- path is operator-controlled and derived from config path
+	if err != nil {
+		return RuntimeConfig{}, fmt.Errorf("read runtime snapshot %s: %w", trimmed, err)
+	}
+	var cfg RuntimeConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return RuntimeConfig{}, fmt.Errorf("decode runtime snapshot: %w", err)
+	}
+	cfg.Normalise()
+	if strings.TrimSpace(cfg.Telemetry.ServiceName) == "" {
+		cfg.Telemetry.ServiceName = DefaultRuntimeConfig().Telemetry.ServiceName
+	}
+	if err := cfg.Validate(); err != nil {
+		return RuntimeConfig{}, err
+	}
+	return cfg, nil
+}
+
+// SaveRuntimeSnapshot persists the supplied runtime configuration to the provided path.
+func SaveRuntimeSnapshot(path string, cfg RuntimeConfig) error {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return fmt.Errorf("runtime snapshot path required")
+	}
+	clone := cfg.Clone()
+	clone.Normalise()
+	if strings.TrimSpace(clone.Telemetry.ServiceName) == "" {
+		clone.Telemetry.ServiceName = DefaultRuntimeConfig().Telemetry.ServiceName
+	}
+	if err := clone.Validate(); err != nil {
+		return err
+	}
+	dir := filepath.Dir(trimmed)
+	if dir == "" {
+		dir = "."
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create runtime snapshot directory: %w", err)
+	}
+	encoded, err := json.MarshalIndent(clone, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode runtime snapshot: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "runtime-snapshot-*.json")
+	if err != nil {
+		return fmt.Errorf("create temp runtime snapshot: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(encoded); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write runtime snapshot: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("sync runtime snapshot: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close runtime snapshot: %w", err)
+	}
+	if err := os.Rename(tmpPath, trimmed); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("replace runtime snapshot: %w", err)
+	}
+	return nil
 }
 
 // Snapshot returns a copy of the current runtime configuration.
@@ -237,8 +327,13 @@ func (s *RuntimeStore) Replace(cfg RuntimeConfig) (RuntimeConfig, error) {
 	}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.persist != nil {
+		if err := s.persist(updated.Clone()); err != nil {
+			return RuntimeConfig{}, err
+		}
+	}
 	s.cfg = updated
-	s.mu.Unlock()
 
 	return updated.Clone(), nil
 }
@@ -253,6 +348,11 @@ func (s *RuntimeStore) UpdateRisk(cfg RiskConfig) (RiskConfig, error) {
 	merged.Normalise()
 	if err := merged.Validate(); err != nil {
 		return RiskConfig{}, err
+	}
+	if s.persist != nil {
+		if err := s.persist(merged.Clone()); err != nil {
+			return RiskConfig{}, err
+		}
 	}
 	s.cfg = merged
 	return cloneRiskConfig(merged.Risk), nil

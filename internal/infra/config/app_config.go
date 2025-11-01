@@ -3,6 +3,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -309,4 +310,155 @@ func openConfigFile(path string) (io.Reader, func(), error) {
 		return nil, nil, fmt.Errorf("open app config: %w", err)
 	}
 	return file, func() { _ = file.Close() }, nil
+}
+
+// DefaultAppConfig returns the baseline application configuration used when no file is supplied.
+func DefaultAppConfig() AppConfig {
+	return AppConfig{
+		Environment: EnvDev,
+		Meta: MetaConfig{
+			Name:        "",
+			Version:     "",
+			Description: "",
+		},
+		Runtime:   DefaultRuntimeConfig(),
+		Providers: nil,
+		LambdaManifest: LambdaManifest{
+			Lambdas: nil,
+		},
+	}
+}
+
+// Clone returns a deep copy of the application configuration.
+func (c AppConfig) Clone() AppConfig {
+	clone := AppConfig{
+		Environment: c.Environment,
+		Meta: MetaConfig{
+			Name:        c.Meta.Name,
+			Version:     c.Meta.Version,
+			Description: c.Meta.Description,
+		},
+		Runtime:        c.Runtime.Clone(),
+		Providers:      nil,
+		LambdaManifest: LambdaManifest{Lambdas: nil},
+	}
+
+	if len(c.Providers) > 0 {
+		providers := make(map[Provider]map[string]any, len(c.Providers))
+		for name, cfg := range c.Providers {
+			if len(cfg) == 0 {
+				providers[name] = nil
+				continue
+			}
+			providerCfg := make(map[string]any, len(cfg))
+			for key, value := range cfg {
+				providerCfg[key] = cloneAny(value)
+			}
+			providers[name] = providerCfg
+		}
+		clone.Providers = providers
+	}
+
+	clone.LambdaManifest = c.LambdaManifest.Clone()
+	return clone
+}
+
+// LoadOrDefault attempts to load the configuration file, returning defaults when the file is absent.
+func LoadOrDefault(ctx context.Context, configPath string) (AppConfig, bool, error) {
+	cfg, err := Load(ctx, configPath)
+	if err == nil {
+		return cfg, true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		def := DefaultAppConfig()
+		if err := def.normalise(); err != nil {
+			return AppConfig{}, false, err
+		}
+		if err := def.Validate(); err != nil {
+			return AppConfig{}, false, err
+		}
+		return def, false, nil
+	}
+	return AppConfig{}, false, err
+}
+
+// SaveAppConfig persists the supplied configuration to disk using an atomic write strategy.
+func SaveAppConfig(path string, cfg AppConfig) error {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return fmt.Errorf("config path required")
+	}
+
+	clone := cfg.Clone()
+	if err := clone.normalise(); err != nil {
+		return err
+	}
+	if err := clone.Validate(); err != nil {
+		return err
+	}
+
+	encoded, err := yaml.Marshal(clone)
+	if err != nil {
+		return fmt.Errorf("encode app config: %w", err)
+	}
+
+	dir := filepath.Dir(trimmed)
+	if dir == "" {
+		dir = "."
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(dir, "app-config-*.yaml")
+	if err != nil {
+		return fmt.Errorf("create temp app config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(encoded); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write app config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("sync app config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close app config: %w", err)
+	}
+	if err := os.Rename(tmpPath, trimmed); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("replace app config: %w", err)
+	}
+	return nil
+}
+
+func cloneAny(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		if v == nil {
+			return map[string]any(nil)
+		}
+		clone := make(map[string]any, len(v))
+		for key, val := range v {
+			clone[key] = cloneAny(val)
+		}
+		return clone
+	case []any:
+		if v == nil {
+			return []any(nil)
+		}
+		clone := make([]any, len(v))
+		for i, item := range v {
+			clone[i] = cloneAny(item)
+		}
+		return clone
+	case []string:
+		return append([]string(nil), v...)
+	default:
+		return v
+	}
 }

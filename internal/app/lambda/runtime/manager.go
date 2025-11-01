@@ -725,6 +725,65 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 	return snapshotOf(spec, running), true
 }
 
+// InstanceSnapshots returns detailed snapshots for all known lambda instances.
+func (m *Manager) InstanceSnapshots() []InstanceSnapshot {
+    m.mu.RLock()
+    ids := make([]string, 0, len(m.specs))
+    for id := range m.specs {
+        ids = append(ids, id)
+    }
+    m.mu.RUnlock()
+
+    sort.Strings(ids)
+
+    snapshots := make([]InstanceSnapshot, 0, len(ids))
+    for _, id := range ids {
+        snapshot, ok := m.Instance(id)
+        if !ok {
+            continue
+        }
+        snapshots = append(snapshots, snapshot)
+    }
+    return snapshots
+}
+
+// Restore replaces the current manifest and running instances with the supplied snapshot.
+func (m *Manager) Restore(ctx context.Context, manifest config.LambdaManifest, running map[string]bool) error {
+    if err := manifest.Validate(); err != nil {
+        return fmt.Errorf("validate manifest: %w", err)
+    }
+
+    summaries := m.Instances()
+    for _, summary := range summaries {
+        if err := m.Remove(summary.ID); err != nil && !errors.Is(err, ErrInstanceNotFound) {
+            return err
+        }
+    }
+
+    specs := make([]config.LambdaSpec, len(manifest.Lambdas))
+    copy(specs, manifest.Lambdas)
+    sort.Slice(specs, func(i, j int) bool { return specs[i].ID < specs[j].ID })
+
+    for _, spec := range specs {
+        sanitized := sanitizeSpec(spec)
+        if err := m.ensureSpec(sanitized, false); err != nil {
+            return err
+        }
+        shouldRun := sanitized.AutoStart
+        if running != nil {
+            if run, ok := running[sanitized.ID]; ok {
+                shouldRun = run
+            }
+        }
+        if shouldRun {
+            if _, _, _, err := m.launch(ctx, sanitized, true); err != nil {
+                return err
+            }
+        }
+    }
+    return nil
+}
+
 func summaryOf(spec config.LambdaSpec, running bool) InstanceSummary {
 	providers := append([]string(nil), spec.Providers...)
 	aggregated := spec.AllSymbols()

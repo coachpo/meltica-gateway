@@ -47,6 +47,42 @@ type httpServer struct {
 	manager      *runtime.Manager
 	providers    *provider.Manager
 	runtimeStore *config.RuntimeStore
+	configStore  *config.AppConfigStore
+}
+
+func (s *httpServer) persistProviders(w http.ResponseWriter) bool {
+	if s.configStore == nil || s.providers == nil {
+		return true
+	}
+	specs := s.providers.ProviderSpecsSnapshot()
+	if err := s.configStore.SetProviders(specs); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("persist providers: %v", err))
+		return false
+	}
+	return true
+}
+
+func (s *httpServer) persistLambdaManifest(w http.ResponseWriter) bool {
+	if s.configStore == nil || s.manager == nil {
+		return true
+	}
+	manifest := s.manager.ManifestSnapshot()
+	if err := s.configStore.SetLambdaManifest(manifest); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("persist lambda manifest: %v", err))
+		return false
+	}
+	return true
+}
+
+func (s *httpServer) persistRuntimeConfig(w http.ResponseWriter, cfg config.RuntimeConfig) bool {
+	if s.configStore == nil {
+		return true
+	}
+	if err := s.configStore.SetRuntime(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("persist runtime config: %v", err))
+		return false
+	}
+	return true
 }
 
 type providerPayload struct {
@@ -61,8 +97,8 @@ type providerAdapterPayload struct {
 }
 
 // NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(environment config.Environment, meta config.MetaConfig, manager *runtime.Manager, providers *provider.Manager, runtimeStore *config.RuntimeStore) http.Handler {
-	server := &httpServer{environment: environment, meta: meta, manager: manager, providers: providers, runtimeStore: runtimeStore}
+func NewHandler(environment config.Environment, meta config.MetaConfig, manager *runtime.Manager, providers *provider.Manager, runtimeStore *config.RuntimeStore, configStore *config.AppConfigStore) http.Handler {
+	server := &httpServer{environment: environment, meta: meta, manager: manager, providers: providers, runtimeStore: runtimeStore, configStore: configStore}
 	mux := http.NewServeMux()
 
 	mux.Handle(strategiesPath, server.methodHandlers(map[string]handlerFunc{
@@ -102,7 +138,8 @@ func NewHandler(environment config.Environment, meta config.MetaConfig, manager 
 	}))
 
 	mux.Handle(configBackupPath, server.methodHandlers(map[string]handlerFunc{
-		http.MethodGet: server.exportConfigBackup,
+		http.MethodGet:  server.exportConfigBackup,
+		http.MethodPost: server.restoreConfigBackup,
 	}))
 
 	if environment == config.EnvDev {
@@ -190,6 +227,10 @@ func (s *httpServer) createProvider(w http.ResponseWriter, r *http.Request) {
 		s.writeProviderError(w, err)
 		return
 	}
+	if !s.persistProviders(w) {
+		_ = s.providers.Remove(spec.Name)
+		return
+	}
 	writeJSON(w, http.StatusCreated, detail)
 }
 
@@ -259,9 +300,20 @@ func (s *httpServer) handleProviderResource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		prevSpecs := s.providers.ProviderSpecsSnapshot()
+		prevMeta, _ := s.providers.ProviderMetadataFor(name)
 		detail, err := s.providers.Update(r.Context(), spec, enabled)
 		if err != nil {
 			s.writeProviderError(w, err)
+			return
+		}
+		if !s.persistProviders(w) {
+			for _, prev := range prevSpecs {
+				if strings.EqualFold(prev.Name, name) {
+					_, _ = s.providers.Update(r.Context(), prev, prevMeta.Running)
+					break
+				}
+			}
 			return
 		}
 		writeJSON(w, http.StatusOK, detail)
@@ -270,8 +322,19 @@ func (s *httpServer) handleProviderResource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
 			return
 		}
+		prevSpecs := s.providers.ProviderSpecsSnapshot()
+		prevMeta, _ := s.providers.ProviderMetadataFor(name)
 		if err := s.providers.Remove(name); err != nil {
 			s.writeProviderError(w, err)
+			return
+		}
+		if !s.persistProviders(w) {
+			for _, prev := range prevSpecs {
+				if strings.EqualFold(prev.Name, name) {
+					_, _ = s.providers.Create(r.Context(), prev, prevMeta.Running)
+					break
+				}
+			}
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "removed", "name": name})
@@ -365,6 +428,10 @@ func (s *httpServer) createInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot, _ := s.manager.Instance(spec.ID)
+	if !s.persistLambdaManifest(w) {
+		_ = s.manager.Remove(spec.ID)
+		return
+	}
 	writeJSON(w, http.StatusCreated, snapshot)
 }
 
@@ -384,6 +451,12 @@ func (s *httpServer) updateRiskLimits(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if s.runtimeStore != nil {
+		snapshot := s.runtimeStore.Snapshot()
+		if !s.persistRuntimeConfig(w, snapshot) {
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "limits": riskConfigFromLimits(limits)})
 }
@@ -417,42 +490,63 @@ func (s *httpServer) importRuntimeConfig(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if !s.persistRuntimeConfig(w, updated) {
+		return
+	}
 	writeJSON(w, http.StatusOK, updated)
 }
 
 func (s *httpServer) exportConfigBackup(w http.ResponseWriter, _ *http.Request) {
+	payload, err := buildBackupPayload(s)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *httpServer) restoreConfigBackup(w http.ResponseWriter, r *http.Request) {
 	if s.runtimeStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "runtime config store unavailable")
 		return
 	}
-	runtimeSnapshot := s.runtimeStore.Snapshot()
+	limitRequestBody(w, r)
+	defer func() {
+		_ = r.Body.Close()
+	}()
 
-	providersConfig := map[string]map[string]any(nil)
-	if s.providers != nil {
-		specs := s.providers.ProviderSpecsSnapshot()
-		if len(specs) > 0 {
-			providersConfig = buildProviderConfigSnapshot(specs)
-		}
+	var payload ConfigBackup
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(payload.Version) == "" {
+		payload.Version = backupVersion
+	} else if payload.Version != backupVersion {
+		writeError(w, http.StatusBadRequest, "unsupported backup version")
+		return
 	}
 
-	manifest := s.manager.ManifestSnapshot()
-
-	payload := map[string]any{
-		"environment": string(s.environment),
-		"runtime":     buildRuntimeBackup(runtimeSnapshot),
+	if err := s.applyBackup(r.Context(), payload); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
-	if meta := buildMetaSnapshot(s.meta); len(meta) > 0 {
-		payload["meta"] = meta
+	lambdaCount := 0
+	if payload.Lambdas.Manifest.Lambdas != nil {
+		lambdaCount = len(payload.Lambdas.Manifest.Lambdas)
 	}
-	if len(providersConfig) > 0 {
-		payload["providers"] = providersConfig
-	}
-	if len(manifest.Lambdas) > 0 {
-		payload["lambda_manifest"] = buildLambdaManifestBackup(manifest)
+	providerCount := 0
+	if payload.Providers.Config != nil {
+		providerCount = len(payload.Providers.Config)
 	}
 
-	writeJSON(w, http.StatusOK, payload)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "restored",
+		"providers": providerCount,
+		"lambdas":   lambdaCount,
+	})
 }
 
 func (s *httpServer) serveSwaggerSpec(w http.ResponseWriter, _ *http.Request) {
@@ -519,10 +613,16 @@ func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		snapshot, _ := s.manager.Instance(id)
+		if !s.persistLambdaManifest(w) {
+			return
+		}
 		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodDelete:
 		if err := s.manager.Remove(id); err != nil {
 			s.writeManagerError(w, err)
+			return
+		}
+		if !s.persistLambdaManifest(w) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "removed", "id": id})
@@ -801,94 +901,6 @@ func isRequestTooLarge(err error) bool {
 	return errors.As(err, &maxBytesErr)
 }
 
-func buildMetaSnapshot(meta config.MetaConfig) map[string]any {
-	out := make(map[string]any)
-	if strings.TrimSpace(meta.Name) != "" {
-		out["name"] = meta.Name
-	}
-	if strings.TrimSpace(meta.Version) != "" {
-		out["version"] = meta.Version
-	}
-	if strings.TrimSpace(meta.Description) != "" {
-		out["description"] = meta.Description
-	}
-	return out
-}
-
-func buildRuntimeBackup(cfg config.RuntimeConfig) map[string]any {
-	eventbus := map[string]any{
-		"buffer_size": cfg.Eventbus.BufferSize,
-	}
-	if fanout := fanoutWorkerSettingValue(cfg.Eventbus.FanoutWorkers); fanout != nil {
-		eventbus["fanout_workers"] = fanout
-	}
-
-	pools := map[string]any{
-		"event": map[string]any{
-			"size":            cfg.Pools.Event.Size,
-			"wait_queue_size": cfg.Pools.Event.WaitQueueSize,
-		},
-		"order_request": map[string]any{
-			"size":            cfg.Pools.OrderRequest.Size,
-			"wait_queue_size": cfg.Pools.OrderRequest.WaitQueueSize,
-		},
-	}
-
-	allowed := make([]string, len(cfg.Risk.AllowedOrderTypes))
-	for i, raw := range cfg.Risk.AllowedOrderTypes {
-		allowed[i] = strings.TrimSpace(raw)
-	}
-
-	risk := map[string]any{
-		"max_position_size":     cfg.Risk.MaxPositionSize,
-		"max_notional_value":    cfg.Risk.MaxNotionalValue,
-		"notional_currency":     cfg.Risk.NotionalCurrency,
-		"order_throttle":        cfg.Risk.OrderThrottle,
-		"order_burst":           cfg.Risk.OrderBurst,
-		"max_concurrent_orders": cfg.Risk.MaxConcurrentOrders,
-		"price_band_percent":    cfg.Risk.PriceBandPercent,
-		"allowed_order_types":   allowed,
-		"kill_switch_enabled":   cfg.Risk.KillSwitchEnabled,
-		"max_risk_breaches":     cfg.Risk.MaxRiskBreaches,
-		"circuit_breaker": map[string]any{
-			"enabled":   cfg.Risk.CircuitBreaker.Enabled,
-			"threshold": cfg.Risk.CircuitBreaker.Threshold,
-			"cooldown":  cfg.Risk.CircuitBreaker.Cooldown,
-		},
-	}
-
-	telemetry := map[string]any{
-		"otlp_endpoint":  cfg.Telemetry.OTLPEndpoint,
-		"service_name":   cfg.Telemetry.ServiceName,
-		"otlp_insecure":  cfg.Telemetry.OTLPInsecure,
-		"enable_metrics": cfg.Telemetry.EnableMetrics,
-	}
-
-	apiServer := map[string]any{
-		"addr": strings.TrimSpace(cfg.APIServer.Addr),
-	}
-
-	return map[string]any{
-		"eventbus":   eventbus,
-		"pools":      pools,
-		"risk":       risk,
-		"api_server": apiServer,
-		"telemetry":  telemetry,
-	}
-}
-
-func fanoutWorkerSettingValue(setting config.FanoutWorkerSetting) any {
-	bytes, err := setting.MarshalJSON()
-	if err != nil {
-		return nil
-	}
-	var decoded any
-	if err := json.Unmarshal(bytes, &decoded); err != nil {
-		return nil
-	}
-	return decoded
-}
-
 func buildProviderConfigSnapshot(specs []config.ProviderSpec) map[string]map[string]any {
 	if len(specs) == 0 {
 		return nil
@@ -919,34 +931,6 @@ func buildProviderConfigSnapshot(specs []config.ProviderSpec) map[string]map[str
 		}
 	}
 	return out
-}
-
-func buildLambdaManifestBackup(manifest config.LambdaManifest) map[string]any {
-	lambdas := make([]map[string]any, 0, len(manifest.Lambdas))
-	for _, spec := range manifest.Lambdas {
-		strategy := map[string]any{
-			"identifier": spec.Strategy.Identifier,
-		}
-		if len(spec.Strategy.Config) > 0 {
-			strategy["config"] = cloneValue(spec.Strategy.Config)
-		}
-
-		scope := make(map[string]any, len(spec.ProviderSymbols))
-		for name, assignment := range spec.ProviderSymbols {
-			scope[name] = map[string]any{
-				"symbols": append([]string(nil), assignment.Symbols...),
-			}
-		}
-
-		lambdaEntry := map[string]any{
-			"id":         spec.ID,
-			"strategy":   strategy,
-			"auto_start": spec.AutoStart,
-			"scope":      scope,
-		}
-		lambdas = append(lambdas, lambdaEntry)
-	}
-	return map[string]any{"lambdas": lambdas}
 }
 
 func cloneValue(value any) any {

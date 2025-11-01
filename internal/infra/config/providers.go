@@ -63,3 +63,44 @@ func BuildProviderSpecs(providers map[Provider]map[string]any) ([]ProviderSpec, 
 	}
 	return specs, nil
 }
+
+// ProviderSpecsToConfigMap converts provider specifications back into configuration map form.
+func ProviderSpecsToConfigMap(specs []ProviderSpec) map[Provider]map[string]any {
+	if len(specs) == 0 {
+		return nil
+	}
+
+	out := make(map[Provider]map[string]any, len(specs))
+	for _, spec := range specs {
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			continue
+		}
+
+		adapter := make(map[string]any)
+		if strings.TrimSpace(spec.Adapter) != "" {
+			adapter["identifier"] = spec.Adapter
+		}
+
+		for key, value := range spec.Config {
+			trimmed := strings.TrimSpace(key)
+			lower := strings.ToLower(trimmed)
+			switch lower {
+			case "provider_name":
+				continue
+			case "identifier":
+				adapter["identifier"] = cloneAny(value)
+			default:
+				adapter[trimmed] = cloneAny(value)
+			}
+		}
+
+		out[Provider(name)] = map[string]any{
+			"adapter": adapter,
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}

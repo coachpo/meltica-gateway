@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"testing"
 
 	"github.com/coachpo/meltica/internal/infra/config"
@@ -72,5 +73,62 @@ func TestBuildProviderConfigSnapshotMasksSensitiveKeys(t *testing.T) {
 	}
 	if rest := specs[0].Config["rest"].(map[string]any); rest["passphrase"] == nil {
 		t.Fatalf("original rest config should remain unchanged")
+	}
+}
+
+func TestApplyBackupUpdatesRuntimeAndConfigStore(t *testing.T) {
+	runtimeCfg := config.DefaultRuntimeConfig()
+	runtimeStore, err := config.NewRuntimeStore(runtimeCfg)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore failed: %v", err)
+	}
+
+	var persisted []config.AppConfig
+	appStore, err := config.NewAppConfigStore(config.DefaultAppConfig(), func(cfg config.AppConfig) error {
+		persisted = append(persisted, cfg)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("NewAppConfigStore failed: %v", err)
+	}
+
+	server := &httpServer{
+		environment:  config.EnvDev,
+		meta:         config.MetaConfig{Name: "Meltica"},
+		runtimeStore: runtimeStore,
+		configStore:  appStore,
+	}
+
+	payload := ConfigBackup{
+		Version:     backupVersion,
+		Environment: "prod",
+		Meta:        config.MetaConfig{Name: "Restored"},
+		Runtime:     runtimeCfg,
+		Providers:   ProviderBackupSection{},
+		Lambdas:     LambdaBackupSection{},
+	}
+	payload.Runtime.Eventbus.BufferSize += 42
+	payload.Runtime.Telemetry.ServiceName = "restored"
+
+	if err := server.applyBackup(context.Background(), payload); err != nil {
+		t.Fatalf("applyBackup failed: %v", err)
+	}
+
+	snapshot := runtimeStore.Snapshot()
+	if snapshot.Eventbus.BufferSize != payload.Runtime.Eventbus.BufferSize {
+		t.Fatalf("expected runtime buffer to update, got %d", snapshot.Eventbus.BufferSize)
+	}
+	if snapshot.Telemetry.ServiceName != "restored" {
+		t.Fatalf("expected telemetry service name restored, got %s", snapshot.Telemetry.ServiceName)
+	}
+
+	if len(persisted) != 1 {
+		t.Fatalf("expected persisted snapshot, got %d", len(persisted))
+	}
+	if persisted[0].Environment != config.EnvProd {
+		t.Fatalf("expected persisted environment prod, got %s", persisted[0].Environment)
+	}
+	if persisted[0].Runtime.Eventbus.BufferSize != payload.Runtime.Eventbus.BufferSize {
+		t.Fatalf("expected persisted runtime buffer to update, got %d", persisted[0].Runtime.Eventbus.BufferSize)
 	}
 }

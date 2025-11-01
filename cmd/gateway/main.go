@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -47,21 +48,55 @@ func main() {
 
 	logger := newGatewayLogger()
 
-	appCfg, err := config.Load(ctx, resolveConfigPath(cfgPathFlag))
+	configPath := resolveConfigPath(cfgPathFlag)
+
+	appCfg, loadedFromFile, err := config.LoadOrDefault(ctx, configPath)
 	if err != nil {
 		logger.Fatalf("load config: %v", err)
 	}
-	logger.Printf("configuration loaded: env=%s, providers=%d",
+	if !loadedFromFile {
+		logger.Printf("configuration file not found, using defaults")
+	}
+	logger.Printf("configuration initialised: env=%s, providers=%d",
 		appCfg.Environment, len(appCfg.Providers))
 
 	logger.Printf("lambda manifest loaded: lambdas=%d", len(appCfg.LambdaManifest.Lambdas))
 	logger.Printf("providers configured: %d", len(appCfg.Providers))
 
-	runtimeStore, err := config.NewRuntimeStore(appCfg.Runtime)
+	appStore, err := config.NewAppConfigStore(appCfg, func(cfg config.AppConfig) error {
+		return config.SaveAppConfig(configPath, cfg)
+	})
+	if err != nil {
+		logger.Fatalf("initialise app config store: %v", err)
+	}
+
+	runtimeSnapshotPath := deriveRuntimeSnapshotPath(configPath)
+	runtimeCfg := appCfg.Runtime
+	if snapshot, err := config.LoadRuntimeSnapshot(runtimeSnapshotPath); err == nil {
+		runtimeCfg = snapshot
+		logger.Printf("runtime snapshot loaded from %s", runtimeSnapshotPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		logger.Fatalf("load runtime snapshot: %v", err)
+	}
+
+	runtimeStore, err := config.NewRuntimeStoreWithPersistence(runtimeCfg, func(cfg config.RuntimeConfig) error {
+		return config.SaveRuntimeSnapshot(runtimeSnapshotPath, cfg)
+	})
 	if err != nil {
 		logger.Fatalf("initialise runtime config: %v", err)
 	}
+	if _, err := os.Stat(runtimeSnapshotPath); errors.Is(err, os.ErrNotExist) {
+		if err := config.SaveRuntimeSnapshot(runtimeSnapshotPath, runtimeStore.Snapshot()); err != nil {
+			logger.Fatalf("initialise runtime snapshot: %v", err)
+		}
+		logger.Printf("runtime snapshot initialised at %s", runtimeSnapshotPath)
+	} else if err != nil {
+		logger.Fatalf("stat runtime snapshot: %v", err)
+	}
 	runtimeSnapshot := runtimeStore.Snapshot()
+	if err := appStore.SetRuntime(runtimeSnapshot); err != nil {
+		logger.Fatalf("sync runtime config store: %v", err)
+	}
 
 	telemetryProvider, err := initTelemetry(ctx, logger, appCfg.Environment, runtimeSnapshot.Telemetry)
 	if err != nil {
@@ -91,7 +126,7 @@ func main() {
 	}
 	logger.Printf("strategy instances registered: %d", len(lambdaManager.Instances()))
 
-	apiServer := buildAPIServer(runtimeSnapshot.APIServer, appCfg.Environment, appCfg.Meta, runtimeStore, lambdaManager, providerManager)
+	apiServer := buildAPIServer(runtimeSnapshot.APIServer, appCfg.Environment, appCfg.Meta, runtimeStore, lambdaManager, providerManager, appStore)
 	startAPIServer(&lifecycle, logger, apiServer)
 	logger.Printf("control API listening on %s", apiServer.Addr)
 
@@ -206,8 +241,8 @@ func startLambdaManager(ctx context.Context, appCfg config.AppConfig, runtimeSto
 	return manager, nil
 }
 
-func buildAPIServer(cfg config.APIServerConfig, env config.Environment, meta config.MetaConfig, runtimeStore *config.RuntimeStore, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager) *http.Server {
-	handler := httpserver.NewHandler(env, meta, lambdaManager, providerManager, runtimeStore)
+func buildAPIServer(cfg config.APIServerConfig, env config.Environment, meta config.MetaConfig, runtimeStore *config.RuntimeStore, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager, appStore *config.AppConfigStore) *http.Server {
+	handler := httpserver.NewHandler(env, meta, lambdaManager, providerManager, runtimeStore, appStore)
 
 	return &http.Server{
 		Addr:                         cfg.Addr,
@@ -320,4 +355,13 @@ func resolveConfigPath(flagValue string) string {
 	}
 
 	return filepath.Clean(defaultConfigPath)
+}
+
+func deriveRuntimeSnapshotPath(configPath string) string {
+	cleaned := filepath.Clean(configPath)
+	dir := filepath.Dir(cleaned)
+	if dir == "" {
+		dir = "."
+	}
+	return filepath.Join(dir, "runtime.snapshot.json")
 }
