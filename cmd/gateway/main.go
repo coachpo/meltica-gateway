@@ -79,19 +79,9 @@ func main() {
 		logger.Fatalf("load runtime snapshot: %v", err)
 	}
 
-	runtimeStore, err := config.NewRuntimeStoreWithPersistence(runtimeCfg, func(cfg config.RuntimeConfig) error {
-		return config.SaveRuntimeSnapshot(runtimeSnapshotPath, cfg)
-	})
+	runtimeStore, err := config.NewRuntimeStore(runtimeCfg)
 	if err != nil {
 		logger.Fatalf("initialise runtime config: %v", err)
-	}
-	if _, err := os.Stat(runtimeSnapshotPath); errors.Is(err, os.ErrNotExist) {
-		if err := config.SaveRuntimeSnapshot(runtimeSnapshotPath, runtimeStore.Snapshot()); err != nil {
-			logger.Fatalf("initialise runtime snapshot: %v", err)
-		}
-		logger.Printf("runtime snapshot initialised at %s", runtimeSnapshotPath)
-	} else if err != nil {
-		logger.Fatalf("stat runtime snapshot: %v", err)
 	}
 	runtimeSnapshot := runtimeStore.Snapshot()
 	if err := appStore.SetRuntime(runtimeSnapshot); err != nil {
