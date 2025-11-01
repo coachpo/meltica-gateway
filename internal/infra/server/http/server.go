@@ -765,7 +765,7 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 	targetProviders := make(map[string]config.ProviderSpec, len(payload.Providers))
 	orderedProviders := make([]config.ProviderSpec, 0, len(payload.Providers))
 	for _, spec := range payload.Providers {
-		sanitized := provider.SanitizeSpec(spec)
+		sanitized := provider.SanitizeProviderSpec(spec)
 		sanitized.Name = strings.TrimSpace(sanitized.Name)
 		if sanitized.Name == "" {
 			return fmt.Errorf("provider name required")

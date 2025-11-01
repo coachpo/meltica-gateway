@@ -6,96 +6,118 @@ import (
 	"github.com/coachpo/meltica/internal/infra/config"
 )
 
-var sensitiveFragments = []string{
-	"api_key",
-	"apikey",
-	"api-secret",
-	"api_secret",
-	"secret",
-	"passphrase",
-	"password",
-	"token",
-	"wssecret",
-	"privatekey",
-	"access_key",
-	"accesskey",
-	"client_secret",
-}
+var (
+	providerSensitiveFragments = []string{
+		"secret",
+		"passphrase",
+		"apikey",
+		"wsapikey",
+		"wssecret",
+		"privatekey",
+		"privkey",
+		"token",
+		"password",
+		"clientsecret",
+		"accesskey",
+		"access_token",
+	}
 
-// SanitizeConfig returns a copy of the provider configuration with sensitive fields removed.
-func SanitizeConfig(cfg map[string]any) map[string]any {
+	providerSettingReplacer = strings.NewReplacer("-", "", "_", "", " ", "")
+)
+
+// SanitizeProviderConfig returns a copy of the supplied configuration with sensitive keys removed.
+func SanitizeProviderConfig(cfg map[string]any) map[string]any {
 	if len(cfg) == 0 {
 		return nil
 	}
-	out := make(map[string]any, len(cfg))
-	for key, value := range cfg {
-		if isSensitiveConfigKey(key) {
-			continue
-		}
-		switch typed := value.(type) {
-		case map[string]any:
-			nested := SanitizeConfig(typed)
-			if len(nested) > 0 {
-				out[key] = nested
-			}
-		case []any:
-			nested := sanitizeSlice(typed)
-			if len(nested) > 0 {
-				out[key] = nested
-			}
-		default:
-			out[key] = typed
-		}
-	}
-	if len(out) == 0 {
+	clean := sanitizeProviderSettingsMap(cfg)
+	if len(clean) == 0 {
 		return nil
 	}
-	return out
+	return clean
 }
 
-// SanitizeSpec returns a sanitised copy of the provider specification with sensitive fields removed.
-func SanitizeSpec(spec config.ProviderSpec) config.ProviderSpec {
+// SanitizeProviderSpec returns a sanitised provider specification with sensitive fields removed.
+func SanitizeProviderSpec(spec config.ProviderSpec) config.ProviderSpec {
 	return config.ProviderSpec{
 		Name:    spec.Name,
 		Adapter: spec.Adapter,
-		Config:  SanitizeConfig(spec.Config),
+		Config:  SanitizeProviderConfig(spec.Config),
 	}
 }
 
-func sanitizeSlice(items []any) []any {
-	if len(items) == 0 {
+func sanitizeProviderSettingsMap(cfg map[string]any) map[string]any {
+	if len(cfg) == 0 {
 		return nil
 	}
-	out := make([]any, 0, len(items))
-	for _, item := range items {
-		switch typed := item.(type) {
-		case map[string]any:
-			nested := SanitizeConfig(typed)
-			if len(nested) > 0 {
-				out = append(out, nested)
-			}
-		case []any:
-			nested := sanitizeSlice(typed)
-			if len(nested) > 0 {
-				out = append(out, nested)
-			}
-		default:
-			out = append(out, typed)
+	clean := make(map[string]any)
+	for key, value := range cfg {
+		if shouldOmitProviderSettingKey(key) {
+			continue
 		}
+		sanitized := sanitizeProviderSettingValue(value)
+		if sanitized == nil {
+			continue
+		}
+		clean[key] = sanitized
 	}
-	if len(out) == 0 {
+	if len(clean) == 0 {
 		return nil
 	}
-	return out
+	return clean
 }
 
-func isSensitiveConfigKey(key string) bool {
-	lower := strings.ToLower(strings.TrimSpace(key))
-	if lower == "" {
+func sanitizeProviderSettingValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		clean := sanitizeProviderSettingsMap(v)
+		if len(clean) == 0 {
+			return nil
+		}
+		return clean
+	case []any:
+		filtered := make([]any, 0, len(v))
+		for _, item := range v {
+			switch typed := item.(type) {
+			case map[string]any:
+				clean := sanitizeProviderSettingsMap(typed)
+				if len(clean) == 0 {
+					continue
+				}
+				filtered = append(filtered, clean)
+			case []any:
+				nested := sanitizeProviderSettingValue(typed)
+				if nested == nil {
+					continue
+				}
+				filtered = append(filtered, nested)
+			default:
+				filtered = append(filtered, typed)
+			}
+		}
+		if len(filtered) == 0 {
+			return nil
+		}
+		return filtered
+	case []string:
+		if len(v) == 0 {
+			return []string{}
+		}
+		return append([]string(nil), v...)
+	default:
+		return value
+	}
+}
+
+func shouldOmitProviderSettingKey(key string) bool {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
 		return false
 	}
-	for _, fragment := range sensitiveFragments {
-		if strings.Contains(lower, fragment) {
+	normalized := strings.ToLower(trimmed)
+	normalized = providerSettingReplacer.Replace(normalized)
+	for _, fragment := range providerSensitiveFragments {
+		if strings.Contains(normalized, providerSettingReplacer.Replace(fragment)) {
 			return true
 		}
 	}

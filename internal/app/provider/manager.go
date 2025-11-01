@@ -541,7 +541,7 @@ func (m *Manager) SanitizedProviderSpecs() []config.ProviderSpec {
 	}
 	specs := make([]config.ProviderSpec, 0, len(m.states))
 	for _, state := range m.states {
-		specs = append(specs, SanitizeSpec(state.spec))
+		specs = append(specs, SanitizeProviderSpec(state.spec))
 	}
 	sort.Slice(specs, func(i, j int) bool {
 		return specs[i].Name < specs[j].Name
