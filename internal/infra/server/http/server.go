@@ -831,7 +831,7 @@ func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
 	if limits.CircuitBreaker.Cooldown > 0 {
 		cooldown = limits.CircuitBreaker.Cooldown.String()
 	}
-	return config.RiskConfig{
+	cfg := config.RiskConfig{
 		MaxPositionSize:     limits.MaxPositionSize.String(),
 		MaxNotionalValue:    limits.MaxNotionalValue.String(),
 		NotionalCurrency:    limits.NotionalCurrency,
@@ -848,6 +848,8 @@ func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
 			Cooldown:  cooldown,
 		},
 	}
+	cfg.MarkAllFieldsSet()
+	return cfg
 }
 
 func validateRiskConfig(cfg config.RiskConfig) error {

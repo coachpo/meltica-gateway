@@ -213,6 +213,76 @@ type RiskConfig struct {
 	KillSwitchEnabled   bool                 `yaml:"kill_switch_enabled" json:"killSwitchEnabled"`
 	MaxRiskBreaches     int                  `yaml:"max_risk_breaches" json:"maxRiskBreaches"`
 	CircuitBreaker      CircuitBreakerConfig `yaml:"circuit_breaker" json:"circuitBreaker"`
+	presence            riskConfigPresence
+}
+
+type riskConfigPresence struct {
+	MaxPositionSize         bool
+	MaxNotionalValue        bool
+	NotionalCurrency        bool
+	OrderThrottle           bool
+	OrderBurst              bool
+	MaxConcurrentOrders     bool
+	PriceBandPercent        bool
+	AllowedOrderTypes       bool
+	KillSwitchEnabled       bool
+	MaxRiskBreaches         bool
+	CircuitBreakerEnabled   bool
+	CircuitBreakerThreshold bool
+	CircuitBreakerCooldown  bool
+}
+
+func (c *RiskConfig) UnmarshalYAML(node *yaml.Node) error {
+	if node == nil {
+		*c = RiskConfig{}
+		return nil
+	}
+	type riskConfigAlias RiskConfig
+	var alias riskConfigAlias
+	if err := node.Decode(&alias); err != nil {
+		return fmt.Errorf("decode risk config: %w", err)
+	}
+	cfg := RiskConfig(alias)
+	cfg.presence = detectRiskPresenceYAML(node)
+	*c = cfg
+	return nil
+}
+
+func (c *RiskConfig) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*c = RiskConfig{}
+		return nil
+	}
+	type riskConfigAlias RiskConfig
+	var alias riskConfigAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	cfg := RiskConfig(alias)
+	cfg.presence = detectRiskPresenceJSON(data)
+	*c = cfg
+	return nil
+}
+
+func (c *RiskConfig) MarkAllFieldsSet() {
+	if c == nil {
+		return
+	}
+	c.presence = riskConfigPresence{
+		MaxPositionSize:         true,
+		MaxNotionalValue:        true,
+		NotionalCurrency:        true,
+		OrderThrottle:           true,
+		OrderBurst:              true,
+		MaxConcurrentOrders:     true,
+		PriceBandPercent:        true,
+		AllowedOrderTypes:       true,
+		KillSwitchEnabled:       true,
+		MaxRiskBreaches:         true,
+		CircuitBreakerEnabled:   true,
+		CircuitBreakerThreshold: true,
+		CircuitBreakerCooldown:  true,
+	}
 }
 
 // TelemetryConfig configures OTLP exporters (metrics only).
@@ -461,4 +531,107 @@ func cloneAny(value any) any {
 	default:
 		return v
 	}
+}
+
+func detectRiskPresenceYAML(node *yaml.Node) riskConfigPresence {
+	var presence riskConfigPresence
+	if node == nil || node.Kind != yaml.MappingNode {
+		return presence
+	}
+	for i := 0; i < len(node.Content)-1; i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		key := normalizeRiskKey(keyNode.Value)
+		switch key {
+		case "maxpositionsize":
+			presence.MaxPositionSize = true
+		case "maxnotionalvalue":
+			presence.MaxNotionalValue = true
+		case "notionalcurrency":
+			presence.NotionalCurrency = true
+		case "orderthrottle":
+			presence.OrderThrottle = true
+		case "orderburst":
+			presence.OrderBurst = true
+		case "maxconcurrentorders":
+			presence.MaxConcurrentOrders = true
+		case "pricebandpercent":
+			presence.PriceBandPercent = true
+		case "allowedordertypes":
+			presence.AllowedOrderTypes = true
+		case "killswitchenabled":
+			presence.KillSwitchEnabled = true
+		case "maxriskbreaches":
+			presence.MaxRiskBreaches = true
+		case "circuitbreaker":
+			if valueNode.Kind == yaml.MappingNode {
+				for j := 0; j < len(valueNode.Content)-1; j += 2 {
+					subKey := normalizeRiskKey(valueNode.Content[j].Value)
+					switch subKey {
+					case "enabled":
+						presence.CircuitBreakerEnabled = true
+					case "threshold":
+						presence.CircuitBreakerThreshold = true
+					case "cooldown":
+						presence.CircuitBreakerCooldown = true
+					}
+				}
+			}
+		}
+	}
+	return presence
+}
+
+func detectRiskPresenceJSON(data []byte) riskConfigPresence {
+	var presence riskConfigPresence
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return presence
+	}
+	for key, raw := range payload {
+		normalized := normalizeRiskKey(key)
+		switch normalized {
+		case "maxpositionsize":
+			presence.MaxPositionSize = true
+		case "maxnotionalvalue":
+			presence.MaxNotionalValue = true
+		case "notionalcurrency":
+			presence.NotionalCurrency = true
+		case "orderthrottle":
+			presence.OrderThrottle = true
+		case "orderburst":
+			presence.OrderBurst = true
+		case "maxconcurrentorders":
+			presence.MaxConcurrentOrders = true
+		case "pricebandpercent":
+			presence.PriceBandPercent = true
+		case "allowedordertypes":
+			presence.AllowedOrderTypes = true
+		case "killswitchenabled":
+			presence.KillSwitchEnabled = true
+		case "maxriskbreaches":
+			presence.MaxRiskBreaches = true
+		case "circuitbreaker":
+			var circuit map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &circuit); err != nil {
+				continue
+			}
+			for subKey := range circuit {
+				switch normalizeRiskKey(subKey) {
+				case "enabled":
+					presence.CircuitBreakerEnabled = true
+				case "threshold":
+					presence.CircuitBreakerThreshold = true
+				case "cooldown":
+					presence.CircuitBreakerCooldown = true
+				}
+			}
+		}
+	}
+	return presence
+}
+
+func normalizeRiskKey(key string) string {
+	replaced := strings.ReplaceAll(strings.TrimSpace(key), "_", "")
+	return strings.ToLower(replaced)
 }

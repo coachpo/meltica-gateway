@@ -21,7 +21,7 @@ type RuntimeConfig struct {
 
 // DefaultRiskConfig returns the default risk configuration applied when no overrides are supplied.
 func DefaultRiskConfig() RiskConfig {
-	return RiskConfig{
+	cfg := RiskConfig{
 		MaxPositionSize:     "250",
 		MaxNotionalValue:    "50000",
 		NotionalCurrency:    "USDT",
@@ -38,6 +38,8 @@ func DefaultRiskConfig() RiskConfig {
 			Cooldown:  "90s",
 		},
 	}
+	cfg.MarkAllFieldsSet()
+	return cfg
 }
 
 // DefaultRuntimeConfig returns the default runtime configuration used when no overrides are supplied.
@@ -82,61 +84,11 @@ func (c *RuntimeConfig) Normalise() {
 	if c == nil {
 		return
 	}
-	if isRiskConfigUnset(c.Risk) {
-		c.Risk = cloneRiskConfig(DefaultRiskConfig())
-	}
-	c.Risk.MaxPositionSize = strings.TrimSpace(c.Risk.MaxPositionSize)
-	c.Risk.MaxNotionalValue = strings.TrimSpace(c.Risk.MaxNotionalValue)
-	c.Risk.NotionalCurrency = strings.TrimSpace(c.Risk.NotionalCurrency)
-	c.Risk.CircuitBreaker.Cooldown = strings.TrimSpace(c.Risk.CircuitBreaker.Cooldown)
+	c.Risk = applyRiskDefaults(c.Risk, DefaultRiskConfig())
 
 	c.APIServer.Addr = strings.TrimSpace(c.APIServer.Addr)
 	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
 	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
-
-	if c.Risk.OrderBurst <= 0 {
-		c.Risk.OrderBurst = 1
-	}
-	if c.Risk.MaxRiskBreaches < 0 {
-		c.Risk.MaxRiskBreaches = 0
-	}
-	if c.Risk.CircuitBreaker.Threshold < 0 {
-		c.Risk.CircuitBreaker.Threshold = 0
-	}
-	for i, ot := range c.Risk.AllowedOrderTypes {
-		c.Risk.AllowedOrderTypes[i] = strings.TrimSpace(ot)
-	}
-}
-
-func isRiskConfigUnset(cfg RiskConfig) bool {
-	if strings.TrimSpace(cfg.MaxPositionSize) != "" {
-		return false
-	}
-	if strings.TrimSpace(cfg.MaxNotionalValue) != "" {
-		return false
-	}
-	if strings.TrimSpace(cfg.NotionalCurrency) != "" {
-		return false
-	}
-	if cfg.OrderThrottle != 0 || cfg.OrderBurst != 0 || cfg.MaxConcurrentOrders != 0 {
-		return false
-	}
-	if cfg.PriceBandPercent != 0 {
-		return false
-	}
-	if len(cfg.AllowedOrderTypes) > 0 {
-		return false
-	}
-	if cfg.KillSwitchEnabled || cfg.MaxRiskBreaches != 0 {
-		return false
-	}
-	if cfg.CircuitBreaker.Enabled || cfg.CircuitBreaker.Threshold != 0 {
-		return false
-	}
-	if strings.TrimSpace(cfg.CircuitBreaker.Cooldown) != "" {
-		return false
-	}
-	return true
 }
 
 // Validate performs semantic validation on runtime configuration fields.
@@ -365,5 +317,105 @@ func cloneRiskConfig(src RiskConfig) RiskConfig {
 	} else {
 		cloned.AllowedOrderTypes = nil
 	}
+	cloned.presence = src.presence
 	return cloned
+}
+
+func applyRiskDefaults(current RiskConfig, defaults RiskConfig) RiskConfig {
+	result := cloneRiskConfig(current)
+
+	if !result.presence.MaxPositionSize && strings.TrimSpace(result.MaxPositionSize) == "" {
+		result.MaxPositionSize = defaults.MaxPositionSize
+	}
+	result.MaxPositionSize = strings.TrimSpace(result.MaxPositionSize)
+	if result.MaxPositionSize != "" {
+		result.presence.MaxPositionSize = true
+	}
+
+	if !result.presence.MaxNotionalValue && strings.TrimSpace(result.MaxNotionalValue) == "" {
+		result.MaxNotionalValue = defaults.MaxNotionalValue
+	}
+	result.MaxNotionalValue = strings.TrimSpace(result.MaxNotionalValue)
+	if result.MaxNotionalValue != "" {
+		result.presence.MaxNotionalValue = true
+	}
+
+	if !result.presence.NotionalCurrency && strings.TrimSpace(result.NotionalCurrency) == "" {
+		result.NotionalCurrency = defaults.NotionalCurrency
+	}
+	result.NotionalCurrency = strings.TrimSpace(result.NotionalCurrency)
+	if result.NotionalCurrency != "" {
+		result.presence.NotionalCurrency = true
+	}
+
+	if !result.presence.OrderThrottle && result.OrderThrottle == 0 {
+		result.OrderThrottle = defaults.OrderThrottle
+	}
+	if result.OrderThrottle != 0 {
+		result.presence.OrderThrottle = true
+	}
+
+	if !result.presence.OrderBurst && result.OrderBurst == 0 {
+		result.OrderBurst = defaults.OrderBurst
+	}
+	if result.OrderBurst <= 0 {
+		result.OrderBurst = 1
+	}
+	result.presence.OrderBurst = true
+
+	if !result.presence.MaxConcurrentOrders {
+		result.MaxConcurrentOrders = defaults.MaxConcurrentOrders
+	}
+	if result.MaxConcurrentOrders < 0 {
+		result.MaxConcurrentOrders = 0
+	}
+	result.presence.MaxConcurrentOrders = true
+
+	if !result.presence.PriceBandPercent {
+		result.PriceBandPercent = defaults.PriceBandPercent
+	}
+	if result.PriceBandPercent < 0 {
+		result.PriceBandPercent = 0
+	}
+	result.presence.PriceBandPercent = true
+
+	if !result.presence.AllowedOrderTypes && len(result.AllowedOrderTypes) == 0 {
+		result.AllowedOrderTypes = append([]string(nil), defaults.AllowedOrderTypes...)
+	}
+	for i, ot := range result.AllowedOrderTypes {
+		result.AllowedOrderTypes[i] = strings.TrimSpace(ot)
+	}
+	result.presence.AllowedOrderTypes = true
+
+	if !result.presence.KillSwitchEnabled {
+		result.KillSwitchEnabled = defaults.KillSwitchEnabled
+	}
+	result.presence.KillSwitchEnabled = true
+
+	if !result.presence.MaxRiskBreaches {
+		result.MaxRiskBreaches = defaults.MaxRiskBreaches
+	}
+	if result.MaxRiskBreaches < 0 {
+		result.MaxRiskBreaches = 0
+	}
+	result.presence.MaxRiskBreaches = true
+
+	if !result.presence.CircuitBreakerEnabled {
+		result.CircuitBreaker.Enabled = defaults.CircuitBreaker.Enabled
+	}
+	if !result.presence.CircuitBreakerThreshold {
+		result.CircuitBreaker.Threshold = defaults.CircuitBreaker.Threshold
+	}
+	if result.CircuitBreaker.Threshold < 0 {
+		result.CircuitBreaker.Threshold = 0
+	}
+	if !result.presence.CircuitBreakerCooldown && strings.TrimSpace(result.CircuitBreaker.Cooldown) == "" {
+		result.CircuitBreaker.Cooldown = defaults.CircuitBreaker.Cooldown
+	}
+	result.CircuitBreaker.Cooldown = strings.TrimSpace(result.CircuitBreaker.Cooldown)
+	result.presence.CircuitBreakerEnabled = true
+	result.presence.CircuitBreakerThreshold = true
+	result.presence.CircuitBreakerCooldown = true
+
+	return result
 }
