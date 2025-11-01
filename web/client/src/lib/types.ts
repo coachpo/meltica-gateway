@@ -236,3 +236,13 @@ export interface RestoreConfigResponse {
   providers: number;
   lambdas: number;
 }
+
+export interface ContextBackupPayload {
+  providers: Record<string, unknown>[];
+  lambdas: Record<string, unknown>[];
+  risk: Record<string, unknown>;
+}
+
+export interface RestoreContextResponse {
+  status: string;
+}

@@ -13,6 +13,8 @@ import {
   ApiError,
   ConfigBackup,
   RestoreConfigResponse,
+  ContextBackupPayload,
+  RestoreContextResponse,
 } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8880';
@@ -463,6 +465,17 @@ class ApiClient {
 
   async restoreConfigBackup(payload: ConfigBackup): Promise<RestoreConfigResponse> {
     return this.request('/config/backup', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getContextBackup(): Promise<ContextBackupPayload> {
+    return this.request('/context/backup');
+  }
+
+  async restoreContextBackup(payload: ContextBackupPayload): Promise<RestoreContextResponse> {
+    return this.request('/context/backup', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
