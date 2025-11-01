@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { InstanceSummary, Strategy, Provider } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +11,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
 import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon } from 'lucide-react';
 
 export default function InstancesPage() {
@@ -35,7 +34,6 @@ export default function InstancesPage() {
     strategyIdentifier: '',
     provider: '',
     symbols: '',
-    autoStart: false,
   });
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -76,7 +74,6 @@ export default function InstancesPage() {
       strategyIdentifier: '',
       provider: '',
       symbols: '',
-      autoStart: false,
     });
     setConfigValues({});
     setFormError(null);
@@ -199,7 +196,6 @@ export default function InstancesPage() {
       scope: {
         [newInstance.provider]: { symbols },
       },
-      autoStart: newInstance.autoStart,
     };
 
     const mode = dialogMode;
@@ -232,8 +228,9 @@ export default function InstancesPage() {
       
       // Check if error is about provider availability but instance might still be created
       if (errorMessage.includes('provider') && errorMessage.includes('unavailable')) {
+        const providerName = newInstance.provider || errorMessage.match(/"([^"]+)"/)?.[1] || 'selected provider';
         setFormError(
-          `${errorMessage}. Note: The instance may have been created in stopped state. Close this dialog and refresh to verify.`
+          `Provider "${providerName}" is not running. Start the provider and try creating the instance again.`
         );
       } else if (errorMessage.includes('scope assignments are immutable')) {
         setFormError(
@@ -313,19 +310,18 @@ export default function InstancesPage() {
     setConfigValues({});
     setInstanceLoading(true);
     setCreateDialogOpen(true);
-    try {
-      const instance = await apiClient.getInstance(id);
-      const providerEntries = Object.entries(instance.scope);
-      const [providerName, providerScope] = providerEntries[0] ?? ['', { symbols: [] }];
-      const symbolsValue = (providerScope?.symbols ?? []).join(', ');
+  try {
+    const instance = await apiClient.getInstance(id);
+    const providerEntries = Object.entries(instance.scope);
+    const [providerName, providerScope] = providerEntries[0] ?? ['', { symbols: [] }];
+    const symbolsValue = (providerScope?.symbols ?? []).join(', ');
 
-      setNewInstance({
-        id: instance.id,
-        strategyIdentifier: instance.strategy.identifier,
-        provider: providerName,
-        symbols: symbolsValue,
-        autoStart: Boolean(instance.autoStart),
-      });
+    setNewInstance({
+      id: instance.id,
+      strategyIdentifier: instance.strategy.identifier,
+      provider: providerName,
+      symbols: symbolsValue,
+    });
 
       const strategyMeta = strategies.find((strategy) => strategy.name === instance.strategy.identifier);
       if (strategyMeta) {
@@ -478,12 +474,21 @@ export default function InstancesPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {providers.map((provider) => (
-                          <SelectItem key={provider.name} value={provider.name}>
-                            {provider.name}
+                          <SelectItem
+                            key={provider.name}
+                            value={provider.name}
+                            disabled={!provider.running}
+                          >
+                            {provider.running ? provider.name : `${provider.name} (stopped)`}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    {providers.some((provider) => !provider.running) && (
+                      <p className="text-xs text-muted-foreground">
+                        Start a provider from the Providers page to enable it here.
+                      </p>
+                    )}
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="symbols">
@@ -557,25 +562,6 @@ export default function InstancesPage() {
                       </div>
                     </div>
                   )}
-                  <div className="rounded-md border p-3">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">Start automatically</p>
-                        <p className="text-xs text-muted-foreground">
-                          When disabled, the instance remains stopped after saving.
-                        </p>
-                      </div>
-                      <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                        <Checkbox
-                          checked={newInstance.autoStart}
-                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                            setNewInstance({ ...newInstance, autoStart: event.target.checked })
-                          }
-                        />
-                        <span>Start after saving</span>
-                      </label>
-                    </div>
-                  </div>
                 </div>
               )}
             </div>
@@ -678,12 +664,6 @@ export default function InstancesPage() {
                       </Badge>
                     ))}
                   </div>
-                </div>
-                <div>
-                  <span className="font-medium">Auto-start:</span>{' '}
-                  <span className="text-muted-foreground">
-                    {instance.autoStart ? 'Enabled' : 'Disabled'}
-                  </span>
                 </div>
               </div>
               <div className="flex gap-2">

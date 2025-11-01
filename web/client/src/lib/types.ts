@@ -86,7 +86,6 @@ export interface InstanceSummary {
   strategyIdentifier: string;
   providers: string[];
   aggregatedSymbols: string[];
-  autoStart: boolean;
   running: boolean;
 }
 
@@ -103,7 +102,6 @@ export interface InstanceSpec {
   scope: Record<string, ProviderSymbols>;
   providers?: string[];
   aggregatedSymbols?: string[];
-  autoStart?: boolean;
   running?: boolean;
 }
 
@@ -196,7 +194,6 @@ export interface LambdaManifestEntry {
   id: string;
   strategy: LambdaStrategySpec;
   scope: Record<string, ProviderSymbols>;
-  autoStart: boolean;
 }
 
 export interface LambdaInstanceSnapshot {
@@ -205,7 +202,6 @@ export interface LambdaInstanceSnapshot {
   providers: string[];
   providerSymbols: Record<string, ProviderSymbols>;
   aggregatedSymbols: string[];
-  autoStart: boolean;
   running: boolean;
 }
 

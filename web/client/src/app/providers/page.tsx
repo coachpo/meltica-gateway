@@ -215,8 +215,10 @@ function maskProviderSettingsForDisplay(settings: Record<string, unknown> | unde
 }
 
 function maskProviderDetail(detail: ProviderDetail): ProviderDetail {
+  const instruments = Array.isArray(detail.instruments) ? detail.instruments : [];
   return {
     ...detail,
+    instruments,
     settings: maskProviderSettingsForDisplay(detail.settings),
   };
 }
