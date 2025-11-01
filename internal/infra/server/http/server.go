@@ -174,6 +174,17 @@ func (s *httpServer) listProviders(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	metadata := s.providers.ProviderMetadataSnapshot()
+	usage := s.providerUsage()
+	for i := range metadata {
+		nameKey := strings.ToLower(strings.TrimSpace(metadata[i].Name))
+		if dependents, ok := usage[nameKey]; ok {
+			metadata[i].DependentInstances = cloneStringSlice(dependents)
+			metadata[i].DependentInstanceCount = len(dependents)
+		} else {
+			metadata[i].DependentInstances = []string{}
+			metadata[i].DependentInstanceCount = 0
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": metadata})
 }
 
@@ -220,6 +231,9 @@ func (s *httpServer) writeProviderDetail(w http.ResponseWriter, name string) {
 		writeError(w, http.StatusNotFound, "provider not found")
 		return
 	}
+	dependents := s.instancesUsingProvider(name)
+	meta.DependentInstances = dependents
+	meta.DependentInstanceCount = len(dependents)
 	writeJSON(w, http.StatusOK, meta)
 }
 
@@ -281,6 +295,11 @@ func (s *httpServer) handleProviderResource(w http.ResponseWriter, r *http.Reque
 	case http.MethodDelete:
 		if s.providers == nil {
 			writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
+			return
+		}
+		dependents := s.instancesUsingProvider(name)
+		if len(dependents) > 0 {
+			writeError(w, http.StatusConflict, fmt.Sprintf("provider %s is in use by instances: %s", name, strings.Join(dependents, ", ")))
 			return
 		}
 		if err := s.providers.Remove(name); err != nil {
@@ -818,6 +837,73 @@ func validateRiskConfig(cfg config.RiskConfig) error {
 	return nil
 }
 
+func (s *httpServer) providerUsage() map[string][]string {
+	usage := make(map[string][]string)
+	if s.manager == nil {
+		return usage
+	}
+	appendProvider := func(list *[]string, seen map[string]struct{}, name string) {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return
+		}
+		normalized := strings.ToLower(trimmed)
+		if _, exists := seen[normalized]; exists {
+			return
+		}
+		seen[normalized] = struct{}{}
+		*list = append(*list, normalized)
+	}
+	summaries := s.manager.Instances()
+	for _, summary := range summaries {
+		if s.isBaselineLambda(summary.ID) {
+			continue
+		}
+		normalizedProviders := make([]string, 0, len(summary.Providers))
+		seen := make(map[string]struct{}, len(summary.Providers))
+		for _, providerName := range summary.Providers {
+			appendProvider(&normalizedProviders, seen, providerName)
+		}
+		if len(normalizedProviders) == 0 {
+			if snapshot, ok := s.manager.Instance(summary.ID); ok {
+				for _, providerName := range snapshot.Providers {
+					appendProvider(&normalizedProviders, seen, providerName)
+				}
+				if len(normalizedProviders) == 0 && len(snapshot.ProviderSymbols) > 0 {
+					providerNames := make([]string, 0, len(snapshot.ProviderSymbols))
+					for name := range snapshot.ProviderSymbols {
+						providerNames = append(providerNames, name)
+					}
+					sort.Strings(providerNames)
+					for _, providerName := range providerNames {
+						appendProvider(&normalizedProviders, seen, providerName)
+					}
+				}
+			}
+		}
+		for _, key := range normalizedProviders {
+			usage[key] = append(usage[key], summary.ID)
+		}
+	}
+	for key := range usage {
+		sort.Strings(usage[key])
+	}
+	return usage
+}
+
+func (s *httpServer) instancesUsingProvider(name string) []string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return []string{}
+	}
+	usage := s.providerUsage()
+	list := usage[strings.ToLower(trimmed)]
+	if len(list) == 0 {
+		return []string{}
+	}
+	return cloneStringSlice(list)
+}
+
 func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBackup) error {
 	if s.providers == nil || s.manager == nil {
 		return fmt.Errorf("runtime managers unavailable")
@@ -834,35 +920,9 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 		if s.isBaselineProvider(sanitized.Name) {
 			continue
 		}
-		targetProviders[strings.ToLower(sanitized.Name)] = sanitized
+		key := strings.ToLower(sanitized.Name)
+		targetProviders[key] = sanitized
 		orderedProviders = append(orderedProviders, sanitized)
-	}
-
-	existing := s.providers.SanitizedProviderSpecs()
-	for _, spec := range existing {
-		if s.isBaselineProvider(spec.Name) {
-			continue
-		}
-		if _, ok := targetProviders[strings.ToLower(spec.Name)]; !ok {
-			if err := s.providers.Remove(spec.Name); err != nil && !errors.Is(err, provider.ErrProviderNotFound) {
-				return fmt.Errorf("remove provider %s: %w", spec.Name, err)
-			}
-		}
-	}
-
-	for _, spec := range orderedProviders {
-		if _, exists := s.providers.ProviderMetadataFor(spec.Name); exists {
-			if _, err := s.providers.StopProvider(spec.Name); err != nil && !errors.Is(err, provider.ErrProviderNotRunning) {
-				return fmt.Errorf("stop provider %s: %w", spec.Name, err)
-			}
-			if _, err := s.providers.Update(ctx, spec, false); err != nil {
-				return fmt.Errorf("update provider %s: %w", spec.Name, err)
-			}
-		} else {
-			if _, err := s.providers.Create(ctx, spec, false); err != nil {
-				return fmt.Errorf("create provider %s: %w", spec.Name, err)
-			}
-		}
 	}
 
 	targetLambdas := make(map[string]struct{}, len(payload.Lambdas))
@@ -885,6 +945,20 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 			return fmt.Errorf("validate lambdas: %w", err)
 		}
 	}
+	for _, spec := range manifest.Lambdas {
+		for _, providerName := range spec.Providers {
+			trimmed := strings.TrimSpace(providerName)
+			if trimmed == "" {
+				return fmt.Errorf("lambda %s requires at least one provider", spec.ID)
+			}
+			if s.isBaselineProvider(trimmed) {
+				continue
+			}
+			if _, ok := targetProviders[strings.ToLower(trimmed)]; !ok {
+				return fmt.Errorf("lambda %s references unknown provider %s", spec.ID, trimmed)
+			}
+		}
+	}
 
 	summaries := s.manager.Instances()
 	for _, summary := range summaries {
@@ -894,6 +968,37 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 		if _, ok := targetLambdas[strings.ToLower(summary.ID)]; !ok {
 			if err := s.manager.Remove(summary.ID); err != nil && !errors.Is(err, runtime.ErrInstanceNotFound) {
 				return fmt.Errorf("remove lambda %s: %w", summary.ID, err)
+			}
+		}
+	}
+
+	existing := s.providers.SanitizedProviderSpecs()
+	for _, spec := range existing {
+		if s.isBaselineProvider(spec.Name) {
+			continue
+		}
+		if _, ok := targetProviders[strings.ToLower(spec.Name)]; !ok {
+			dependents := s.instancesUsingProvider(spec.Name)
+			if len(dependents) > 0 {
+				return fmt.Errorf("provider %s is in use by instances: %s", spec.Name, strings.Join(dependents, ", "))
+			}
+			if err := s.providers.Remove(spec.Name); err != nil && !errors.Is(err, provider.ErrProviderNotFound) {
+				return fmt.Errorf("remove provider %s: %w", spec.Name, err)
+			}
+		}
+	}
+
+	for _, spec := range orderedProviders {
+		if _, exists := s.providers.ProviderMetadataFor(spec.Name); exists {
+			if _, err := s.providers.StopProvider(spec.Name); err != nil && !errors.Is(err, provider.ErrProviderNotRunning) {
+				return fmt.Errorf("stop provider %s: %w", spec.Name, err)
+			}
+			if _, err := s.providers.Update(ctx, spec, false); err != nil {
+				return fmt.Errorf("update provider %s: %w", spec.Name, err)
+			}
+		} else {
+			if _, err := s.providers.Create(ctx, spec, false); err != nil {
+				return fmt.Errorf("create provider %s: %w", spec.Name, err)
 			}
 		}
 	}

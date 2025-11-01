@@ -2,8 +2,14 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"log"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/shopspring/decimal"
 
@@ -340,6 +346,187 @@ func TestBuildProviderSpecFromPayload_OmitsEmptyConfig(t *testing.T) {
 	}
 	if _, ok := spec.Config["config"]; ok {
 		t.Fatalf("expected empty config map to be omitted, got %#v", spec.Config["config"])
+	}
+}
+
+func TestHandleProviderDeleteBlockedWhenInUse(t *testing.T) {
+	appCfg := config.AppConfig{}
+
+	poolMgr := pool.NewPoolManager()
+	if err := poolMgr.RegisterPool("Event", 8, 8, func() interface{} { return new(schema.Event) }); err != nil {
+		t.Fatalf("register Event pool: %v", err)
+	}
+	if err := poolMgr.RegisterPool("OrderRequest", 4, 4, func() interface{} { return new(schema.OrderRequest) }); err != nil {
+		t.Fatalf("register OrderRequest pool: %v", err)
+	}
+
+	bus := eventbus.NewMemoryBus(eventbus.MemoryConfig{
+		BufferSize:    16,
+		FanoutWorkers: 1,
+		Pools:         poolMgr,
+	})
+
+	table := dispatcher.NewTable()
+	providerManager := provider.NewManager(nil, poolMgr, bus, table, log.New(ioDiscards{}, "", 0))
+	logger := log.New(ioDiscards{}, "", 0)
+	registrar := dispatcher.NewRegistrar(table, providerManager)
+	lambdaManager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+
+	server := &httpServer{
+		manager:       lambdaManager,
+		providers:     providerManager,
+		baseProviders: map[string]struct{}{},
+		baseLambdas:   map[string]struct{}{},
+	}
+
+	providerSpec := config.ProviderSpec{
+		Name:    "binance",
+		Adapter: "binance",
+		Config: map[string]any{
+			"identifier": "binance",
+		},
+	}
+	if _, err := providerManager.Create(context.Background(), providerSpec, false); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+
+	lambdaSpec := config.LambdaSpec{
+		ID:        "logging-alpha",
+		Strategy:  config.LambdaStrategySpec{Identifier: "logging", Config: map[string]any{}},
+		Providers: []string{"binance"},
+		ProviderSymbols: map[string]config.ProviderSymbols{
+			"binance": {Symbols: []string{"BTC-USDT"}},
+		},
+	}
+	if err := lambdaManager.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{lambdaSpec}}); err != nil {
+		t.Fatalf("start manifest: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/providers/binance", nil)
+	res := httptest.NewRecorder()
+	server.handleProviderResource(res, req, "binance")
+	if res.Code != http.StatusConflict {
+		t.Fatalf("expected 409 conflict, got %d (%s)", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "logging-alpha") {
+		t.Fatalf("expected dependent instance to be reported, body=%s", res.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	listRes := httptest.NewRecorder()
+	server.listProviders(listRes, listReq)
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("list providers unexpected status %d", listRes.Code)
+	}
+	var payload struct {
+		Providers []struct {
+			Name                   string   `json:"name"`
+			DependentInstanceCount int      `json:"dependentInstanceCount"`
+			DependentInstances     []string `json:"dependentInstances"`
+		}
+	}
+	if err := json.Unmarshal(listRes.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode providers: %v", err)
+	}
+	if len(payload.Providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(payload.Providers))
+	}
+	if payload.Providers[0].DependentInstanceCount != 1 {
+		t.Fatalf("expected dependent instance count 1, got %d", payload.Providers[0].DependentInstanceCount)
+	}
+	if len(payload.Providers[0].DependentInstances) != 1 || payload.Providers[0].DependentInstances[0] != "logging-alpha" {
+		t.Fatalf("unexpected dependent instances %#v", payload.Providers[0].DependentInstances)
+	}
+}
+
+func TestProviderUsageInfersProvidersFromScope(t *testing.T) {
+	appCfg := config.AppConfig{}
+
+	poolMgr := pool.NewPoolManager()
+	if err := poolMgr.RegisterPool("Event", 8, 8, func() interface{} { return new(schema.Event) }); err != nil {
+		t.Fatalf("register Event pool: %v", err)
+	}
+	if err := poolMgr.RegisterPool("OrderRequest", 4, 4, func() interface{} { return new(schema.OrderRequest) }); err != nil {
+		t.Fatalf("register OrderRequest pool: %v", err)
+	}
+
+	bus := eventbus.NewMemoryBus(eventbus.MemoryConfig{
+		BufferSize:    16,
+		FanoutWorkers: 1,
+		Pools:         poolMgr,
+	})
+
+	table := dispatcher.NewTable()
+	providerManager := provider.NewManager(nil, poolMgr, bus, table, log.New(ioDiscards{}, "", 0))
+	logger := log.New(ioDiscards{}, "", 0)
+	registrar := dispatcher.NewRegistrar(table, providerManager)
+	lambdaManager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+
+	if _, err := providerManager.Create(context.Background(), config.ProviderSpec{
+		Name:    "binance",
+		Adapter: "binance",
+		Config: map[string]any{
+			"identifier": "binance",
+		},
+	}, false); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+
+	lambdaSpec := config.LambdaSpec{
+		ID:       "logging-beta",
+		Strategy: config.LambdaStrategySpec{Identifier: "logging", Config: map[string]any{}},
+		ProviderSymbols: map[string]config.ProviderSymbols{
+			"binance": {Symbols: []string{"BTC-USDT"}},
+		},
+	}
+	if err := lambdaManager.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{lambdaSpec}}); err != nil {
+		t.Fatalf("start manifest: %v", err)
+	}
+
+	// Simulate a summary with no providers while scope is populated.
+	managerValue := reflect.ValueOf(lambdaManager).Elem()
+	specsField := managerValue.FieldByName("specs")
+	if !specsField.IsValid() {
+		t.Fatal("manager specs field missing")
+	}
+	specsField = reflect.NewAt(specsField.Type(), unsafe.Pointer(specsField.UnsafeAddr())).Elem()
+	key := reflect.ValueOf("logging-beta")
+	specValue := specsField.MapIndex(key)
+	if !specValue.IsValid() {
+		t.Fatal("expected spec for logging-beta")
+	}
+	spec := specValue.Interface().(config.LambdaSpec)
+	spec.Providers = nil
+	specsField.SetMapIndex(key, reflect.ValueOf(spec))
+
+	server := &httpServer{
+		manager:       lambdaManager,
+		providers:     providerManager,
+		baseProviders: map[string]struct{}{},
+		baseLambdas:   map[string]struct{}{},
+	}
+
+	summaries := lambdaManager.Instances()
+	var found bool
+	for _, summary := range summaries {
+		if summary.ID == "logging-beta" {
+			found = true
+			if len(summary.Providers) != 0 {
+				t.Fatalf("expected summary providers empty, got %v", summary.Providers)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected logging-beta summary")
+	}
+
+	usage := server.providerUsage()
+	dependents, ok := usage["binance"]
+	if !ok {
+		t.Fatalf("expected binance dependencies, got %#v", usage)
+	}
+	if len(dependents) != 1 || dependents[0] != "logging-beta" {
+		t.Fatalf("unexpected dependents for binance: %#v", dependents)
 	}
 }
 

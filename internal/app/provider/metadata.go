@@ -45,12 +45,14 @@ func CloneAdapterSettings(settings []AdapterSetting) []AdapterSetting {
 
 // RuntimeMetadata summarizes a running provider instance.
 type RuntimeMetadata struct {
-	Name            string         `json:"name"`
-	Adapter         string         `json:"adapter"`
-	Identifier      string         `json:"identifier"`
-	InstrumentCount int            `json:"instrumentCount"`
-	Settings        map[string]any `json:"settings,omitempty"`
-	Running         bool           `json:"running"`
+	Name                   string         `json:"name"`
+	Adapter                string         `json:"adapter"`
+	Identifier             string         `json:"identifier"`
+	InstrumentCount        int            `json:"instrumentCount"`
+	Settings               map[string]any `json:"settings,omitempty"`
+	Running                bool           `json:"running"`
+	DependentInstances     []string       `json:"dependentInstances,omitempty"`
+	DependentInstanceCount int            `json:"dependentInstanceCount,omitempty"`
 }
 
 // RuntimeDetail contains the detailed metadata for a provider instance.
@@ -68,6 +70,9 @@ func CloneRuntimeMetadata(meta RuntimeMetadata) RuntimeMetadata {
 		for k, v := range meta.Settings {
 			clone.Settings[k] = v
 		}
+	}
+	if len(meta.DependentInstances) > 0 {
+		clone.DependentInstances = cloneStringSlice(meta.DependentInstances)
 	}
 	return clone
 }
@@ -95,4 +100,13 @@ func cloneInstruments(instruments []schema.Instrument) []schema.Instrument {
 // SortRuntimeMetadata sorts the slice in-place by provider name.
 func SortRuntimeMetadata(meta []RuntimeMetadata) {
 	sort.Slice(meta, func(i, j int) bool { return meta[i].Name < meta[j].Name })
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, len(values))
+	copy(out, values)
+	return out
 }
