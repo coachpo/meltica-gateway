@@ -35,18 +35,30 @@ function applyThemeClass(theme: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => getPreferredTheme());
+  const [theme, setThemeState] = useState<Theme>('light');
+  const [initialized, setInitialized] = useState(false);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    const initial = getPreferredTheme();
+    setThemeState(initial);
+    applyThemeClass(initial);
+    setInitialized(true);
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
+    if (!initialized) {
+      return;
+    }
     applyThemeClass(theme);
-  }, [theme]);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORAGE_KEY, theme);
+    }
+  }, [theme, initialized]);
 
   const updateTheme = useCallback((value: Theme) => {
     setThemeState(value);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, value);
-    }
-    applyThemeClass(value);
   }, []);
 
   const toggleTheme = useCallback(() => {
