@@ -10,6 +10,7 @@ import (
 	"github.com/coachpo/meltica/internal/app/dispatcher"
 	lambdaruntime "github.com/coachpo/meltica/internal/app/lambda/runtime"
 	"github.com/coachpo/meltica/internal/app/provider"
+	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
@@ -60,10 +61,10 @@ func TestBuildContextBackup(t *testing.T) {
 	}
 
 	poolMgr := pool.NewPoolManager()
-	if err := poolMgr.RegisterPool("Event", appCfg.Pools.Event.Size, appCfg.Pools.Event.QueueSize(), func() interface{} { return new(struct{}) }); err != nil {
+	if err := poolMgr.RegisterPool("Event", appCfg.Pools.Event.Size, appCfg.Pools.Event.QueueSize(), func() interface{} { return new(schema.Event) }); err != nil {
 		t.Fatalf("register Event pool: %v", err)
 	}
-	if err := poolMgr.RegisterPool("OrderRequest", appCfg.Pools.OrderRequest.Size, appCfg.Pools.OrderRequest.QueueSize(), func() interface{} { return new(struct{}) }); err != nil {
+	if err := poolMgr.RegisterPool("OrderRequest", appCfg.Pools.OrderRequest.Size, appCfg.Pools.OrderRequest.QueueSize(), func() interface{} { return new(schema.OrderRequest) }); err != nil {
 		t.Fatalf("register OrderRequest pool: %v", err)
 	}
 
@@ -134,8 +135,17 @@ func TestBuildContextBackup(t *testing.T) {
 	if _, present := providerCfg["api_key"]; present {
 		t.Fatal("expected api_key to be removed from exported provider config")
 	}
-	if providerCfg["depth"] != float64(100) {
-		t.Fatalf("expected depth to be retained, got %v", providerCfg["depth"])
+	switch depth := providerCfg["depth"].(type) {
+	case float64:
+		if depth != 100 {
+			t.Fatalf("expected depth 100, got %v", depth)
+		}
+	case int:
+		if depth != 100 {
+			t.Fatalf("expected depth 100, got %v", depth)
+		}
+	default:
+		t.Fatalf("expected numeric depth, got %T", depth)
 	}
 
 	if len(snapshot.Lambdas) != 1 {
@@ -160,10 +170,10 @@ func TestApplyContextBackupRestoresState(t *testing.T) {
 	appCfg := config.AppConfig{}
 
 	poolMgr := pool.NewPoolManager()
-	if err := poolMgr.RegisterPool("Event", 8, 8, func() interface{} { return new(struct{}) }); err != nil {
+	if err := poolMgr.RegisterPool("Event", 8, 8, func() interface{} { return new(schema.Event) }); err != nil {
 		t.Fatalf("register Event pool: %v", err)
 	}
-	if err := poolMgr.RegisterPool("OrderRequest", 4, 4, func() interface{} { return new(struct{}) }); err != nil {
+	if err := poolMgr.RegisterPool("OrderRequest", 4, 4, func() interface{} { return new(schema.OrderRequest) }); err != nil {
 		t.Fatalf("register OrderRequest pool: %v", err)
 	}
 
