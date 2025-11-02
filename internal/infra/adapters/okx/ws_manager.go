@@ -43,11 +43,12 @@ type wsRequest struct {
 }
 
 type wsEnvelope struct {
-	Arg   wsArgument        `json:"arg"`
-	Data  []json.RawMessage `json:"data"`
-	Event string            `json:"event"`
-	Code  string            `json:"code"`
-	Msg   string            `json:"msg"`
+	Arg    wsArgument        `json:"arg"`
+	Action string            `json:"action"`
+	Data   []json.RawMessage `json:"data"`
+	Event  string            `json:"event"`
+	Code   string            `json:"code"`
+	Msg    string            `json:"msg"`
 }
 
 type wsMessageHandler func(wsEnvelope) error

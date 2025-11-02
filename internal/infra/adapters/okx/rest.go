@@ -222,7 +222,7 @@ func (p *Provider) fetchOrderBookSnapshot(ctx context.Context, instID string) (s
 		return schema.BookSnapshotPayload{}, 0, errors.New("okx: empty books response")
 	}
 	entry := payload.Data[0]
-	
+
 	// OKX may not return seqId for full orderbook snapshots, use timestamp as fallback
 	seqStr := entry.SeqID.String()
 	var seq uint64

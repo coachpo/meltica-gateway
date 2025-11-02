@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"log"
 	"net/http"
 	"sort"
@@ -72,6 +73,9 @@ type bookHandle struct {
 	assembler *shared.OrderBookAssembler
 	mu        sync.Mutex
 	seeded    bool
+	lastSeq   uint64
+	lastCRC   int32
+	resyncing bool
 }
 
 // NewProvider constructs an OKX provider instance.
@@ -444,7 +448,7 @@ func (p *Provider) configureOrderBookStreams(instruments []string) error {
 		if !ok {
 			continue
 		}
-		if err := p.ensureOrderBookHandle(symbol, meta); err != nil {
+		if err := p.ensureOrderBookHandle(symbol); err != nil {
 			return err
 		}
 		p.bookMu.Lock()
@@ -483,34 +487,21 @@ func (p *Provider) unsubscribeOrderBookStreams(instruments []string) error {
 	return p.ws.unsubscribe(args)
 }
 
-func (p *Provider) ensureOrderBookHandle(symbol string, meta symbolMeta) error {
+func (p *Provider) ensureOrderBookHandle(symbol string) error {
 	p.bookMu.Lock()
-	handle, ok := p.bookHandles[symbol]
+	_, ok := p.bookHandles[symbol]
 	if !ok {
-		handle = &bookHandle{
-			assembler: shared.NewOrderBookAssembler(p.opts.Config.SnapshotDepth),
+		handle := &bookHandle{
+			assembler: shared.NewOrderBookAssembler(0), // No depth limit, assembler handles diffs
 			mu:        sync.Mutex{},
 			seeded:    false,
+			lastSeq:   0,
+			lastCRC:   0,
+			resyncing: false,
 		}
 		p.bookHandles[symbol] = handle
 	}
 	p.bookMu.Unlock()
-
-	handle.mu.Lock()
-	defer handle.mu.Unlock()
-	if handle.seeded {
-		return nil
-	}
-	snapshot, seq, err := p.fetchOrderBookSnapshot(p.ctx, meta.instID)
-	if err != nil {
-		return fmt.Errorf("fetch okx snapshot: %w", err)
-	}
-	payload, err := handle.assembler.ApplySnapshot(seq, snapshot)
-	if err != nil {
-		return fmt.Errorf("apply okx snapshot: %w", err)
-	}
-	handle.seeded = true
-	p.publisher.PublishBookSnapshot(p.ctx, symbol, payload)
 	return nil
 }
 
@@ -552,7 +543,14 @@ func (p *Provider) handleTrades(envelope wsEnvelope) error {
 		if err := json.Unmarshal(raw, &evt); err != nil {
 			return fmt.Errorf("decode trade event: %w", err)
 		}
-		symbol, ok := p.symbolForInstID(evt.InstID)
+		instID := strings.TrimSpace(evt.InstID)
+		if instID == "" {
+			instID = strings.TrimSpace(envelope.Arg.InstID)
+		}
+		if instID == "" {
+			continue
+		}
+		symbol, ok := p.symbolForInstID(instID)
 		if !ok {
 			continue
 		}
@@ -582,7 +580,14 @@ func (p *Provider) handleTickers(envelope wsEnvelope) error {
 		if err := json.Unmarshal(raw, &evt); err != nil {
 			return fmt.Errorf("decode ticker event: %w", err)
 		}
-		symbol, ok := p.symbolForInstID(evt.InstID)
+		instID := strings.TrimSpace(evt.InstID)
+		if instID == "" {
+			instID = strings.TrimSpace(envelope.Arg.InstID)
+		}
+		if instID == "" {
+			continue
+		}
+		symbol, ok := p.symbolForInstID(instID)
 		if !ok {
 			continue
 		}
@@ -599,12 +604,26 @@ func (p *Provider) handleTickers(envelope wsEnvelope) error {
 }
 
 func (p *Provider) handleBooks(envelope wsEnvelope) error {
+	action := strings.ToLower(strings.TrimSpace(envelope.Action))
+	log.Printf("okx/handleBooks: received %s with %d data items", action, len(envelope.Data))
+
 	for _, raw := range envelope.Data {
 		var evt bookEvent
 		if err := json.Unmarshal(raw, &evt); err != nil {
 			return fmt.Errorf("decode book event: %w", err)
 		}
-		symbol, ok := p.symbolForInstID(evt.InstID)
+		instID := strings.TrimSpace(evt.InstID)
+		if instID == "" {
+			instID = strings.TrimSpace(envelope.Arg.InstID)
+		}
+		if instID == "" {
+			continue
+		}
+		symbol, ok := p.symbolForInstID(instID)
+		if !ok {
+			continue
+		}
+		meta, ok := p.metaForInstrument(symbol)
 		if !ok {
 			continue
 		}
@@ -614,50 +633,215 @@ func (p *Provider) handleBooks(envelope wsEnvelope) error {
 		if handle == nil {
 			continue
 		}
+
 		seq := evt.SequenceID()
-		if seq == 0 {
-			continue
-		}
+		prev := evt.PrevSequenceID()
 		ts := parseMilliTimestamp(evt.Timestamp)
-		if strings.EqualFold(strings.TrimSpace(evt.Action), "snapshot") {
-			snapshot := schema.BookSnapshotPayload{
+		isSnapshot := action == "snapshot" || prev < 0
+
+		// For WebSocket snapshots: directly emit without assembler
+		if isSnapshot {
+			payload := schema.BookSnapshotPayload{
 				Bids:          convertPriceLevels(evt.Bids),
 				Asks:          convertPriceLevels(evt.Asks),
-				Checksum:      strconv.Itoa(int(evt.Checksum)),
+				Checksum:      "",
 				LastUpdate:    ts,
 				FirstUpdateID: seq,
 				FinalUpdateID: seq,
 			}
+
+			// Compute and validate checksum
+			checksum := computeOKXChecksum(payload)
+			payload.Checksum = strconv.FormatInt(int64(checksum), 10)
+
 			handle.mu.Lock()
-			payload, err := handle.assembler.ApplySnapshot(seq, snapshot)
 			handle.seeded = true
+			handle.lastSeq = seq
+			handle.lastCRC = checksum
+			handle.resyncing = false
 			handle.mu.Unlock()
-			if err != nil {
-				p.reportError(fmt.Errorf("apply okx snapshot: %w", err))
-				continue
+
+			// Validate checksum if provided
+			if evt.Checksum != 0 && checksum != evt.Checksum {
+				p.reportError(fmt.Errorf("okx orderbook snapshot checksum mismatch for %s: got %d want %d", symbol, checksum, evt.Checksum))
 			}
+
+			// Emit the snapshot directly
+			log.Printf("okx/handleBooks: emitting snapshot for %s with %d bids, %d asks, seq=%d",
+				symbol, len(payload.Bids), len(payload.Asks), seq)
 			p.publisher.PublishBookSnapshot(p.ctx, symbol, payload)
+
+			// Initialize assembler with this snapshot for future diffs
+			handle.mu.Lock()
+			if _, err := handle.assembler.ApplySnapshot(seq, payload); err != nil {
+				p.reportError(fmt.Errorf("initialize assembler for %s: %w", symbol, err))
+			}
+			handle.mu.Unlock()
 			continue
 		}
+
+		// For diffs: use assembler to maintain state
+		handle.mu.Lock()
+		seeded := handle.seeded
+		lastSeq := handle.lastSeq
+		resyncing := handle.resyncing
+		handle.mu.Unlock()
+
+		if !seeded {
+			if !resyncing {
+				p.triggerOrderBookResync(symbol, meta, handle, "orderbook not seeded")
+			}
+			continue
+		}
+		if seq == 0 {
+			p.triggerOrderBookResync(symbol, meta, handle, "zero sequence id")
+			continue
+		}
+		if prev >= 0 && uint64(prev) != lastSeq {
+			reason := fmt.Sprintf("prevSeq %d does not match lastSeq %d", prev, lastSeq)
+			p.triggerOrderBookResync(symbol, meta, handle, reason)
+			continue
+		}
+
 		diff := shared.OrderBookDiff{
 			SequenceID: seq,
 			Bids:       convertDiffLevels(evt.Bids),
 			Asks:       convertDiffLevels(evt.Asks),
 			Timestamp:  ts,
 		}
+
 		handle.mu.Lock()
 		payload, applied, err := handle.assembler.ApplyDiff(diff)
-		handle.mu.Unlock()
 		if err != nil {
-			p.reportError(fmt.Errorf("apply okx diff: %w", err))
+			handle.seeded = false
+			handle.lastSeq = 0
+			handle.lastCRC = 0
+			handle.resyncing = false
+			handle.mu.Unlock()
+			reason := fmt.Sprintf("apply diff failed: %v", err)
+			p.triggerOrderBookResync(symbol, meta, handle, reason)
 			continue
 		}
 		if !applied {
+			handle.mu.Unlock()
 			continue
 		}
+
+		// Compute and validate checksum
+		checksum := computeOKXChecksum(payload)
+		payload.Checksum = strconv.FormatInt(int64(checksum), 10)
+
+		// Update sequence tracking
+		if prev >= 0 {
+			first := uint64(prev) + 1
+			if first > payload.FinalUpdateID {
+				first = payload.FinalUpdateID
+			}
+			payload.FirstUpdateID = first
+		}
+
+		handle.lastSeq = payload.FinalUpdateID
+		handle.lastCRC = checksum
+		handle.resyncing = false
+		handle.mu.Unlock()
+
+		// Validate checksum if provided
+		if evt.Checksum != 0 && checksum != evt.Checksum {
+			reason := fmt.Sprintf("checksum mismatch: got %d want %d", checksum, evt.Checksum)
+			p.triggerOrderBookResync(symbol, meta, handle, reason)
+			continue
+		}
+
+		// Emit the updated snapshot
+		log.Printf("okx/handleBooks: emitting diff update for %s with %d bids, %d asks, seq=%d",
+			symbol, len(payload.Bids), len(payload.Asks), payload.FinalUpdateID)
 		p.publisher.PublishBookSnapshot(p.ctx, symbol, payload)
 	}
 	return nil
+}
+
+func (p *Provider) triggerOrderBookResync(symbol string, meta symbolMeta, handle *bookHandle, reason string) {
+	handle.mu.Lock()
+	if handle.resyncing {
+		handle.mu.Unlock()
+		return
+	}
+	handle.seeded = false
+	handle.lastSeq = 0
+	handle.lastCRC = 0
+	handle.resyncing = true
+	handle.mu.Unlock()
+
+	go p.resyncOrderBook(symbol, meta, handle, reason)
+}
+
+func (p *Provider) resyncOrderBook(symbol string, meta symbolMeta, handle *bookHandle, reason string) {
+	snapshot, seq, err := p.fetchOrderBookSnapshot(p.ctx, meta.instID)
+	if err != nil {
+		handle.mu.Lock()
+		handle.resyncing = false
+		handle.mu.Unlock()
+		p.reportError(fmt.Errorf("resync okx orderbook %s (%s): %w", symbol, reason, err))
+		return
+	}
+
+	// Compute checksum for validation
+	checksum := computeOKXChecksum(snapshot)
+	snapshot.Checksum = strconv.FormatInt(int64(checksum), 10)
+
+	// Validate REST snapshot checksum if provided
+	if strings.TrimSpace(snapshot.Checksum) != "" {
+		if expected, err := strconv.ParseInt(strings.TrimSpace(snapshot.Checksum), 10, 32); err == nil && checksum != int32(expected) {
+			p.reportError(fmt.Errorf("okx orderbook resync checksum mismatch for %s: rest=%d calc=%d", symbol, expected, checksum))
+		}
+	}
+
+	handle.mu.Lock()
+	handle.seeded = true
+	handle.lastSeq = seq
+	handle.lastCRC = checksum
+	handle.resyncing = false
+
+	// Initialize assembler with REST snapshot for future diffs
+	if _, err := handle.assembler.ApplySnapshot(seq, snapshot); err != nil {
+		p.reportError(fmt.Errorf("initialize assembler during resync for %s: %w", symbol, err))
+	}
+	handle.mu.Unlock()
+
+	// Emit the snapshot
+	p.publisher.PublishBookSnapshot(p.ctx, symbol, snapshot)
+}
+
+func computeOKXChecksum(snapshot schema.BookSnapshotPayload) int32 {
+	const depthLimit = 25
+	var builder strings.Builder
+	appendPart := func(price, qty string) {
+		price = strings.TrimSpace(price)
+		qty = strings.TrimSpace(qty)
+		if price == "" || qty == "" {
+			return
+		}
+		if builder.Len() > 0 {
+			builder.WriteByte(':')
+		}
+		builder.WriteString(price)
+		builder.WriteByte(':')
+		builder.WriteString(qty)
+	}
+
+	for i := 0; i < depthLimit; i++ {
+		if i < len(snapshot.Bids) {
+			appendPart(snapshot.Bids[i].Price, snapshot.Bids[i].Quantity)
+		}
+		if i < len(snapshot.Asks) {
+			appendPart(snapshot.Asks[i].Price, snapshot.Asks[i].Quantity)
+		}
+	}
+	if builder.Len() == 0 {
+		return 0
+	}
+	rawCRC := crc32.ChecksumIEEE([]byte(builder.String()))
+	return int32(rawCRC) // #nosec G115 -- OKX requires signed CRC32 representation
 }
 
 func (p *Provider) metaForInstrument(symbol string) (symbolMeta, bool) {
@@ -719,7 +903,6 @@ type bookEvent struct {
 	PrevSeqID json.Number `json:"prevSeqId"`
 	Checksum  int32       `json:"checksum"`
 	Timestamp string      `json:"ts"`
-	Action    string      `json:"action"`
 }
 
 func (b bookEvent) SequenceID() uint64 {
@@ -728,6 +911,18 @@ func (b bookEvent) SequenceID() uint64 {
 		return 0
 	}
 	seq, err := strconv.ParseUint(seqStr, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return seq
+}
+
+func (b bookEvent) PrevSequenceID() int64 {
+	seqStr := strings.TrimSpace(b.PrevSeqID.String())
+	if seqStr == "" {
+		return 0
+	}
+	seq, err := strconv.ParseInt(seqStr, 10, 64)
 	if err != nil {
 		return 0
 	}

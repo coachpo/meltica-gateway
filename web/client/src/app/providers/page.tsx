@@ -233,6 +233,7 @@ export default function ProvidersPage() {
   const [adapters, setAdapters] = useState<AdapterMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pollingEnabled, setPollingEnabled] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>('create');
@@ -283,6 +284,26 @@ export default function ProvidersPage() {
     return map;
   }, [adapters]);
 
+  const refreshProviders = useCallback(async (silent = false) => {
+    try {
+      const response = await apiClient.getProviders();
+      setProviders(response.providers);
+      
+      // Check if any provider is in 'starting' state to enable polling
+      const hasStarting = response.providers.some(p => p.status === 'starting');
+      setPollingEnabled(hasStarting);
+    } catch (err) {
+      if (!silent) {
+        const message = err instanceof Error ? err.message : 'Failed to refresh providers';
+        showToast({
+          title: 'Provider refresh failed',
+          description: message,
+          variant: 'destructive',
+        });
+      }
+    }
+  }, [showToast]);
+
   useEffect(() => {
     const fetchInitial = async () => {
       setLoading(true);
@@ -294,6 +315,10 @@ export default function ProvidersPage() {
         ]);
         setProviders(providersResponse.providers);
         setAdapters(adaptersResponse.adapters);
+        
+        // Check if any provider is in 'starting' state
+        const hasStarting = providersResponse.providers.some(p => p.status === 'starting');
+        setPollingEnabled(hasStarting);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load providers');
       } finally {
@@ -303,6 +328,19 @@ export default function ProvidersPage() {
 
     fetchInitial();
   }, []);
+
+  // Poll for updates when providers are in 'starting' state
+  useEffect(() => {
+    if (!pollingEnabled) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      void refreshProviders(true);
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(intervalId);
+  }, [pollingEnabled, refreshProviders]);
 
   useEffect(() => {
     if (!detailOpen) {
@@ -417,20 +455,6 @@ export default function ProvidersPage() {
     };
   }, [selectedInstrument]);
 
-  const refreshProviders = async () => {
-    try {
-      const response = await apiClient.getProviders();
-      setProviders(response.providers);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to refresh providers';
-      showToast({
-        title: 'Provider refresh failed',
-        description: message,
-        variant: 'destructive',
-      });
-    }
-  };
-
   const resetForm = () => {
     setFormState(defaultFormState);
     setFormError(null);
@@ -541,9 +565,13 @@ export default function ProvidersPage() {
         await apiClient.updateProvider(trimmedName, payload);
       }
       await refreshProviders();
+      const actionVerb = mode === 'create' ? 'created' : 'updated';
+      const description = formState.enabled
+        ? `Provider ${trimmedName} ${actionVerb}. Starting asynchronously...`
+        : `Provider ${trimmedName} ${actionVerb} successfully.`;
       showToast({
         title: mode === 'create' ? 'Provider created' : 'Provider updated',
-        description: `Provider ${trimmedName} ${mode === 'create' ? 'created' : 'updated'} successfully.`,
+        description,
         variant: 'success',
       });
       handleFormOpenChange(false);
@@ -560,8 +588,8 @@ export default function ProvidersPage() {
       await apiClient.startProvider(name);
       await refreshProviders();
       showToast({
-        title: 'Provider started',
-        description: `${name} is now running.`,
+        title: 'Provider starting',
+        description: `${name} is starting asynchronously. Check status for updates.`,
         variant: 'success',
       });
     } catch (err) {
@@ -659,11 +687,12 @@ export default function ProvidersPage() {
           const isStartPending = pendingActions.start === provider.name;
           const isStopPending = pendingActions.stop === provider.name;
           const isDeletePending = pendingActions.delete === provider.name;
-          const disableActions = isStartPending || isStopPending || isDeletePending;
+          const isStarting = provider.status === 'starting';
+          const disableActions = isStartPending || isStopPending || isDeletePending || isStarting;
           const dependentInstances = provider.dependentInstances ?? [];
           const dependentCount = provider.dependentInstanceCount ?? dependentInstances.length;
           const deleteDisabled =
-            dependentCount > 0 || isDeletePending || isStartPending || isStopPending;
+            dependentCount > 0 || isDeletePending || isStartPending || isStopPending || isStarting;
           const adapterMeta = adapterByIdentifier.get(provider.adapter);
           return (
             <Card key={provider.name}>
@@ -682,12 +711,31 @@ export default function ProvidersPage() {
                       </p>
                     )}
                   </div>
-                  <Badge variant={provider.running ? 'default' : 'secondary'}>
-                    {provider.running ? 'Running' : 'Stopped'}
+                  <Badge 
+                    variant={
+                      provider.status === 'running' ? 'default' :
+                      provider.status === 'failed' ? 'destructive' :
+                      provider.status === 'starting' ? 'default' :
+                      'secondary'
+                    }
+                  >
+                    {provider.status === 'starting' ? 'Starting…' :
+                     provider.status === 'pending' ? 'Pending' :
+                     provider.status === 'running' ? 'Running' :
+                     provider.status === 'stopped' ? 'Stopped' :
+                     provider.status === 'failed' ? 'Failed' :
+                     'Unknown'}
                   </Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
+                {provider.startupError && (
+                  <Alert variant="destructive">
+                    <AlertDescription className="text-xs">
+                      <span className="font-medium">Startup failed:</span> {provider.startupError}
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div className="space-y-1 text-muted-foreground">
                   <div>
                     <span className="font-medium text-foreground">Identifier:</span>{' '}
@@ -746,7 +794,7 @@ export default function ProvidersPage() {
                       disabled={disableActions}
                       onClick={() => handleStart(provider.name)}
                     >
-                      {isStartPending ? 'Starting…' : 'Start'}
+                      {isStarting ? 'Starting…' : isStartPending ? 'Starting…' : 'Start'}
                     </Button>
                   )}
                   <Button
@@ -861,7 +909,7 @@ export default function ProvidersPage() {
                     <div>
                       <p className="text-sm font-medium text-foreground">Start provider immediately</p>
                       <p className="text-xs text-muted-foreground">
-                        Toggle to launch it right after saving.
+                        Provider will start asynchronously. Check status to monitor readiness.
                       </p>
                     </div>
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">

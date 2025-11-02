@@ -18,6 +18,8 @@ export interface Strategy {
 
 export type ProviderSettings = Record<string, unknown>;
 
+export type ProviderStatus = 'pending' | 'starting' | 'running' | 'stopped' | 'failed';
+
 export interface Provider {
   name: string;
   adapter: string;
@@ -25,6 +27,8 @@ export interface Provider {
   instrumentCount: number;
   settings: ProviderSettings;
   running: boolean;
+  status: ProviderStatus;
+  startupError?: string;
   dependentInstances: string[];
   dependentInstanceCount: number;
 }
@@ -185,6 +189,8 @@ export interface ProviderRuntimeMetadata {
   instrumentCount: number;
   settings?: Record<string, unknown> | null;
   running: boolean;
+  status: ProviderStatus;
+  startupError?: string;
 }
 
 export interface LambdaStrategySpec {
