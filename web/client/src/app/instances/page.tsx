@@ -581,16 +581,26 @@ export default function InstancesPage() {
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="strategy">Strategy</Label>
+                    <Label htmlFor="strategy">
+                      Strategy
+                      {dialogMode === 'edit' && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          (cannot be changed)
+                        </span>
+                      )}
+                    </Label>
                     <Select
                       value={newInstance.strategyIdentifier}
                       onValueChange={(value) => {
+                        if (dialogMode === 'edit') {
+                          return;
+                        }
                         setFormError(null);
                         setPrefilledConfig(false);
                         setNewInstance({ ...newInstance, strategyIdentifier: value });
                       }}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger disabled={dialogMode === 'edit'}>
                         <SelectValue placeholder="Select strategy" />
                       </SelectTrigger>
                       <SelectContent>
