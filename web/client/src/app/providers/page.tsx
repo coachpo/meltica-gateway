@@ -799,7 +799,7 @@ export default function ProvidersPage() {
                     onChange={(event) =>
                       setFormState((prev) => ({ ...prev, name: event.target.value }))
                     }
-                    placeholder="binance-spot"
+                    placeholder="new-provider"
                     disabled={formMode === 'edit'}
                   />
                 </div>
