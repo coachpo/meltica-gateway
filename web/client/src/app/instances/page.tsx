@@ -13,6 +13,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon } from 'lucide-react';
 import { useToast } from '@/components/ui/toast-provider';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 
 export default function InstancesPage() {
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
@@ -31,11 +33,14 @@ export default function InstancesPage() {
   const [newInstance, setNewInstance] = useState({
     id: '',
     strategyIdentifier: '',
-    provider: '',
-    symbols: '',
   });
+  const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
+  const [providerSymbols, setProviderSymbols] = useState<Record<string, string>>({});
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{ type: 'delete-instance'; id: string } | null>(
+    null,
+  );
   const { show: showToast } = useToast();
 
   const selectedStrategy = useMemo(
@@ -72,9 +77,9 @@ export default function InstancesPage() {
     setNewInstance({
       id: '',
       strategyIdentifier: '',
-      provider: '',
-      symbols: '',
     });
+    setSelectedProviders([]);
+    setProviderSymbols({});
     setConfigValues({});
     setFormError(null);
     setEditingInstanceId(null);
@@ -82,6 +87,33 @@ export default function InstancesPage() {
     setPrefilledConfig(false);
     setDialogSaving(false);
     setInstanceLoading(false);
+  };
+
+  const toggleProviderSelection = (providerName: string, checked: boolean) => {
+    setSelectedProviders((prev) => {
+      if (checked) {
+        if (prev.includes(providerName)) {
+          return prev;
+        }
+        return [...prev, providerName];
+      }
+      return prev.filter((name) => name !== providerName);
+    });
+    if (checked) {
+      setProviderSymbols((prev) => ({
+        ...prev,
+        [providerName]: prev[providerName] ?? '',
+      }));
+    } else {
+      setProviderSymbols((prev) => {
+        if (!(providerName in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[providerName];
+        return next;
+      });
+    }
   };
 
   const handleConfigChange = (field: string, value: string) => {
@@ -119,23 +151,35 @@ export default function InstancesPage() {
       setFormError('Strategy selection is required');
       return;
     }
-    if (!newInstance.provider) {
-      setFormError('Provider selection is required');
-      return;
-    }
-
-    const symbols = newInstance.symbols
-      .split(',')
-      .map((symbol) => symbol.trim())
-      .filter(Boolean);
-    if (symbols.length === 0) {
-      setFormError('At least one symbol is required');
+    if (selectedProviders.length === 0) {
+      setFormError('Select at least one provider');
       return;
     }
 
     const strategyMeta = selectedStrategy;
     if (!strategyMeta) {
       setFormError('Strategy metadata is unavailable');
+      return;
+    }
+
+    const scope: Record<string, { symbols: string[] }> = {};
+    const allSymbols = new Set<string>();
+    for (const providerName of selectedProviders) {
+      const raw = providerSymbols[providerName] ?? '';
+      const parsed = raw
+        .split(',')
+        .map((symbol) => symbol.trim().toUpperCase())
+        .filter(Boolean);
+      if (parsed.length === 0) {
+        setFormError(`Provider "${providerName}" requires at least one symbol`);
+        return;
+      }
+      parsed.forEach((symbol) => allSymbols.add(symbol));
+      scope[providerName] = { symbols: parsed };
+    }
+
+    if (allSymbols.size === 0) {
+      setFormError('At least one instrument symbol is required');
       return;
     }
 
@@ -180,9 +224,7 @@ export default function InstancesPage() {
         identifier: newInstance.strategyIdentifier,
         config: configPayload,
       },
-      scope: {
-        [newInstance.provider]: { symbols },
-      },
+      scope,
     };
 
     const mode = dialogMode;
@@ -210,23 +252,24 @@ export default function InstancesPage() {
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '';
-      
-      // Check if error is about provider availability but instance might still be created
       if (errorMessage.includes('provider') && errorMessage.includes('unavailable')) {
-        const providerName = newInstance.provider || errorMessage.match(/"([^"]+)"/)?.[1] || 'selected provider';
+        const matchedProvider =
+          selectedProviders.find((name) =>
+            errorMessage.toLowerCase().includes(name.toLowerCase()),
+          ) ?? selectedProviders[0] ?? 'selected provider';
         setFormError(
-          `Provider "${providerName}" is not running. Start the provider and try creating the instance again.`
+          `Provider "${matchedProvider}" is not running. Start the provider and try creating the instance again.`,
         );
       } else if (errorMessage.includes('scope assignments are immutable')) {
         setFormError(
-          'Provider and symbol assignments cannot be changed after creation. Only strategy configuration can be modified.'
+          'Provider and symbol assignments cannot be changed after creation. Only strategy configuration can be modified.',
         );
       } else {
         setFormError(
           errorMessage ||
-          (dialogMode === 'edit'
-            ? 'Failed to update instance'
-            : 'Failed to create instance')
+            (dialogMode === 'edit'
+              ? 'Failed to update instance'
+              : 'Failed to create instance'),
         );
       }
     } finally {
@@ -281,14 +324,12 @@ export default function InstancesPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm(`Are you sure you want to delete instance "${id}"?`)) {
-      return;
-    }
+  const performDelete = async (id: string) => {
     setActionInProgress(prev => ({ ...prev, [`delete-${id}`]: true }));
     try {
       await apiClient.deleteInstance(id);
       await fetchData();
+      setConfirmState(null);
       showToast({
         title: 'Instance deleted',
         description: `${id} has been removed.`,
@@ -301,9 +342,13 @@ export default function InstancesPage() {
         description: message,
         variant: 'destructive',
       });
+      setConfirmState(null);
     } finally {
       setActionInProgress(prev => ({ ...prev, [`delete-${id}`]: false }));
     }
+  };
+  const handleDelete = (id: string) => {
+    setConfirmState({ type: 'delete-instance', id });
   };
 
   const handleEdit = async (id: string) => {
@@ -314,20 +359,26 @@ export default function InstancesPage() {
     setConfigValues({});
     setInstanceLoading(true);
     setCreateDialogOpen(true);
-  try {
-    const instance = await apiClient.getInstance(id);
-    const providerEntries = Object.entries(instance.scope);
-    const [providerName, providerScope] = providerEntries[0] ?? ['', { symbols: [] }];
-    const symbolsValue = (providerScope?.symbols ?? []).join(', ');
+    try {
+      const instance = await apiClient.getInstance(id);
+      const scopeEntries = Object.entries(instance.scope ?? {});
+      const providerList = scopeEntries.map(([name]) => name);
+      const symbolMap: Record<string, string> = {};
+      scopeEntries.forEach(([name, assignment]) => {
+        const symbols = assignment?.symbols ?? [];
+        symbolMap[name] = symbols.join(', ');
+      });
 
-    setNewInstance({
-      id: instance.id,
-      strategyIdentifier: instance.strategy.identifier,
-      provider: providerName,
-      symbols: symbolsValue,
-    });
+      setNewInstance({
+        id: instance.id,
+        strategyIdentifier: instance.strategy.identifier,
+      });
+      setSelectedProviders(providerList);
+      setProviderSymbols(symbolMap);
 
-      const strategyMeta = strategies.find((strategy) => strategy.name === instance.strategy.identifier);
+      const strategyMeta = strategies.find(
+        (strategy) => strategy.name === instance.strategy.identifier,
+      );
       if (strategyMeta) {
         const values: Record<string, string> = {};
         strategyMeta.config.forEach((field) => {
@@ -345,7 +396,7 @@ export default function InstancesPage() {
         setConfigValues(values);
       } else {
         const values = Object.fromEntries(
-          Object.entries(instance.strategy.config).map(([key, value]) => [key, String(value)])
+          Object.entries(instance.strategy.config).map(([key, value]) => [key, String(value)]),
         );
         setConfigValues(values);
       }
@@ -369,8 +420,15 @@ export default function InstancesPage() {
     );
   }
 
+  const confirmOpen = Boolean(confirmState);
+  const confirmLoading =
+    confirmState?.type === 'delete-instance'
+      ? Boolean(actionInProgress[`delete-${confirmState.id}`])
+      : false;
+
   return (
-    <div className="space-y-6">
+    <>
+      <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Strategy Instances</h1>
@@ -457,72 +515,115 @@ export default function InstancesPage() {
                     </Select>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="provider">
-                      Provider
+                    <Label>
+                      Providers
                       {dialogMode === 'edit' && (
                         <span className="ml-2 text-xs font-normal text-muted-foreground">
                           (cannot be changed)
                         </span>
                       )}
                     </Label>
-                    <Select
-                      value={newInstance.provider}
-                      onValueChange={(value) => {
-                        setFormError(null);
-                        setNewInstance({ ...newInstance, provider: value });
-                      }}
-                      disabled={dialogMode === 'edit' || providers.length === 0}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select provider" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {providers.length === 0 ? (
-                          <SelectItem value="__no-providers" disabled>
-                            No providers available
-                          </SelectItem>
+                    {dialogMode === 'edit' ? (
+                      <div className="space-y-3 rounded-md border bg-muted/30 p-3">
+                        {selectedProviders.length === 0 ? (
+                          <p className="text-sm italic text-muted-foreground">
+                            No providers assigned to this instance.
+                          </p>
                         ) : (
-                          providers.map((provider) => (
-                            <SelectItem
-                              key={provider.name}
-                              value={provider.name}
-                              disabled={!provider.running}
-                            >
-                              {provider.running ? provider.name : `${provider.name} (stopped)`}
-                            </SelectItem>
-                          ))
+                          selectedProviders.map((name) => {
+                            const symbols =
+                              providerSymbols[name]?.split(',').map((s) => s.trim()).filter(Boolean) ??
+                              [];
+                            return (
+                              <div key={name} className="space-y-1">
+                                <p className="text-sm font-medium text-foreground">{name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {symbols.length > 0 ? symbols.join(', ') : 'No symbols assigned'}
+                                </p>
+                              </div>
+                            );
+                          })
                         )}
-                      </SelectContent>
-                    </Select>
-                    {providers.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        No providers are configured yet. Create and start a provider from the Providers page before creating an instance.
-                      </p>
-                    ) : providers.some((provider) => !provider.running) ? (
-                      <p className="text-xs text-muted-foreground">
-                        Start a provider from the Providers page to enable it here.
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="symbols">
-                      Symbols (comma-separated)
-                      {dialogMode === 'edit' && (
-                        <span className="ml-2 text-xs font-normal text-muted-foreground">
-                          (cannot be changed)
-                        </span>
-                      )}
-                    </Label>
-                    <Input
-                      id="symbols"
-                      value={newInstance.symbols}
-                      onChange={(e) => {
-                        setFormError(null);
-                        setNewInstance({ ...newInstance, symbols: e.target.value });
-                      }}
-                      placeholder="BTC-USDT, ETH-USDT"
-                      disabled={dialogMode === 'edit'}
-                    />
+                        <p className="text-xs text-muted-foreground">
+                          Provider and symbol assignments cannot be changed after creation.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4 rounded-md border p-3">
+                        <div className="space-y-2">
+                          {providers.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                              No providers are configured yet. Create and start a provider from the
+                              Providers page before creating an instance.
+                            </p>
+                          ) : (
+                            <>
+                              {providers.map((provider) => {
+                              const checked = selectedProviders.includes(provider.name);
+                              return (
+                                <label
+                                  key={provider.name}
+                                  className="flex items-center gap-2 text-sm text-foreground"
+                                >
+                                  <Checkbox
+                                    checked={checked}
+                                    onChange={(event) => {
+                                      if (!provider.running) {
+                                        return;
+                                      }
+                                      setFormError(null);
+                                      toggleProviderSelection(provider.name, event.target.checked);
+                                    }}
+                                    disabled={!provider.running}
+                                  />
+                                  <span className={provider.running ? '' : 'text-muted-foreground'}>
+                                    {provider.running
+                                      ? provider.name
+                                      : `${provider.name} (stopped)`}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                              {providers.some((provider) => !provider.running) ? (
+                                <p className="text-xs text-muted-foreground">
+                                  Start a provider from the Providers page to enable it here.
+                                </p>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                        {selectedProviders.length > 0 && (
+                          <div className="space-y-3">
+                            {selectedProviders.map((providerName) => (
+                              <div key={providerName} className="grid gap-1">
+                                <Label
+                                  htmlFor={`symbols-${providerName}`}
+                                  className="text-xs uppercase text-muted-foreground"
+                                >
+                                  Symbols for {providerName}
+                                </Label>
+                                <Input
+                                  id={`symbols-${providerName}`}
+                                  value={providerSymbols[providerName] ?? ''}
+                                  onChange={(event) => {
+                                    const { value } = event.target;
+                                    setFormError(null);
+                                    setProviderSymbols((prev) => ({
+                                      ...prev,
+                                      [providerName]: value,
+                                    }));
+                                  }}
+                                  placeholder="BTC-USDT, ETH-USDT"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          Select one or more providers and list the symbols to assign to each.
+                        </p>
+                      </div>
+                    )}
                   </div>
                   {selectedStrategy && selectedStrategy.config.length > 0 && (
                     <div className="grid gap-3">
@@ -711,6 +812,33 @@ export default function InstancesPage() {
           </CardContent>
         </Card>
       )}
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmState(null);
+          }
+        }}
+        title="Delete instance?"
+        description={
+          confirmState ? (
+            <span>
+              This action will permanently remove{' '}
+              <span className="font-medium text-foreground">{confirmState.id}</span>.
+            </span>
+          ) : undefined
+        }
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        loading={confirmLoading}
+        confirmDisabled={confirmLoading}
+        onConfirm={() => {
+          if (confirmState) {
+            void performDelete(confirmState.id);
+          }
+        }}
+      />
     </div>
+    </>
   );
 }

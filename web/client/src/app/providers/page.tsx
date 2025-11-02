@@ -35,6 +35,7 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/toast-provider';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 
 const INSTRUMENTS_PAGE_SIZE = 120;
 
@@ -247,6 +248,7 @@ export default function ProvidersPage() {
   const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(null);
   const [instrumentQuery, setInstrumentQuery] = useState('');
   const [instrumentPage, setInstrumentPage] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   type ProviderActionType = 'start' | 'stop' | 'delete';
   type ProviderActionState = Record<ProviderActionType, string | null>;
@@ -596,17 +598,12 @@ export default function ProvidersPage() {
     }
   };
 
-  const handleDelete = async (name: string) => {
-    if (typeof window !== 'undefined') {
-      const confirmed = window.confirm(`Delete provider ${name}?`);
-      if (!confirmed) {
-        return;
-      }
-    }
+  const performDelete = async (name: string) => {
     setPending('delete', name);
     try {
       await apiClient.deleteProvider(name);
       await refreshProviders();
+      setDeleteTarget(null);
       showToast({
         title: 'Provider deleted',
         description: `${name} has been removed.`,
@@ -619,9 +616,13 @@ export default function ProvidersPage() {
         description: message,
         variant: 'destructive',
       });
+      setDeleteTarget(null);
     } finally {
       setPending('delete', null);
     }
+  };
+  const handleDelete = (name: string) => {
+    setDeleteTarget(name);
   };
 
   if (loading) {
@@ -636,8 +637,13 @@ export default function ProvidersPage() {
     );
   }
 
+  const deleteConfirmOpen = deleteTarget !== null;
+  const deleteConfirmLoading =
+    deleteTarget !== null && pendingActions.delete === deleteTarget;
+
   return (
-    <div className="space-y-6">
+    <>
+      <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Providers</h1>
@@ -1114,6 +1120,33 @@ export default function ProvidersPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+          }
+        }}
+        title="Delete provider?"
+        description={
+          deleteTarget ? (
+            <span>
+              This action will permanently remove{' '}
+              <span className="font-medium text-foreground">{deleteTarget}</span>.
+            </span>
+          ) : undefined
+        }
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        loading={deleteConfirmLoading}
+        confirmDisabled={deleteConfirmLoading}
+        onConfirm={() => {
+          if (deleteTarget) {
+            void performDelete(deleteTarget);
+          }
+        }}
+      />
+    </>
   );
 }

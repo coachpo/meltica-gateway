@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { RiskConfig } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { XIcon } from 'lucide-react';
 
 type RiskPresence = {
   maxPositionSize: boolean;
@@ -110,6 +111,7 @@ export default function RiskPage() {
       cooldown: '',
     },
   });
+  const [orderTypeInput, setOrderTypeInput] = useState('');
 
   useEffect(() => {
     const loadLimits = async () => {
@@ -170,9 +172,36 @@ export default function RiskPage() {
     setActionError(null);
   };
 
-  const handleOrderTypesChange = (value: string) => {
-    const types = value.split(',').map((t) => t.trim()).filter(Boolean);
-    setFormData((prev) => ({ ...prev, allowedOrderTypes: types }));
+  const addOrderType = (raw: string) => {
+    const trimmed = raw.trim().toUpperCase();
+    if (!trimmed) {
+      setOrderTypeInput('');
+      return;
+    }
+    setFormData((prev) => {
+      if (prev.allowedOrderTypes.includes(trimmed)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        allowedOrderTypes: [...prev.allowedOrderTypes, trimmed],
+      };
+    });
+    setOrderTypeInput('');
+  };
+
+  const removeOrderType = (type: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      allowedOrderTypes: prev.allowedOrderTypes.filter((entry) => entry !== type),
+    }));
+  };
+
+  const handleOrderTypeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' || event.key === ',') {
+      event.preventDefault();
+      addOrderType(orderTypeInput);
+    }
   };
 
   const missingFields = useMemo(() => {
@@ -429,12 +458,34 @@ export default function RiskPage() {
             <div className="grid gap-2">
               <Label htmlFor="allowedOrderTypes">Allowed Order Types</Label>
               {editMode ? (
-                <Input
-                  id="allowedOrderTypes"
-                  value={formData.allowedOrderTypes.join(', ')}
-                  onChange={(e) => handleOrderTypesChange(e.target.value)}
-                  placeholder="e.g., LIMIT, MARKET"
-                />
+                <div className="space-y-2 rounded-md border p-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {formData.allowedOrderTypes.map((type) => (
+                      <Badge key={type} variant="secondary" className="flex items-center gap-1">
+                        {type}
+                        <button
+                          type="button"
+                          onClick={() => removeOrderType(type)}
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                          aria-label={`Remove ${type}`}
+                        >
+                          <XIcon className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                    <Input
+                      id="allowedOrderTypes"
+                      value={orderTypeInput}
+                      onChange={(event) => setOrderTypeInput(event.target.value)}
+                      onKeyDown={handleOrderTypeKeyDown}
+                      placeholder="Type and press Enter"
+                      className="flex-1 min-w-[8rem] border-none bg-transparent p-0 text-sm focus-visible:ring-0 focus-visible:border-none"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Press Enter or comma to add, or click an order type to remove it.
+                  </p>
+                </div>
               ) : (
                 <div className="flex flex-wrap gap-1">
                   {presence?.allowedOrderTypes && limits?.allowedOrderTypes?.length ? (

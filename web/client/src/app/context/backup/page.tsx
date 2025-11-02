@@ -75,6 +75,56 @@ export default function ContextBackupPage() {
     return current;
   }, [snapshot, loadSnapshot]);
 
+  const inputDiagnostics = useMemo(() => {
+    const length = importText.length;
+    const trimmed = importText.trim();
+    if (!trimmed) {
+      return {
+        status: 'idle' as const,
+        message: 'Paste a backup payload or load one from file to inspect it.',
+        length,
+      };
+    }
+    try {
+      const parsed = JSON.parse(importText);
+      if (!parsed || typeof parsed !== 'object') {
+        return {
+          status: 'warning' as const,
+          message: 'JSON payload should resolve to an object with providers, lambdas, and risk keys.',
+          length,
+        };
+      }
+      const keys = Object.keys(parsed);
+      return {
+        status: 'success' as const,
+        message: `Looks like valid JSON${keys.length ? ` with keys: ${keys.join(', ')}` : ''}.`,
+        length,
+      };
+    } catch (err) {
+      const detail =
+        err instanceof SyntaxError
+          ? err.message.split('\n')[0]
+          : err instanceof Error
+            ? err.message
+            : 'Invalid JSON payload';
+      return {
+        status: 'error' as const,
+        message: detail,
+        length,
+      };
+    }
+  }, [importText]);
+
+  const inputDiagnosticClass =
+    inputDiagnostics.status === 'success'
+      ? 'text-xs text-emerald-600 dark:text-emerald-400'
+      : inputDiagnostics.status === 'warning'
+        ? 'text-xs text-amber-600 dark:text-amber-400'
+        : inputDiagnostics.status === 'error'
+          ? 'text-xs text-destructive'
+          : 'text-xs text-muted-foreground';
+  const formattedInputLength = inputDiagnostics.length.toLocaleString();
+
   const handleDownload = async () => {
     setError(null);
     setDownloading(true);
@@ -316,6 +366,12 @@ export default function ContextBackupPage() {
                 value={importText}
                 onChange={handleImportChange}
               />
+              <p className={inputDiagnosticClass}>
+                {inputDiagnostics.message}{' '}
+                <span className="text-muted-foreground">
+                  ({formattedInputLength} characters)
+                </span>
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
