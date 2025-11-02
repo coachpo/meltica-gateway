@@ -877,26 +877,36 @@ export default function ProvidersPage() {
                     <div className="space-y-1 text-sm text-muted-foreground">
                       Provide adapter-specific settings. Leave optional fields blank to use defaults.
                     </div>
-                    {selectedAdapter.settingsSchema.map((setting) => (
-                      <div key={setting.name} className="space-y-2">
-                        <Label htmlFor={`setting-${setting.name}`}>
-                          {setting.name}
-                          {setting.required && <span className="text-red-500">*</span>}
-                        </Label>
-                        <Input
-                          id={`setting-${setting.name}`}
-                          type={['int', 'integer', 'float', 'double', 'number'].includes(setting.type.toLowerCase()) ? 'number' : 'text'}
-                          value={formState.configValues[setting.name] ?? ''}
-                          onChange={(event) => handleConfigChange(setting.name, event.target.value)}
-                          placeholder={
-                            setting.default !== undefined && setting.default !== null
-                              ? `Default: ${valueToString(setting.default)}`
-                              : undefined
-                          }
-                        />
-                        <p className="text-xs text-muted-foreground">Type: {setting.type}</p>
-                      </div>
-                    ))}
+                    {selectedAdapter.settingsSchema.map((setting) => {
+                      const normalizedName = setting.name.trim().toLowerCase();
+                      const isAPIKeySetting = normalizedName === 'api_key';
+                      const labelText = isAPIKeySetting ? 'API key (optional)' : setting.name;
+                      return (
+                        <div key={setting.name} className="space-y-2">
+                          <Label htmlFor={`setting-${setting.name}`}>
+                            {labelText}
+                            {setting.required && <span className="text-red-500">*</span>}
+                          </Label>
+                          <Input
+                            id={`setting-${setting.name}`}
+                            type={['int', 'integer', 'float', 'double', 'number'].includes(setting.type.toLowerCase()) ? 'number' : 'text'}
+                            value={formState.configValues[setting.name] ?? ''}
+                            onChange={(event) => handleConfigChange(setting.name, event.target.value)}
+                            placeholder={
+                              setting.default !== undefined && setting.default !== null
+                                ? `Default: ${valueToString(setting.default)}`
+                                : undefined
+                            }
+                          />
+                          {isAPIKeySetting && (
+                            <p className="text-xs text-muted-foreground">
+                              Leave blank to disable private subscriptions such as balances and order executions.
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground">Type: {setting.type}</p>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-sm text-muted-foreground">

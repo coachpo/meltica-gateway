@@ -52,6 +52,10 @@ var (
 		EventTypeInstrumentUpdate: RouteTypeInstrumentUpdate,
 		EventTypeRiskControl:      RouteTypeRiskControl,
 	}
+	routesRequiringAuthentication = map[RouteType]struct{}{
+		RouteTypeAccountBalance:  {},
+		RouteTypeExecutionReport: {},
+	}
 )
 
 // NormalizeRouteType trims spaces and uppercases the provided canonical route.
@@ -61,6 +65,16 @@ func NormalizeRouteType(route RouteType) RouteType {
 		return ""
 	}
 	return RouteType(strings.ToUpper(trimmed))
+}
+
+// RouteRequiresAuthentication reports whether the route depends on authenticated API access.
+func RouteRequiresAuthentication(route RouteType) bool {
+	normalized := NormalizeRouteType(route)
+	if normalized == "" {
+		return false
+	}
+	_, ok := routesRequiringAuthentication[normalized]
+	return ok
 }
 
 // Validate ensures the canonical route name adheres to spec.

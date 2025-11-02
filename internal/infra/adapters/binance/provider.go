@@ -219,6 +219,8 @@ func (p *Provider) Start(ctx context.Context) error {
 
 	if p.hasTradingCredentials() {
 		p.startUserDataStream()
+	} else if strings.TrimSpace(p.opts.Config.APIKey) == "" {
+		log.Printf("binance/provider: API key not configured; private subscriptions will be disabled for %s", p.name)
 	}
 
 	go func() {
@@ -279,8 +281,16 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 	case schema.RouteTypeOrderbookSnapshot:
 		return p.configureOrderBookStreams(instruments)
 	case schema.RouteTypeAccountBalance,
-		schema.RouteTypeExecutionReport,
-		schema.RouteTypeKlineSummary,
+		schema.RouteTypeExecutionReport:
+		if schema.RouteRequiresAuthentication(route.Type) && !p.hasTradingCredentials() {
+			if strings.TrimSpace(p.opts.Config.APIKey) == "" {
+				log.Printf("binance/provider: skipped %s subscription for %s because API key is not configured", route.Type, p.name)
+			} else {
+				log.Printf("binance/provider: skipped %s subscription for %s because API credentials are incomplete", route.Type, p.name)
+			}
+		}
+		return nil
+	case schema.RouteTypeKlineSummary,
 		schema.RouteTypeInstrumentUpdate,
 		schema.RouteTypeRiskControl:
 		return nil
