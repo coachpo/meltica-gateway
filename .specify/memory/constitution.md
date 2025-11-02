@@ -1,36 +1,3 @@
-<!--
-SYNC IMPACT REPORT
-==================
-
-Version Change: v5.1.0 → v6.0.0
-
-Modified Principles:
-- Replaced Meltica-specific LM/CQ/TS/UX/PERF/ARCH families with universal FA, AI, DW, CQ, TV, OP, SP, GOV frameworks.
-- Governance section now spells out amendment authority, semantic versioning, and compliance checkpoints in technology-agnostic terms.
-
-Added Sections:
-- 1. Foundational Alignment
-- 6. Operational Excellence
-- 7. Security & Privacy
-
-Removed Sections:
-- Meltica Trading Monolith component requirements (LM-01 through PERF-09, ARCH-01 through ARCH-04, UX-01 through UX-04) and language/tool mandates.
-
-Templates Requiring Updates:
-✅ .specify/templates/plan-template.md
-✅ .specify/templates/spec-template.md
-✅ .specify/templates/tasks-template.md
-⚠ Legacy specifications in /specs/00*-*/ referencing retired principle codes (requires manual refresh)
-
-Deferred/Follow-ups:
-- TODO(update-legacy-specs): Refresh historical specification artifacts to reference the new principle taxonomy.
-
-Rationale:
-MAJOR bump (5.1.0 → 6.0.0). Constitution rewritten as a technology-, architecture-, implementation-, and project-agnostic framework while keeping enforceable governance. All Meltica-specific component structures and library requirements were replaced with universal principles covering alignment, architecture, workflow, code quality, testing, operations, security, and governance expectations.
-
-Last Amended: 2025-10-15
--->
-
 # Universal Engineering Constitution
 
 ## 1. Foundational Alignment
@@ -211,22 +178,29 @@ Rationale: Transparency accelerates onboarding and supports retrospectives.
 ## Version History
 
 ### v6.0.0 (2025-10-15)
+
 MAJOR: Replaced Meltica-specific architecture, tooling, and component mandates with the technology-agnostic Universal Engineering Constitution. Introduced FA, AI, DW, CQ, TV, OP, SP, and GOV principle families plus explicit amendment, versioning, and compliance procedures.
 
 ### v5.1.0 (2025-10-14)
+
 MINOR: Enhanced PERF-06 with fan-out duplicate strategy using sync.Pool for per-subscriber copies and parallel delivery. Enhanced PERF-07 with Recycler as single return gateway, debug poisoning to catch use-after-put, and double-put guards. Added PERF-08 (Consumer Purity Rules): pure lambdas, routing_version-based market-data ignoring, critical kinds (ExecReport, ControlAck, ControlResult) always delivered. Added PERF-09 (Concurrency Library Standard): MUST use github.com/sourcegraph/conc, FORBID async/pool. Updated GOV-02b to include async/pool in banned imports. Updated GOV-04 to explicitly mandate async/pool eradication. Added GOV-06 (Developer Workflow Guidance): use context7 prompt for Cursor/agents to get current library docs. No backward compatibility per CQ-08/GOV-04.
 
 ### v5.0.0 (2025-10-13)
+
 MAJOR: Added mandatory runtime performance & memory requirements. Introduced PERF-04 (MUST use goccy/go-json, FORBID encoding/json), PERF-05 (MUST use coder/websocket, FORBID gorilla/websocket), PERF-06 (object pooling with sync.Pool for canonical events and hot-path structs), PERF-07 (struct bus ownership rules: Dispatcher fan-out clones, pool lifecycle). Updated GOV-02b to include CI guards for banned imports and coverage enforcement. Removed duplicate principles (old PERF-06, UX-06). No backward compatibility layers per CQ-08/GOV-04.
 
 ### v4.0.0 (2025-10-12)
+
 Redefined principles for a loss-tolerant, non-HFT monolith: immutable boundaries; canonical, versioned events; per-stream ordering; explicit backpressure; windowed merge rules; idempotent orders; provider-side book assembly; ops-only telemetry; simple restarts; and stricter testing gates (coverage/timeouts).
 
 ### v3.0.0 (2025-10-12)
+
 Introduced Meltica Event Pipeline principles (EP-01 through EP-08) to mandate canonical-first ingestion, Dispatcher authority, control plane isolation, end-to-end observability, and refactor directives (Router → Dispatcher, Coordinator removal, Filter Adapter replacement).
 
 ### v2.1.0 (2025-10-12)
+
 Added CQ-10: Static Code Inspection principle requiring `golangci-lint` for all code changes. Updated GOV-02b (Automated Enforcement Inventory) and GOV-04 (Quality Gates) to reflect the new linting requirement. Makefile already provides `make lint` target; developers must resolve linter issues before committing.
 
 ### v2.0.0 (2025-10-12)
+
 Lean solo-dev rewrite. Removed bureaucratic governance (RFCs, formal reviews), simplified testing to essentials, aligned with current CI (build + `go test -race`), and codified "MUST ALWAYS IGNORE BACKWARD COMPATIBILITY".
