@@ -187,6 +187,14 @@ Returns the detailed instance snapshot, including strategy configuration and pro
 ### `PUT /strategy/instances/{id}`
 Replaces the configuration and restarts the instance. Provider, symbol, and strategy are immutable and cannot be changed; only `config` can be updated.
 
+Attempts to modify immutable fields return `400 Bad Request` with descriptive errors:
+
+- `strategy is immutable for <id>` when the strategy identifier changes
+- `providers are immutable for <id>` when the provider list changes
+- `scope assignments are immutable for <id>` when symbol scope changes
+
+To alter strategy logic or trading instruments, remove the instance (or let context backup restore do so) and create a new one with the desired configuration.
+
 ### `DELETE /strategy/instances/{id}`
 Stops the instance (if running) and removes it from the manager. Returns:
 
@@ -213,6 +221,15 @@ Status codes:
 - `404` resource not found
 - `409` conflict (exists, already running, not running)
 - `405` method not allowed
+
+### Redeploying Strategy Logic
+
+Strategy type and instrument scope are intentionally fixed after creation. To change either:
+
+1. Stop and delete the existing instance (or allow a context backup restore to remove it automatically).
+2. Deploy a replacement instance with the new strategy identifier or scope.
+
+Only strategy parameters (`strategy.config`) are hot-updatable; all other changes must follow a redeploy flow so they can be audited and, if needed, backtested before going live.
 
 ## Authentication & Transport
 
