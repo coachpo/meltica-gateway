@@ -861,7 +861,7 @@ export default function ProvidersPage() {
                     <div>
                       <p className="text-sm font-medium text-foreground">Start provider immediately</p>
                       <p className="text-xs text-muted-foreground">
-                        Providers are created stopped by default. Enable this toggle to launch the provider as soon as it is saved.
+                        Toggle to launch it right after saving.
                       </p>
                     </div>
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -871,7 +871,7 @@ export default function ProvidersPage() {
                           setFormState((prev) => ({ ...prev, enabled: event.target.checked }))
                         }
                       />
-                      <span>Start immediately</span>
+                      <span className="whitespace-nowrap">Start immediately</span>
                     </label>
                   </div>
                 </div>

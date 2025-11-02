@@ -24,7 +24,6 @@ export default function ContextBackupPage() {
   const [downloading, setDownloading] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [importText, setImportText] = useState('');
-  const [sanitizedPreview, setSanitizedPreview] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const { show: showToast } = useToast();
@@ -189,7 +188,6 @@ export default function ContextBackupPage() {
   const handleImportChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     setImportText(event.target.value);
     setValidationError(null);
-    setSanitizedPreview('');
   };
 
   const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -201,7 +199,6 @@ export default function ContextBackupPage() {
       const text = await file.text();
       setImportText(text);
       setValidationError(null);
-      setSanitizedPreview('');
       showToast({
         title: 'Backup file loaded',
         description: `Loaded backup file ${file.name}.`,
@@ -227,13 +224,11 @@ export default function ContextBackupPage() {
     try {
       const parsed = JSON.parse(importText);
       const sanitized = sanitizeContextBackupPayload(parsed);
-      setSanitizedPreview(formatContextBackupPayload(sanitized));
       setValidationError(null);
       return sanitized;
     } catch (err) {
       const message = err instanceof SyntaxError ? 'Backup payload must be valid JSON' : err instanceof Error ? err.message : 'Backup payload is invalid';
       setValidationError(message);
-      setSanitizedPreview('');
       return null;
     }
   };
@@ -244,7 +239,7 @@ export default function ContextBackupPage() {
     if (sanitized) {
       showToast({
         title: 'Payload sanitized',
-        description: 'Review the sanitized preview before restoring.',
+        description: 'Payload looks good and is ready to restore.',
       });
     }
   };
@@ -388,13 +383,6 @@ export default function ContextBackupPage() {
               <Alert variant="destructive">
                 <AlertDescription>{validationError}</AlertDescription>
               </Alert>
-            )}
-
-            {sanitizedPreview && (
-              <div className="space-y-2">
-                <div className="text-sm font-medium text-foreground">Sanitized payload preview</div>
-                <Textarea className="h-48 font-mono text-xs" value={sanitizedPreview} readOnly />
-              </div>
             )}
           </CardContent>
         </Card>

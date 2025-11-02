@@ -137,41 +137,64 @@ function ToastViewport({ toasts, onDismiss }: ToastViewportProps) {
   return createPortal(
     <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex flex-col items-center gap-3 px-4 sm:items-end sm:px-6">
       {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          className={cn(
-            'pointer-events-auto w-full max-w-sm overflow-hidden rounded-md border bg-card text-card-foreground shadow-lg transition-all duration-200 ease-out',
-            toast.isVisible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
-            toast.variant === 'destructive' &&
-              'border-destructive/40 bg-destructive text-destructive-foreground',
-            toast.variant === 'success' &&
-              'border-green-400/40 bg-green-500/10 text-foreground',
-          )}
-        >
-          <div className="flex items-start gap-3 p-4">
-            <div className="flex-1">
-              {toast.title && (
-                <p className="text-sm font-semibold">{toast.title}</p>
-              )}
-              {toast.description && (
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {toast.description}
-                </p>
-              )}
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onDismiss(toast.id)}
-              className="h-6 w-6 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-              <span className="sr-only">Dismiss</span>
-            </Button>
-          </div>
-        </div>
+        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}
     </div>,
     portalTarget,
+  );
+}
+
+interface ToastItemProps {
+  toast: ToastRecord;
+  onDismiss: (id: number) => void;
+}
+
+function ToastItem({ toast, onDismiss }: ToastItemProps) {
+  const variantClass =
+    toast.variant === 'destructive'
+      ? 'border-destructive/60 bg-destructive/10 text-destructive dark:text-destructive-foreground'
+      : toast.variant === 'success'
+        ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
+        : 'border-border bg-card text-card-foreground';
+
+  const titleClass = cn(
+    'text-sm font-semibold',
+    toast.variant === 'destructive' && 'text-destructive dark:text-destructive-foreground',
+    toast.variant === 'success' && 'text-emerald-900 dark:text-emerald-100',
+  );
+
+  const descriptionClass = cn(
+    'mt-1 text-sm',
+    toast.variant === 'destructive'
+      ? 'text-destructive/80 dark:text-destructive-foreground/80'
+      : toast.variant === 'success'
+        ? 'text-emerald-800 dark:text-emerald-200'
+        : 'text-muted-foreground',
+  );
+
+  return (
+    <div
+      className={cn(
+        'pointer-events-auto w-full max-w-sm overflow-hidden rounded-md border shadow-lg transition-all duration-200 ease-out',
+        toast.isVisible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
+        variantClass,
+      )}
+    >
+      <div className="flex items-start gap-3 p-4">
+        <div className="flex-1">
+          {toast.title && <p className={titleClass}>{toast.title}</p>}
+          {toast.description && <p className={descriptionClass}>{toast.description}</p>}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => onDismiss(toast.id)}
+          className="h-6 w-6 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+        >
+          <X className="h-4 w-4" />
+          <span className="sr-only">Dismiss</span>
+        </Button>
+      </div>
+    </div>
   );
 }
