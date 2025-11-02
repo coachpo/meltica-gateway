@@ -41,9 +41,13 @@ All exchange adapters **MUST** implement WebSocket stream management using the *
 - Support order resting, liquidity consumption, and price derivation using constraint helpers for consistent precision handling.
 
 ## Order Book Assembly From Snapshot + Diffs
-1. Request a REST snapshot that includes a sequence identifier. Invoke `OrderBookAssembler.ApplySnapshot`, which resets internal maps, applies the snapshot, and replays any buffered diffs.
-2. Stream diff messages into `ApplyDiff`. The assembler buffers them until the initial snapshot lands, ignores stale sequences, and applies updates atomically.
-3. Consume the returned `schema.BookSnapshotPayload` from each successful `ApplyDiff` as the canonical book. If you detect dropped or out-of-order sequences, fetch a new snapshot and call `ApplySnapshot` again to resynchronize.
+Most venues deliver books using some combination of snapshots and incremental diffs. Handle each pattern explicitly:
+
+- **REST snapshot + streaming diffs** – Fetch a REST snapshot that includes a sequence identifier, feed it into `OrderBookAssembler.ApplySnapshot`, then stream WebSocket diffs through `ApplyDiff`. The assembler will buffer diffs that arrive before the snapshot, discard stale updates, and return fresh `schema.BookSnapshotPayload` instances whenever a diff is applied.
+- **WebSocket snapshot bootstrapping** – Some channels send a full snapshot as the very first WebSocket message. Treat that payload as the initial snapshot: publish it immediately, seed the assembler with `ApplySnapshot`, and then apply subsequent diff messages exactly as above. No REST round-trip is required unless resyncing.
+- **Resync after gaps** – If you detect missed sequences (e.g. `prevSeq` does not match the last applied sequence, zero sequence IDs, or checksum mismatches), set the handle into a resync state, fetch a fresh snapshot, and replay diffs once the assembler reports it is initialized again.
+
+> **Heads-up:** Several exchanges omit the instrument identifier inside snapshot/diff records and rely on the subscription arguments or envelope metadata instead. Preserve that context so you can resolve the canonical symbol before publishing events.
 
 ## Instrument & Symbol Metadata
 - Populate `symbolMeta`-style structs when building instruments. They should track the canonical symbol (`BTC-USDT`), the uppercase REST symbol (`BTCUSDT`), and the lowercase stream topic (`btcusdt`) so routing logic can translate requests, WebSocket subscriptions, and REST responses without recomputing strings.

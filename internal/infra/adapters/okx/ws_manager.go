@@ -12,7 +12,7 @@ import (
 
 	"github.com/cenkalti/backoff/v5"
 	"github.com/coder/websocket"
-	json "github.com/goccy/go-json"
+	"github.com/goccy/go-json"
 )
 
 const (
