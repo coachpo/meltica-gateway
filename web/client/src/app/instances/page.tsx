@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { InstanceSummary, Strategy, Provider } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,6 +15,12 @@ import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon 
 import { useToast } from '@/components/ui/toast-provider';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+
+type ProviderInstrumentStatus = {
+  symbols: string[];
+  loading: boolean;
+  error: string | null;
+};
 
 export default function InstancesPage() {
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
@@ -35,7 +41,11 @@ export default function InstancesPage() {
     strategyIdentifier: '',
   });
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
-  const [providerSymbols, setProviderSymbols] = useState<Record<string, string>>({});
+  const [providerSymbols, setProviderSymbols] = useState<Record<string, string[]>>({});
+  const [providerSymbolFilters, setProviderSymbolFilters] = useState<Record<string, string>>({});
+  const [providerInstrumentState, setProviderInstrumentState] = useState<
+    Record<string, ProviderInstrumentStatus>
+  >({});
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<{ type: 'delete-instance'; id: string } | null>(
@@ -80,6 +90,7 @@ export default function InstancesPage() {
     });
     setSelectedProviders([]);
     setProviderSymbols({});
+    setProviderSymbolFilters({});
     setConfigValues({});
     setFormError(null);
     setEditingInstanceId(null);
@@ -88,6 +99,63 @@ export default function InstancesPage() {
     setDialogSaving(false);
     setInstanceLoading(false);
   };
+
+  const loadProviderInstrumentSymbols = useCallback(async (providerName: string) => {
+    let shouldFetch = true;
+    setProviderInstrumentState((prev) => {
+      const existing = prev[providerName];
+      if (existing?.loading) {
+        shouldFetch = false;
+        return prev;
+      }
+      return {
+        ...prev,
+        [providerName]: {
+          symbols: existing?.symbols ?? [],
+          loading: true,
+          error: null,
+        },
+      };
+    });
+
+    if (!shouldFetch) {
+      return;
+    }
+
+    try {
+      const detail = await apiClient.getProvider(providerName);
+      const instruments = Array.isArray(detail.instruments) ? detail.instruments : [];
+      const symbols = Array.from(
+        new Set(
+          instruments
+            .map((instrument) => instrument.symbol)
+            .filter((symbol): symbol is string => typeof symbol === 'string' && symbol.trim().length > 0)
+            .map((symbol) => symbol.trim().toUpperCase()),
+        ),
+      ).sort((a, b) => a.localeCompare(b));
+      setProviderInstrumentState((prev) => ({
+        ...prev,
+        [providerName]: {
+          symbols,
+          loading: false,
+          error: null,
+        },
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load symbols';
+      setProviderInstrumentState((prev) => {
+        const existing = prev[providerName];
+        return {
+          ...prev,
+          [providerName]: {
+            symbols: existing?.symbols ?? [],
+            loading: false,
+            error: message,
+          },
+        };
+      });
+    }
+  }, []);
 
   const toggleProviderSelection = (providerName: string, checked: boolean) => {
     setSelectedProviders((prev) => {
@@ -102,10 +170,19 @@ export default function InstancesPage() {
     if (checked) {
       setProviderSymbols((prev) => ({
         ...prev,
-        [providerName]: prev[providerName] ?? '',
+        [providerName]: prev[providerName] ?? [],
       }));
+      void loadProviderInstrumentSymbols(providerName);
     } else {
       setProviderSymbols((prev) => {
+        if (!(providerName in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[providerName];
+        return next;
+      });
+      setProviderSymbolFilters((prev) => {
         if (!(providerName in prev)) {
           return prev;
         }
@@ -165,11 +242,14 @@ export default function InstancesPage() {
     const scope: Record<string, { symbols: string[] }> = {};
     const allSymbols = new Set<string>();
     for (const providerName of selectedProviders) {
-      const raw = providerSymbols[providerName] ?? '';
-      const parsed = raw
-        .split(',')
-        .map((symbol) => symbol.trim().toUpperCase())
-        .filter(Boolean);
+      const selectedSymbols = providerSymbols[providerName] ?? [];
+      const parsed = Array.from(
+        new Set(
+          selectedSymbols
+            .map((symbol) => symbol.trim().toUpperCase())
+            .filter((symbol) => symbol.length > 0),
+        ),
+      );
       if (parsed.length === 0) {
         setFormError(`Provider "${providerName}" requires at least one symbol`);
         return;
@@ -363,10 +443,18 @@ export default function InstancesPage() {
       const instance = await apiClient.getInstance(id);
       const scopeEntries = Object.entries(instance.scope ?? {});
       const providerList = scopeEntries.map(([name]) => name);
-      const symbolMap: Record<string, string> = {};
+      const symbolMap: Record<string, string[]> = {};
       scopeEntries.forEach(([name, assignment]) => {
-        const symbols = assignment?.symbols ?? [];
-        symbolMap[name] = symbols.join(', ');
+        const symbols = Array.isArray(assignment?.symbols) ? assignment.symbols : [];
+        const normalised = Array.from(
+          new Set(
+            symbols
+              .map((symbol) => (typeof symbol === 'string' ? symbol : String(symbol ?? '')))
+              .map((symbol) => symbol.trim().toUpperCase())
+              .filter((symbol) => symbol.length > 0),
+          ),
+        );
+        symbolMap[name] = normalised;
       });
 
       setNewInstance({
@@ -531,9 +619,7 @@ export default function InstancesPage() {
                           </p>
                         ) : (
                           selectedProviders.map((name) => {
-                            const symbols =
-                              providerSymbols[name]?.split(',').map((s) => s.trim()).filter(Boolean) ??
-                              [];
+                            const symbols = providerSymbols[name] ?? [];
                             return (
                               <div key={name} className="space-y-1">
                                 <p className="text-sm font-medium text-foreground">{name}</p>
@@ -594,33 +680,133 @@ export default function InstancesPage() {
                         </div>
                         {selectedProviders.length > 0 && (
                           <div className="space-y-3">
-                            {selectedProviders.map((providerName) => (
-                              <div key={providerName} className="grid gap-1">
-                                <Label
-                                  htmlFor={`symbols-${providerName}`}
-                                  className="text-xs uppercase text-muted-foreground"
-                                >
-                                  Symbols for {providerName}
-                                </Label>
-                                <Input
-                                  id={`symbols-${providerName}`}
-                                  value={providerSymbols[providerName] ?? ''}
-                                  onChange={(event) => {
-                                    const { value } = event.target;
-                                    setFormError(null);
-                                    setProviderSymbols((prev) => ({
-                                      ...prev,
-                                      [providerName]: value,
-                                    }));
-                                  }}
-                                  placeholder="BTC-USDT, ETH-USDT"
-                                />
-                              </div>
-                            ))}
+                            {selectedProviders.map((providerName) => {
+                              const instrumentState = providerInstrumentState[providerName];
+                              const selectedSymbols = providerSymbols[providerName] ?? [];
+                              const filterTerm = providerSymbolFilters[providerName] ?? '';
+                              const availableSymbols = instrumentState?.symbols ?? [];
+                              const filteredSymbols =
+                                filterTerm.trim().length > 0
+                                  ? availableSymbols.filter((symbol) =>
+                                      symbol.toLowerCase().includes(filterTerm.trim().toLowerCase()),
+                                    )
+                                  : availableSymbols;
+
+                              return (
+                                <div key={providerName} className="space-y-2">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <Label
+                                      htmlFor={`symbols-${providerName}`}
+                                      className="text-xs uppercase text-muted-foreground"
+                                    >
+                                      Symbols for {providerName}
+                                    </Label>
+                                    {selectedSymbols.length > 0 ? (
+                                      <span className="text-xs text-muted-foreground">
+                                        {selectedSymbols.length} selected
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="space-y-2 rounded-md border p-3">
+                                    {instrumentState?.loading ? (
+                                      <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                                        <Loader2Icon className="h-4 w-4 animate-spin" />
+                                        Loading symbols...
+                                      </div>
+                                    ) : instrumentState?.error ? (
+                                      <div className="space-y-2">
+                                        <p className="text-xs text-destructive">
+                                          {instrumentState.error}
+                                        </p>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => {
+                                            setFormError(null);
+                                          void loadProviderInstrumentSymbols(providerName);
+                                          }}
+                                        >
+                                          Retry
+                                        </Button>
+                                      </div>
+                                    ) : availableSymbols.length === 0 ? (
+                                      <p className="text-xs text-muted-foreground">
+                                        No symbols available for this provider.
+                                      </p>
+                                    ) : (
+                                      <>
+                                        <Input
+                                          id={`symbols-${providerName}`}
+                                          value={filterTerm}
+                                          onChange={(event) => {
+                                            const { value } = event.target;
+                                            setProviderSymbolFilters((prev) => ({
+                                              ...prev,
+                                              [providerName]: value,
+                                            }));
+                                          }}
+                                          placeholder="Search symbols"
+                                        />
+                                        <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+                                          {filteredSymbols.length === 0 ? (
+                                            <p className="text-xs text-muted-foreground">
+                                              No matching symbols found.
+                                            </p>
+                                          ) : (
+                                            filteredSymbols.map((symbol) => {
+                                              const checked = selectedSymbols.includes(symbol);
+                                              return (
+                                                <label
+                                                  key={symbol}
+                                                  className="flex items-center gap-2 text-sm text-foreground"
+                                                >
+                                                  <Checkbox
+                                                    checked={checked}
+                                                    onChange={(event) => {
+                                                      const { checked: symbolChecked } = event.target;
+                                                      setFormError(null);
+                                                      setProviderSymbols((prev) => {
+                                                        const current = new Set(prev[providerName] ?? []);
+                                                        if (symbolChecked) {
+                                                          current.add(symbol);
+                                                        } else {
+                                                          current.delete(symbol);
+                                                        }
+                                                        return {
+                                                          ...prev,
+                                                          [providerName]: Array.from(current).sort((a, b) =>
+                                                            a.localeCompare(b),
+                                                          ),
+                                                        };
+                                                      });
+                                                    }}
+                                                  />
+                                                  <span>{symbol}</span>
+                                                </label>
+                                              );
+                                            })
+                                          )}
+                                        </div>
+                                        {selectedSymbols.length > 0 ? (
+                                          <div className="flex flex-wrap gap-1 pt-1">
+                                            {selectedSymbols.map((symbol) => (
+                                              <Badge key={symbol} variant="secondary">
+                                                {symbol}
+                                              </Badge>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                         <p className="text-xs text-muted-foreground">
-                          Select one or more providers and list the symbols to assign to each.
+                          Select one or more providers and choose symbols from the catalog for each.
                         </p>
                       </div>
                     )}
