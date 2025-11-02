@@ -209,12 +209,20 @@ func (s *httpServer) createProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	detail, err := s.providers.Create(r.Context(), spec, enabled)
+	detail, err := s.providers.Create(r.Context(), spec, false)
 	if err != nil {
 		s.writeProviderError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, detail)
+	if enabled {
+		if _, err := s.providers.StartProviderAsync(spec.Name); err != nil {
+			s.writeProviderError(w, err)
+			return
+		}
+	}
+	location := providerDetailPrefix + spec.Name
+	w.Header().Set("Location", location)
+	writeJSON(w, http.StatusAccepted, detail)
 }
 
 func (s *httpServer) writeProviderDetail(w http.ResponseWriter, name string) {
@@ -324,12 +332,14 @@ func (s *httpServer) handleProviderAction(w http.ResponseWriter, r *http.Request
 
 	switch action {
 	case "start":
-		detail, err := s.providers.StartProvider(r.Context(), name)
+		detail, err := s.providers.StartProviderAsync(name)
 		if err != nil {
 			s.writeProviderError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, detail)
+		location := providerDetailPrefix + name
+		w.Header().Set("Location", location)
+		writeJSON(w, http.StatusAccepted, detail)
 	case "stop":
 		detail, err := s.providers.StopProvider(name)
 		if err != nil {
@@ -582,6 +592,8 @@ func (s *httpServer) writeProviderError(w http.ResponseWriter, err error) {
 	case errors.Is(err, provider.ErrProviderNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, provider.ErrProviderRunning):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, provider.ErrProviderStarting):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, provider.ErrProviderNotRunning):
 		writeError(w, http.StatusConflict, err.Error())

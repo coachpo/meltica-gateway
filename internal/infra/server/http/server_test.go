@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/shopspring/decimal"
@@ -530,8 +531,167 @@ func TestProviderUsageInfersProvidersFromScope(t *testing.T) {
 	}
 }
 
+func TestCreateProviderRespondsAcceptedPending(t *testing.T) {
+	registry := provider.NewRegistry()
+	started := make(chan struct{}, 1)
+	registry.Register("stub", func(ctx context.Context, pools *pool.PoolManager, cfg map[string]any) (provider.Instance, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		name, _ := cfg["provider_name"].(string)
+		if name == "" {
+			name = "stub"
+		}
+		return &httpTestProviderInstance{name: name}, nil
+	})
+
+	logger := log.New(ioDiscards{}, "", 0)
+	providerManager := provider.NewManager(registry, nil, nil, dispatcher.NewTable(), logger)
+
+	server := &httpServer{
+		providers:     providerManager,
+		baseProviders: map[string]struct{}{},
+		baseLambdas:   map[string]struct{}{},
+	}
+
+	body := `{"name":"stub","adapter":{"identifier":"stub","config":{}},"enabled":true}`
+	req := httptest.NewRequest(http.MethodPost, "/providers", strings.NewReader(body))
+	res := httptest.NewRecorder()
+
+	server.createProvider(res, req)
+
+	if res.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", res.Code)
+	}
+	if location := res.Header().Get("Location"); location != "/providers/stub" {
+		t.Fatalf("expected Location header /providers/stub, got %q", location)
+	}
+
+	var detail provider.RuntimeDetail
+	if err := json.Unmarshal(res.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if detail.Name != "stub" {
+		t.Fatalf("expected provider name stub, got %s", detail.Name)
+	}
+	if detail.Status != provider.StatusPending {
+		t.Fatalf("expected pending status, got %s", detail.Status)
+	}
+	if detail.Running {
+		t.Fatal("expected provider not running immediately after creation")
+	}
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for provider factory")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		meta, ok := providerManager.ProviderMetadataFor("stub")
+		if ok && meta.Status == provider.StatusRunning && meta.Running {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected provider to transition to running state")
+}
+
+func TestStartProviderActionReturnsAccepted(t *testing.T) {
+	registry := provider.NewRegistry()
+	started := make(chan struct{}, 1)
+	registry.Register("stub", func(ctx context.Context, pools *pool.PoolManager, cfg map[string]any) (provider.Instance, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		name, _ := cfg["provider_name"].(string)
+		if name == "" {
+			name = "stub"
+		}
+		return &httpTestProviderInstance{name: name}, nil
+	})
+
+	logger := log.New(ioDiscards{}, "", 0)
+	providerManager := provider.NewManager(registry, nil, nil, dispatcher.NewTable(), logger)
+
+	spec := config.ProviderSpec{
+		Name:    "stub",
+		Adapter: "stub",
+		Config: map[string]any{
+			"identifier":    "stub",
+			"provider_name": "stub",
+		},
+	}
+	if _, err := providerManager.Create(context.Background(), spec, false); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+
+	server := &httpServer{
+		providers:     providerManager,
+		baseProviders: map[string]struct{}{},
+		baseLambdas:   map[string]struct{}{},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/providers/stub/start", nil)
+	res := httptest.NewRecorder()
+
+	server.handleProviderAction(res, req, "stub", "start")
+
+	if res.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", res.Code)
+	}
+	if location := res.Header().Get("Location"); location != "/providers/stub" {
+		t.Fatalf("expected Location header /providers/stub, got %q", location)
+	}
+
+	var detail provider.RuntimeDetail
+	if err := json.Unmarshal(res.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if detail.Status != provider.StatusStarting {
+		t.Fatalf("expected starting status, got %s", detail.Status)
+	}
+	if detail.Running {
+		t.Fatal("expected provider not running during startup")
+	}
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for provider factory")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		meta, ok := providerManager.ProviderMetadataFor("stub")
+		if ok && meta.Status == provider.StatusRunning && meta.Running {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected provider to transition to running state")
+}
+
 type ioDiscards struct{}
 
 func (ioDiscards) Write(p []byte) (int, error) {
 	return len(p), nil
 }
+
+type httpTestProviderInstance struct {
+	name string
+}
+
+func (i *httpTestProviderInstance) Name() string                    { return i.name }
+func (i *httpTestProviderInstance) Start(ctx context.Context) error { return nil }
+func (i *httpTestProviderInstance) Events() <-chan *schema.Event    { return nil }
+func (i *httpTestProviderInstance) Errors() <-chan error            { return nil }
+func (i *httpTestProviderInstance) SubmitOrder(ctx context.Context, req schema.OrderRequest) error {
+	return nil
+}
+func (i *httpTestProviderInstance) SubscribeRoute(route dispatcher.Route) error   { return nil }
+func (i *httpTestProviderInstance) UnsubscribeRoute(route dispatcher.Route) error { return nil }
+func (i *httpTestProviderInstance) Instruments() []schema.Instrument              { return nil }

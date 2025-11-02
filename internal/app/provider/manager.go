@@ -41,7 +41,25 @@ type providerState struct {
 	cancel        context.CancelFunc
 	cachedRoutes  []dispatcher.Route
 	running       bool
+	status        Status
+	startupErr    error
 }
+
+// Status represents the lifecycle state of a provider.
+type Status string
+
+const (
+	// StatusPending indicates the provider is registered but not yet started.
+	StatusPending Status = "pending"
+	// StatusStarting indicates the provider is currently starting.
+	StatusStarting Status = "starting"
+	// StatusRunning indicates the provider is fully operational.
+	StatusRunning Status = "running"
+	// StatusStopped indicates the provider has been stopped.
+	StatusStopped Status = "stopped"
+	// StatusFailed indicates the provider failed to start.
+	StatusFailed Status = "failed"
+)
 
 var (
 	// ErrProviderExists indicates that a provider with the given name already exists.
@@ -50,6 +68,8 @@ var (
 	ErrProviderNotFound = errors.New("provider not found")
 	// ErrProviderRunning indicates that the provider is already running.
 	ErrProviderRunning = errors.New("provider already running")
+	// ErrProviderStarting indicates that the provider is currently starting.
+	ErrProviderStarting = errors.New("provider starting")
 	// ErrProviderNotRunning indicates that the provider is not currently running.
 	ErrProviderNotRunning = errors.New("provider not running")
 )
@@ -139,6 +159,8 @@ func (m *Manager) Create(ctx context.Context, spec config.ProviderSpec, start bo
 		cancel:        nil,
 		cachedRoutes:  nil,
 		running:       false,
+		status:        StatusPending,
+		startupErr:    nil,
 	}
 	m.states[spec.Name] = state
 	m.mu.Unlock()
@@ -179,6 +201,10 @@ func (m *Manager) Update(ctx context.Context, spec config.ProviderSpec, start bo
 		m.mu.Unlock()
 		return empty, fmt.Errorf("%w: %s", ErrProviderNotFound, spec.Name)
 	}
+	if state.status == StatusStarting {
+		m.mu.Unlock()
+		return empty, fmt.Errorf("%w: %s", ErrProviderStarting, spec.Name)
+	}
 	wasRunning := state.running
 	if wasRunning {
 		m.stopProviderLocked(state)
@@ -218,7 +244,7 @@ func (m *Manager) Remove(name string) error {
 	return nil
 }
 
-// StartProvider starts a configured provider instance.
+// StartProvider starts a configured provider instance synchronously.
 func (m *Manager) StartProvider(ctx context.Context, name string) (RuntimeDetail, error) {
 	var empty RuntimeDetail
 	trimmed := strings.TrimSpace(name)
@@ -231,26 +257,48 @@ func (m *Manager) StartProvider(ctx context.Context, name string) (RuntimeDetail
 		}
 	}
 
-	m.mu.Lock()
-	state, ok := m.states[trimmed]
-	if !ok {
-		m.mu.Unlock()
-		return empty, fmt.Errorf("%w: %s", ErrProviderNotFound, trimmed)
-	}
-	if state.running {
-		m.mu.Unlock()
-		return empty, fmt.Errorf("%w: %s", ErrProviderRunning, trimmed)
-	}
-	err := m.startProviderLocked(state)
-	m.mu.Unlock()
+	spec, cachedRoutes, err := m.prepareProviderStart(trimmed)
 	if err != nil {
 		return empty, err
 	}
+
+	if err := m.startProviderRuntime(trimmed, spec, cachedRoutes); err != nil {
+		return empty, err
+	}
+
 	detail, ok := m.ProviderMetadataFor(trimmed)
 	if !ok {
 		return empty, fmt.Errorf("%w: %s", ErrProviderNotFound, trimmed)
 	}
 	return detail, nil
+}
+
+// StartProviderAsync starts a configured provider instance asynchronously.
+func (m *Manager) StartProviderAsync(name string) (RuntimeDetail, error) {
+	var empty RuntimeDetail
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return empty, fmt.Errorf("provider name required")
+	}
+
+	spec, cachedRoutes, err := m.prepareProviderStart(trimmed)
+	if err != nil {
+		return empty, err
+	}
+
+	go m.startProviderAsync(trimmed, spec, cachedRoutes)
+
+	detail, ok := m.ProviderMetadataFor(trimmed)
+	if !ok {
+		return empty, fmt.Errorf("%w: %s", ErrProviderNotFound, trimmed)
+	}
+	return detail, nil
+}
+
+func (m *Manager) startProviderAsync(name string, spec config.ProviderSpec, cachedRoutes []dispatcher.Route) {
+	if err := m.startProviderRuntime(name, spec, cachedRoutes); err != nil && m.logger != nil {
+		m.logger.Printf("provider/%s: async start failed: %v", name, err)
+	}
 }
 
 // StopProvider stops a running provider instance but retains its specification.
@@ -280,38 +328,99 @@ func (m *Manager) StopProvider(name string) (RuntimeDetail, error) {
 	return detail, nil
 }
 
-func (m *Manager) startProviderLocked(state *providerState) error {
-	if state == nil {
-		return fmt.Errorf("provider state required")
-	}
+func (m *Manager) startProviderRuntime(name string, spec config.ProviderSpec, cachedRoutes []dispatcher.Route) error {
 	parent := m.parentContext()
 	providerCtx, cancel := context.WithCancel(parent)
-	instance, err := m.registry.Create(providerCtx, m.pools, state.spec)
+	instance, err := m.registry.Create(providerCtx, m.pools, spec)
 	if err != nil {
 		cancel()
+		m.recordProviderStartFailure(name, err)
 		return err
 	}
-	state.instance = instance
-	state.cancel = cancel
-	state.subscriptions = shared.NewSubscriptionManager(instance)
-	state.running = true
 
-	if len(state.cachedRoutes) > 0 {
-		for _, route := range state.cachedRoutes {
-			route.Provider = state.spec.Name
-			if err := state.subscriptions.Activate(providerCtx, route); err != nil && m.logger != nil {
-				m.logger.Printf("provider/%s: reapply route %s: %v", state.spec.Name, route.Type, err)
-			}
-		}
+	subscriptions := shared.NewSubscriptionManager(instance)
+	if !m.recordProviderStartSuccess(name, cancel, instance, subscriptions) {
+		cancel()
+		return fmt.Errorf("%w: %s", ErrProviderNotFound, name)
 	}
 
-	m.logErrors(providerCtx, fmt.Sprintf("provider/%s", state.spec.Name), instance.Errors())
+	if len(cachedRoutes) > 0 {
+		for _, route := range cachedRoutes {
+			route.Provider = spec.Name
+			if err := subscriptions.Activate(providerCtx, route); err != nil && m.logger != nil {
+				m.logger.Printf("provider/%s: reapply route %s: %v", spec.Name, route.Type, err)
+			}
+		}
+		m.clearCachedRoutes(name)
+	}
+
+	m.logErrors(providerCtx, fmt.Sprintf("provider/%s", spec.Name), instance.Errors())
 	if m.bus != nil {
 		runtime := dispatcher.NewRuntime(m.bus, m.table, m.pools)
 		errCh := runtime.Start(providerCtx, instance.Events())
-		m.logErrors(providerCtx, fmt.Sprintf("dispatcher/%s", state.spec.Name), errCh)
+		m.logErrors(providerCtx, fmt.Sprintf("dispatcher/%s", spec.Name), errCh)
 	}
 	return nil
+}
+
+func (m *Manager) prepareProviderStart(name string) (config.ProviderSpec, []dispatcher.Route, error) {
+	m.mu.Lock()
+	state, ok := m.states[name]
+	if !ok {
+		m.mu.Unlock()
+		return config.ProviderSpec{}, nil, fmt.Errorf("%w: %s", ErrProviderNotFound, name)
+	}
+	if state.running {
+		m.mu.Unlock()
+		return config.ProviderSpec{}, nil, fmt.Errorf("%w: %s", ErrProviderRunning, name)
+	}
+	if state.status == StatusStarting {
+		m.mu.Unlock()
+		return config.ProviderSpec{}, nil, fmt.Errorf("%w: %s", ErrProviderStarting, name)
+	}
+	state.status = StatusStarting
+	state.startupErr = nil
+	spec := state.spec
+	cachedRoutes := cloneRoutes(state.cachedRoutes)
+	m.mu.Unlock()
+	return spec, cachedRoutes, nil
+}
+
+func (m *Manager) recordProviderStartFailure(name string, startErr error) {
+	m.mu.Lock()
+	state, ok := m.states[name]
+	if ok {
+		state.cancel = nil
+		state.instance = nil
+		state.subscriptions = nil
+		state.running = false
+		state.status = StatusFailed
+		state.startupErr = startErr
+	}
+	m.mu.Unlock()
+}
+
+func (m *Manager) recordProviderStartSuccess(name string, cancel context.CancelFunc, instance Instance, subscriptions *shared.SubscriptionManager) bool {
+	m.mu.Lock()
+	state, ok := m.states[name]
+	if ok {
+		state.cancel = cancel
+		state.instance = instance
+		state.subscriptions = subscriptions
+		state.running = true
+		state.status = StatusRunning
+		state.startupErr = nil
+	}
+	m.mu.Unlock()
+	return ok
+}
+
+func (m *Manager) clearCachedRoutes(name string) {
+	m.mu.Lock()
+	if state, ok := m.states[name]; ok && state.running {
+		state.cachedRoutes = nil
+	}
+	m.mu.Unlock()
 }
 
 func (m *Manager) stopProviderLocked(state *providerState) {
@@ -328,6 +437,8 @@ func (m *Manager) stopProviderLocked(state *providerState) {
 	state.instance = nil
 	state.subscriptions = nil
 	state.running = false
+	state.status = StatusStopped
+	state.startupErr = nil
 }
 
 func (m *Manager) logErrors(ctx context.Context, stage string, errs <-chan error) {
@@ -439,7 +550,7 @@ func (m *Manager) ProviderMetadataSnapshot() []RuntimeMetadata {
 		if state.running && state.instance != nil {
 			instrumentCount = len(state.instance.Instruments())
 		}
-		runtime := buildRuntimeMetadata(state.spec, instrumentCount, state.running)
+		runtime := buildRuntimeMetadata(state.spec, instrumentCount, state.running, state.status, state.startupErr)
 		out = append(out, runtime)
 	}
 	m.mu.RUnlock()
@@ -459,10 +570,14 @@ func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 	var spec config.ProviderSpec
 	var instance Instance
 	var running bool
+	var status Status
+	var startupErr error
 	if ok {
 		spec = state.spec
 		instance = state.instance
 		running = state.running && instance != nil
+		status = state.status
+		startupErr = state.startupErr
 	}
 	m.mu.RUnlock()
 	if !ok {
@@ -475,7 +590,7 @@ func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 		instruments = instance.Instruments()
 		instrumentCount = len(instruments)
 	}
-	meta := buildRuntimeMetadata(spec, instrumentCount, running)
+	meta := buildRuntimeMetadata(spec, instrumentCount, running, status, startupErr)
 	adapterMeta, _ := m.registry.AdapterMetadata(spec.Adapter)
 	detail := RuntimeDetail{
 		RuntimeMetadata: meta,
@@ -488,15 +603,23 @@ func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 	return CloneRuntimeDetail(detail), true
 }
 
-func buildRuntimeMetadata(spec config.ProviderSpec, instrumentCount int, running bool) RuntimeMetadata {
+func buildRuntimeMetadata(spec config.ProviderSpec, instrumentCount int, running bool, status Status, startupErr error) RuntimeMetadata {
 	settings := extractProviderSettings(spec.Config)
+	errMsg := ""
+	if startupErr != nil {
+		errMsg = startupErr.Error()
+	}
 	meta := RuntimeMetadata{
-		Name:            spec.Name,
-		Adapter:         spec.Adapter,
-		Identifier:      spec.Adapter,
-		Settings:        settings,
-		InstrumentCount: instrumentCount,
-		Running:         running,
+		Name:                   spec.Name,
+		Adapter:                spec.Adapter,
+		Identifier:             spec.Adapter,
+		Settings:               settings,
+		InstrumentCount:        instrumentCount,
+		Running:                running,
+		Status:                 status,
+		StartupError:           errMsg,
+		DependentInstances:     nil,
+		DependentInstanceCount: 0,
 	}
 	return CloneRuntimeMetadata(meta)
 }

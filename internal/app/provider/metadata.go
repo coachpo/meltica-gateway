@@ -51,6 +51,8 @@ type RuntimeMetadata struct {
 	InstrumentCount        int            `json:"instrumentCount"`
 	Settings               map[string]any `json:"settings,omitempty"`
 	Running                bool           `json:"running"`
+	Status                 Status         `json:"status"`
+	StartupError           string         `json:"startupError,omitempty"`
 	DependentInstances     []string       `json:"dependentInstances,omitempty"`
 	DependentInstanceCount int            `json:"dependentInstanceCount,omitempty"`
 }
