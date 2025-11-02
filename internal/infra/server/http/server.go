@@ -778,8 +778,22 @@ func decodeRiskConfig(r *http.Request) (config.RiskConfig, error) {
 	if cfg.CircuitBreaker.Threshold < 0 {
 		cfg.CircuitBreaker.Threshold = 0
 	}
-	for i, ot := range cfg.AllowedOrderTypes {
-		cfg.AllowedOrderTypes[i] = strings.TrimSpace(ot)
+	if len(cfg.AllowedOrderTypes) > 0 {
+		normalized := make([]string, 0, len(cfg.AllowedOrderTypes))
+		seen := make(map[string]struct{}, len(cfg.AllowedOrderTypes))
+		for _, ot := range cfg.AllowedOrderTypes {
+			trimmed := strings.TrimSpace(ot)
+			if trimmed == "" {
+				continue
+			}
+			key := strings.ToLower(trimmed)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			normalized = append(normalized, trimmed)
+		}
+		cfg.AllowedOrderTypes = normalized
 	}
 	if err := validateRiskConfig(cfg); err != nil {
 		return cfg, err

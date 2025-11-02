@@ -22,7 +22,7 @@ If user input is not empty, you **must** take it into account before proceeding.
 
 - **Ignore backward compatibility** — do not write shim code.
 - If a modification is too large or complex, **stop immediately** and notify the user instead of attempting a partial workaround.
-- You MUST always use zsh instead of bash when you run every command.
+- MUST Always **retry** the command using **zsh** if it **fails** when run with **bash**.
 - Use Capabilities MCP servers in these cases:
 
   - `context7 MCP`:

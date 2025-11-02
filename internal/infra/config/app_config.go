@@ -266,8 +266,22 @@ func (c *AppConfig) normalise() error {
 	if c.Risk.CircuitBreaker.Threshold < 0 {
 		c.Risk.CircuitBreaker.Threshold = 0
 	}
-	for i, ot := range c.Risk.AllowedOrderTypes {
-		c.Risk.AllowedOrderTypes[i] = strings.TrimSpace(ot)
+	if len(c.Risk.AllowedOrderTypes) > 0 {
+		normalized := make([]string, 0, len(c.Risk.AllowedOrderTypes))
+		seen := make(map[string]struct{}, len(c.Risk.AllowedOrderTypes))
+		for _, ot := range c.Risk.AllowedOrderTypes {
+			trimmed := strings.TrimSpace(ot)
+			if trimmed == "" {
+				continue
+			}
+			key := strings.ToLower(trimmed)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			normalized = append(normalized, trimmed)
+		}
+		c.Risk.AllowedOrderTypes = normalized
 	}
 	return nil
 }

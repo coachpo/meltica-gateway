@@ -171,3 +171,62 @@ func TestManager_KillSwitchEngagesAfterBreaches(t *testing.T) {
 		t.Fatalf("expected kill switch error, got %v", err)
 	}
 }
+
+func TestManager_AllowedOrderTypesCaseInsensitive(t *testing.T) {
+	limits := Limits{
+		MaxPositionSize:     decimal.NewFromInt(1_000),
+		MaxNotionalValue:    decimal.NewFromInt(1_000_000),
+		OrderThrottle:       100,
+		OrderBurst:          100,
+		PriceBandPercent:    0,
+		AllowedOrderTypes:   []schema.OrderType{"Limit", "market", "STOP"},
+		KillSwitchEnabled:   false,
+		MaxRiskBreaches:     10,
+		MaxConcurrentOrders: 10,
+	}
+	manager := NewManager(limits)
+
+	cases := []schema.OrderType{
+		schema.OrderType("limit"),
+		schema.OrderType("LiMiT"),
+		schema.OrderType("MARKET"),
+		schema.OrderType("stop"),
+	}
+
+	price := "10"
+	for idx, orderType := range cases {
+		req := &schema.OrderRequest{
+			ClientOrderID: fmt.Sprintf("ord-%d", idx),
+			Provider:      "demo",
+			Symbol:        "BTC-USDT",
+			Side:          schema.TradeSideBuy,
+			OrderType:     orderType,
+			Price:         &price,
+			Quantity:      "1",
+		}
+		if err := manager.CheckOrder(context.Background(), req); err != nil {
+			t.Fatalf("expected order type %s to pass validation: %v", orderType, err)
+		}
+	}
+
+	req := &schema.OrderRequest{
+		ClientOrderID: "ord-invalid",
+		Provider:      "demo",
+		Symbol:        "BTC-USDT",
+		Side:          schema.TradeSideBuy,
+		OrderType:     schema.OrderType("iceberg"),
+		Price:         &price,
+		Quantity:      "1",
+	}
+	err := manager.CheckOrder(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected iceberg order type to be rejected")
+	}
+	var breach *BreachError
+	if !errors.As(err, &breach) {
+		t.Fatalf("expected breach error, got %v", err)
+	}
+	if breach.Type != BreachTypeOrderType {
+		t.Fatalf("expected breach type %s, got %s", BreachTypeOrderType, breach.Type)
+	}
+}

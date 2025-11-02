@@ -66,6 +66,27 @@ const computePresence = (config?: Partial<RiskConfig> | null): RiskPresence => {
   };
 };
 
+const normalizeOrderTypes = (types?: string[] | null): string[] => {
+  if (!types || types.length === 0) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const raw of types) {
+    const trimmed = raw?.trim() ?? '';
+    if (!trimmed) {
+      continue;
+    }
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(trimmed);
+  }
+  return normalized;
+};
+
 export default function RiskPage() {
   const normalizeRiskConfig = (config?: Partial<RiskConfig> | null): RiskConfig => ({
     maxPositionSize: config?.maxPositionSize ?? '',
@@ -75,7 +96,7 @@ export default function RiskPage() {
     orderBurst: Number(config?.orderBurst ?? 0),
     maxConcurrentOrders: Number(config?.maxConcurrentOrders ?? 0),
     priceBandPercent: Number(config?.priceBandPercent ?? 0),
-    allowedOrderTypes: config?.allowedOrderTypes ?? [],
+    allowedOrderTypes: normalizeOrderTypes(config?.allowedOrderTypes),
     killSwitchEnabled: Boolean(config?.killSwitchEnabled ?? false),
     maxRiskBreaches: Number(config?.maxRiskBreaches ?? 0),
     circuitBreaker: {
@@ -173,13 +194,17 @@ export default function RiskPage() {
   };
 
   const addOrderType = (raw: string) => {
-    const trimmed = raw.trim().toUpperCase();
+    const trimmed = raw.trim();
     if (!trimmed) {
       setOrderTypeInput('');
       return;
     }
     setFormData((prev) => {
-      if (prev.allowedOrderTypes.includes(trimmed)) {
+      const lowered = trimmed.toLowerCase();
+      const exists = prev.allowedOrderTypes.some(
+        (existing) => existing.toLowerCase() === lowered,
+      );
+      if (exists) {
         return prev;
       }
       return {

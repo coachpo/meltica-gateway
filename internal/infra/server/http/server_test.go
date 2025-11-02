@@ -23,6 +23,35 @@ import (
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
 
+func TestDecodeRiskConfig_NormalizesAllowedOrderTypes(t *testing.T) {
+	payload := `{
+		"maxPositionSize": "10",
+		"maxNotionalValue": "100",
+		"notionalCurrency": "USD",
+		"orderThrottle": 5,
+		"orderBurst": 1,
+		"maxConcurrentOrders": 0,
+		"priceBandPercent": 0,
+		"allowedOrderTypes": [" limit", "LIMIT", "Market", "market ", "Stop "],
+		"killSwitchEnabled": false,
+		"maxRiskBreaches": 0,
+		"circuitBreaker": {
+			"enabled": false,
+			"threshold": 0,
+			"cooldown": ""
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/risk", strings.NewReader(payload))
+	cfg, err := decodeRiskConfig(req)
+	if err != nil {
+		t.Fatalf("decodeRiskConfig: %v", err)
+	}
+	expected := []string{"limit", "Market", "Stop"}
+	if !reflect.DeepEqual(cfg.AllowedOrderTypes, expected) {
+		t.Fatalf("expected allowed order types %v, got %v", expected, cfg.AllowedOrderTypes)
+	}
+}
+
 func TestBuildContextBackup(t *testing.T) {
 	appCfg := config.AppConfig{
 		Environment: config.EnvDev,

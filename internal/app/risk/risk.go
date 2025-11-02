@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -132,26 +133,47 @@ type Manager struct {
 	marketPrices  map[string]decimal.Decimal
 	orders        map[string]*orderState
 	inflight      map[string]int
-	allowedTypes  map[schema.OrderType]struct{}
+	allowedTypes  map[string]struct{}
 	failureCount  int
 	killSwitch    bool
 	killReason    string
 	cooldownUntil time.Time
 }
 
+func normalizeAllowedOrderTypes(types []schema.OrderType) []schema.OrderType {
+	if len(types) == 0 {
+		return nil
+	}
+	normalized := make([]schema.OrderType, 0, len(types))
+	seen := make(map[string]struct{}, len(types))
+	for _, raw := range types {
+		trimmed := schema.OrderType(strings.TrimSpace(string(raw)))
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(string(trimmed))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
+}
+
 // NewManager creates a new risk manager with the given limits.
 func NewManager(limits Limits) *Manager {
 	limitCopy := limits
 	if len(limitCopy.AllowedOrderTypes) > 0 {
-		limitCopy.AllowedOrderTypes = append([]schema.OrderType(nil), limits.AllowedOrderTypes...)
+		limitCopy.AllowedOrderTypes = normalizeAllowedOrderTypes(limits.AllowedOrderTypes)
 	}
 	burst := limitCopy.OrderBurst
 	if burst <= 0 {
 		burst = 1
 	}
-	allowed := make(map[schema.OrderType]struct{}, len(limitCopy.AllowedOrderTypes))
+	allowed := make(map[string]struct{}, len(limitCopy.AllowedOrderTypes))
 	for _, ot := range limitCopy.AllowedOrderTypes {
-		allowed[ot] = struct{}{}
+		allowed[strings.ToLower(string(ot))] = struct{}{}
 	}
 	return &Manager{
 		limits:        limitCopy,
@@ -177,7 +199,7 @@ func (m *Manager) UpdateLimits(limits Limits) {
 	defer m.mu.Unlock()
 	limitCopy := limits
 	if len(limitCopy.AllowedOrderTypes) > 0 {
-		limitCopy.AllowedOrderTypes = append([]schema.OrderType(nil), limits.AllowedOrderTypes...)
+		limitCopy.AllowedOrderTypes = normalizeAllowedOrderTypes(limits.AllowedOrderTypes)
 	}
 	m.limits = limitCopy
 	burst := limitCopy.OrderBurst
@@ -186,9 +208,9 @@ func (m *Manager) UpdateLimits(limits Limits) {
 	}
 	m.limiter = rate.NewLimiter(rate.Limit(limitCopy.OrderThrottle), burst)
 	m.symbolLimiter = make(map[string]*rate.Limiter)
-	m.allowedTypes = make(map[schema.OrderType]struct{}, len(limitCopy.AllowedOrderTypes))
+	m.allowedTypes = make(map[string]struct{}, len(limitCopy.AllowedOrderTypes))
 	for _, ot := range limitCopy.AllowedOrderTypes {
-		m.allowedTypes[ot] = struct{}{}
+		m.allowedTypes[strings.ToLower(string(ot))] = struct{}{}
 	}
 }
 
@@ -406,7 +428,7 @@ func (m *Manager) enforceOrderTypeLocked(orderType schema.OrderType) error {
 	if len(m.allowedTypes) == 0 {
 		return nil
 	}
-	if _, ok := m.allowedTypes[orderType]; ok {
+	if _, ok := m.allowedTypes[strings.ToLower(string(orderType))]; ok {
 		return nil
 	}
 	return newBreachError(BreachTypeOrderType, fmt.Sprintf("order type %s not allowed", orderType), nil, map[string]string{

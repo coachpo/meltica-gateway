@@ -44,11 +44,17 @@ func buildRiskLimits(cfg config.RiskConfig, logger *log.Logger) risk.Limits {
 	var allowedOrderTypes []schema.OrderType
 	if len(cfg.AllowedOrderTypes) > 0 {
 		allowedOrderTypes = make([]schema.OrderType, 0, len(cfg.AllowedOrderTypes))
+		seen := make(map[string]struct{}, len(cfg.AllowedOrderTypes))
 		for _, raw := range cfg.AllowedOrderTypes {
 			trimmed := strings.TrimSpace(raw)
 			if trimmed == "" {
 				continue
 			}
+			key := strings.ToLower(trimmed)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
 			allowedOrderTypes = append(allowedOrderTypes, schema.OrderType(trimmed))
 		}
 	}
