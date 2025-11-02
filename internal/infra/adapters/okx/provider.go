@@ -151,6 +151,12 @@ func (p *Provider) Start(ctx context.Context) error {
 
 	if p.hasTradingCredentials() {
 		go p.startUserDataStream()
+	} else if strings.TrimSpace(p.opts.Config.APIKey) == "" {
+		log.Printf("okx/provider: API key not configured; private subscriptions (balances, execution reports) require API key, secret, and passphrase for %s", p.name)
+	} else if strings.TrimSpace(p.opts.Config.APISecret) == "" {
+		log.Printf("okx/provider: API secret not configured; private subscriptions (balances, execution reports) require API key, secret, and passphrase for %s", p.name)
+	} else if strings.TrimSpace(p.opts.Config.Passphrase) == "" {
+		log.Printf("okx/provider: API passphrase not configured; private subscriptions (balances, execution reports) require API key, secret, and passphrase for %s", p.name)
 	}
 
 	go func() {
@@ -213,9 +219,14 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 	case schema.RouteTypeAccountBalance,
 		schema.RouteTypeExecutionReport:
 		if schema.RouteRequiresAuthentication(route.Type) && !p.hasTradingCredentials() {
-			if strings.TrimSpace(p.opts.Config.APIKey) == "" {
+			switch {
+			case strings.TrimSpace(p.opts.Config.APIKey) == "":
 				log.Printf("okx/provider: skipped %s subscription for %s because API key is not configured", route.Type, p.name)
-			} else {
+			case strings.TrimSpace(p.opts.Config.APISecret) == "":
+				log.Printf("okx/provider: skipped %s subscription for %s because API secret is not configured (requires API key, secret, and passphrase)", route.Type, p.name)
+			case strings.TrimSpace(p.opts.Config.Passphrase) == "":
+				log.Printf("okx/provider: skipped %s subscription for %s because API passphrase is not configured (requires API key, secret, and passphrase)", route.Type, p.name)
+			default:
 				log.Printf("okx/provider: skipped %s subscription for %s because API credentials are incomplete", route.Type, p.name)
 			}
 		}

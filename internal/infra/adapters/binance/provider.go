@@ -220,7 +220,9 @@ func (p *Provider) Start(ctx context.Context) error {
 	if p.hasTradingCredentials() {
 		p.startUserDataStream()
 	} else if strings.TrimSpace(p.opts.Config.APIKey) == "" {
-		log.Printf("binance/provider: API key not configured; private subscriptions will be disabled for %s", p.name)
+		log.Printf("binance/provider: API key not configured; private subscriptions (balances, execution reports) need API key and secret for %s", p.name)
+	} else if strings.TrimSpace(p.opts.Config.APISecret) == "" {
+		log.Printf("binance/provider: API secret not configured; private subscriptions (balances, execution reports) require both API key and secret for %s", p.name)
 	}
 
 	go func() {
@@ -285,6 +287,8 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 		if schema.RouteRequiresAuthentication(route.Type) && !p.hasTradingCredentials() {
 			if strings.TrimSpace(p.opts.Config.APIKey) == "" {
 				log.Printf("binance/provider: skipped %s subscription for %s because API key is not configured", route.Type, p.name)
+			} else if strings.TrimSpace(p.opts.Config.APISecret) == "" {
+				log.Printf("binance/provider: skipped %s subscription for %s because API secret is not configured (requires API key and secret)", route.Type, p.name)
 			} else {
 				log.Printf("binance/provider: skipped %s subscription for %s because API credentials are incomplete", route.Type, p.name)
 			}

@@ -76,6 +76,50 @@ const defaultFormState: FormState = {
 
 const MASKED_SECRET_PLACEHOLDER = '••••••';
 
+const DEFAULT_PRIVATE_NOTE =
+  'Leave blank to disable private subscriptions such as balances and execution reports.';
+
+type AuthFieldHints = Record<
+  string,
+  {
+    label?: string;
+    note?: string;
+  }
+>;
+
+const AUTH_FIELD_HINTS: Record<string, AuthFieldHints> = {
+  binance: {
+    api_key: {
+      label: 'API key (optional)',
+      note: 'Provide both API key and secret to enable private subscriptions (balances, execution reports).',
+    },
+    api_secret: {
+      label: 'API secret (optional)',
+      note: 'Provide both API key and secret to enable private subscriptions (balances, execution reports).',
+    },
+  },
+  okx: {
+    api_key: {
+      label: 'API key (optional)',
+      note: 'Provide API key, secret, and passphrase to enable private subscriptions (balances, execution reports).',
+    },
+    api_secret: {
+      label: 'API secret (optional)',
+      note: 'Provide API key, secret, and passphrase to enable private subscriptions (balances, execution reports).',
+    },
+    passphrase: {
+      label: 'API passphrase (optional)',
+      note: 'Provide API key, secret, and passphrase to enable private subscriptions (balances, execution reports).',
+    },
+  },
+};
+
+const AUTH_SETTING_LABELS: Record<string, string> = {
+  api_key: 'API key (optional)',
+  api_secret: 'API secret (optional)',
+  passphrase: 'API passphrase (optional)',
+};
+
 function valueToString(value: unknown): string {
   if (value === null || value === undefined) {
     return '';
@@ -879,30 +923,26 @@ export default function ProvidersPage() {
                     </div>
                     {selectedAdapter.settingsSchema.map((setting) => {
                       const normalizedName = setting.name.trim().toLowerCase();
-                      const isAPIKeySetting = normalizedName === 'api_key';
-                      const labelText = isAPIKeySetting ? 'API key (optional)' : setting.name;
+                      const adapterHints = AUTH_FIELD_HINTS[selectedAdapter.identifier] ?? {};
+                      const fieldHint = adapterHints[normalizedName] ?? adapterHints[setting.name];
+                      const defaultLabel = AUTH_SETTING_LABELS[normalizedName] ?? setting.name;
+                      const labelText = fieldHint?.label ?? defaultLabel;
+                      const noteText =
+                        fieldHint?.note ??
+                        (fieldHint ? undefined : AUTH_SETTING_LABELS[normalizedName] ? DEFAULT_PRIVATE_NOTE : undefined);
                       return (
                         <div key={setting.name} className="space-y-2">
                           <Label htmlFor={`setting-${setting.name}`}>
                             {labelText}
                             {setting.required && <span className="text-red-500">*</span>}
                           </Label>
-                          <Input
-                            id={`setting-${setting.name}`}
-                            type={['int', 'integer', 'float', 'double', 'number'].includes(setting.type.toLowerCase()) ? 'number' : 'text'}
-                            value={formState.configValues[setting.name] ?? ''}
-                            onChange={(event) => handleConfigChange(setting.name, event.target.value)}
-                            placeholder={
-                              setting.default !== undefined && setting.default !== null
-                                ? `Default: ${valueToString(setting.default)}`
-                                : undefined
-                            }
-                          />
-                          {isAPIKeySetting && (
-                            <p className="text-xs text-muted-foreground">
-                              Leave blank to disable private subscriptions such as balances and order executions.
-                            </p>
-                          )}
+                      <Input
+                        id={`setting-${setting.name}`}
+                        type={['int', 'integer', 'float', 'double', 'number'].includes(setting.type.toLowerCase()) ? 'number' : 'text'}
+                        value={formState.configValues[setting.name] ?? ''}
+                        onChange={(event) => handleConfigChange(setting.name, event.target.value)}
+                      />
+                          {noteText && <p className="text-xs text-muted-foreground">{noteText}</p>}
                           <p className="text-xs text-muted-foreground">Type: {setting.type}</p>
                         </div>
                       );
