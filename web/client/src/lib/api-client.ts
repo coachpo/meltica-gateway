@@ -1,5 +1,8 @@
 import {
   Strategy,
+  StrategyModuleSummary,
+  StrategyModulePayload,
+  StrategyModuleOperationResponse,
   Provider,
   ProviderDetail,
   ProviderRequest,
@@ -15,6 +18,7 @@ import {
   RestoreConfigResponse,
   ContextBackupPayload,
   RestoreContextResponse,
+  StrategyRefreshResponse,
 } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8880';
@@ -303,6 +307,37 @@ class ApiClient {
     }
   }
 
+  private async requestText(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<string> {
+    const url = `${API_BASE_URL}${endpoint}`;
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      let message = 'Request failed';
+      if (responseText) {
+        try {
+          const error: ApiError = JSON.parse(responseText);
+          message = error.error || message;
+        } catch {
+          message = responseText;
+        }
+      }
+      throw new Error(message);
+    }
+
+    return responseText;
+  }
+
   // Strategy Catalog
   async getStrategies(): Promise<{ strategies: Strategy[] }> {
     return this.request('/strategies');
@@ -310,6 +345,50 @@ class ApiClient {
 
   async getStrategy(name: string): Promise<Strategy> {
     return this.request(`/strategies/${encodeURIComponent(name)}`);
+  }
+
+  // Strategy Modules
+  async getStrategyModules(): Promise<{ modules: StrategyModuleSummary[] }> {
+    return this.request('/strategies/modules');
+  }
+
+  async getStrategyModule(identifier: string): Promise<StrategyModuleSummary> {
+    return this.request(`/strategies/modules/${encodeURIComponent(identifier)}`);
+  }
+
+  async getStrategyModuleSource(identifier: string): Promise<string> {
+    return this.requestText(`/strategies/modules/${encodeURIComponent(identifier)}/source`);
+  }
+
+  async createStrategyModule(
+    payload: StrategyModulePayload
+  ): Promise<StrategyModuleOperationResponse> {
+    return this.request('/strategies/modules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateStrategyModule(
+    identifier: string,
+    payload: StrategyModulePayload
+  ): Promise<StrategyModuleOperationResponse> {
+    return this.request(`/strategies/modules/${encodeURIComponent(identifier)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteStrategyModule(identifier: string): Promise<void> {
+    await this.request(`/strategies/modules/${encodeURIComponent(identifier)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async refreshStrategies(): Promise<StrategyRefreshResponse> {
+    return this.request('/strategies/refresh', {
+      method: 'POST',
+    });
   }
 
   // Providers

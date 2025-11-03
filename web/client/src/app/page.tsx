@@ -44,6 +44,22 @@ export default function Home() {
           </Card>
         </Link>
 
+        <Link href="/strategies/modules">
+          <Card className="hover:border-primary cursor-pointer transition-colors">
+            <CardHeader>
+              <CardTitle>Strategy Modules</CardTitle>
+              <CardDescription>
+                Manage JavaScript strategy source files
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Upload, edit, and refresh runtime strategy modules
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
         <Link href="/providers">
           <Card className="hover:border-primary cursor-pointer transition-colors">
             <CardHeader>

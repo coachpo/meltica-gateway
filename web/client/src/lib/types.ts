@@ -16,6 +16,26 @@ export interface Strategy {
   events: string[];
 }
 
+export interface StrategyModuleSummary {
+  name: string;
+  file: string;
+  path: string;
+  hash: string;
+  size: number;
+  metadata: Strategy;
+}
+
+export interface StrategyModulePayload {
+  filename: string;
+  source: string;
+}
+
+export interface StrategyModuleOperationResponse {
+  filename: string;
+  status: string;
+  strategyDirectory: string;
+}
+
 export type ProviderSettings = Record<string, unknown>;
 
 export type ProviderStatus = 'pending' | 'starting' | 'running' | 'stopped' | 'failed';
@@ -248,5 +268,9 @@ export interface ContextBackupPayload {
 }
 
 export interface RestoreContextResponse {
+  status: string;
+}
+
+export interface StrategyRefreshResponse {
   status: string;
 }

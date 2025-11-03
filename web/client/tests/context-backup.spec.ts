@@ -65,10 +65,15 @@ test('sanitizes sensitive keys recursively without mutating input', () => {
   ).toBe(true);
 });
 
-test('throws when required collections are missing', () => {
-  expect(() => sanitizeContextBackupPayload({})).toThrow(/providers/i);
-  expect(() => sanitizeContextBackupPayload({ providers: [] })).toThrow(/lambdas/i);
-  expect(() => sanitizeContextBackupPayload({ providers: [], lambdas: [] })).toThrow(/risk/i);
+test('requires risk object and defaults missing collections', () => {
+  expect(() => sanitizeContextBackupPayload({})).toThrow(/risk/i);
+
+  const sanitized = sanitizeContextBackupPayload({ risk: {} });
+
+  expect(Array.isArray(sanitized.providers)).toBe(true);
+  expect(Array.isArray(sanitized.lambdas)).toBe(true);
+  expect(sanitized.providers).toHaveLength(0);
+  expect(sanitized.lambdas).toHaveLength(0);
 });
 
 test('sensitive key fragments list includes documented patterns', () => {
