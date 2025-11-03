@@ -4,12 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/coachpo/meltica/internal/app/lambda/strategies"
 	"github.com/coachpo/meltica/internal/domain/schema"
 )
 
 func TestSimulatedExchange_SubmitOrder(t *testing.T) {
-	strategy := &strategies.NoOp{}
+	strategy := loadTestStrategy(t, "noop")
 	se := NewSimulatedExchange(strategy)
 
 	price := "100"

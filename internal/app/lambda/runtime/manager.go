@@ -5,10 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/coachpo/meltica/internal/app/dispatcher"
 	"github.com/coachpo/meltica/internal/app/lambda/core"
+	"github.com/coachpo/meltica/internal/app/lambda/js"
 	"github.com/coachpo/meltica/internal/app/lambda/strategies"
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/app/risk"
@@ -129,6 +130,10 @@ type Manager struct {
 	logger      *log.Logger
 	registrar   RouteRegistrar
 	riskManager *risk.Manager
+	jsLoader    *js.Loader
+	dynamic     map[string]struct{}
+	strategyDir string
+	base        map[string]StrategyDefinition
 
 	strategies map[string]StrategyDefinition
 	specs      map[string]config.LambdaSpec
@@ -139,15 +144,26 @@ type lambdaInstance struct {
 	base   *core.BaseLambda
 	cancel context.CancelFunc
 	errs   <-chan error
+	strat  core.TradingStrategy
 }
 
 // NewManager creates a new lambda manager with the specified dependencies.
-func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) *Manager {
+func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) (*Manager, error) {
 	if logger == nil {
 		logger = log.New(os.Stdout, "lambda-manager ", log.LstdFlags|log.Lmicroseconds)
 	}
 
 	rm := risk.NewManager(buildRiskLimits(cfg.Risk, logger))
+
+	dir := strings.TrimSpace(cfg.Strategies.Directory)
+	if dir == "" {
+		dir = "strategies"
+	}
+
+	loader, err := js.NewLoader(dir)
+	if err != nil {
+		return nil, err
+	}
 
 	mgr := &Manager{
 		mu:           sync.RWMutex{},
@@ -159,12 +175,18 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 		logger:       logger,
 		registrar:    registrar,
 		riskManager:  rm,
+		jsLoader:     loader,
+		dynamic:      make(map[string]struct{}),
+		strategyDir:  loader.Root(),
+		base:         make(map[string]StrategyDefinition),
 		strategies:   make(map[string]StrategyDefinition),
 		specs:        make(map[string]config.LambdaSpec),
 		instances:    make(map[string]*lambdaInstance),
 	}
-	mgr.registerDefaults()
-	return mgr
+	if _, err := mgr.installJavaScriptStrategies(context.Background()); err != nil {
+		return nil, err
+	}
+	return mgr, nil
 }
 
 // SetLifecycleContext configures the parent context used to run lambda instances.
@@ -185,101 +207,6 @@ func (m *Manager) parentContext() context.Context {
 		return context.Background()
 	}
 	return ctx
-}
-
-func (m *Manager) registerDefaults() {
-	m.registerStrategy(StrategyDefinition{
-		meta: strategies.CloneMetadata(strategies.NoOpMetadata),
-		factory: func(_ map[string]any) (core.TradingStrategy, error) {
-			return &strategies.NoOp{}, nil
-		},
-	})
-
-	m.registerStrategy(StrategyDefinition{
-		meta: strategies.CloneMetadata(strategies.DelayMetadata),
-		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
-			minDelay := durationValue(cfg, "min_delay", strategies.DefaultMinDelay)
-			maxDelay := durationValue(cfg, "max_delay", strategies.DefaultMaxDelay)
-
-			if minDelay < 0 || maxDelay < 0 {
-				return nil, fmt.Errorf("delay: min_delay and max_delay must be non-negative")
-			}
-			if maxDelay < minDelay {
-				return nil, fmt.Errorf("delay: max_delay must be greater than or equal to min_delay")
-			}
-
-			return &strategies.Delay{MinDelay: minDelay, MaxDelay: maxDelay}, nil
-		},
-	})
-
-	m.registerStrategy(StrategyDefinition{
-		meta: strategies.CloneMetadata(strategies.LoggingMetadata),
-		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
-			return &strategies.Logging{
-				Logger:       nil,
-				LoggerPrefix: stringValue(cfg, "logger_prefix", "[Logging] "),
-			}, nil
-		},
-	})
-
-	m.registerStrategy(StrategyDefinition{
-		meta: strategies.CloneMetadata(strategies.MomentumMetadata),
-		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
-			return &strategies.Momentum{
-				Lambda:            nil,
-				LookbackPeriod:    intValue(cfg, "lookback_period", 20),
-				MomentumThreshold: floatValue(cfg, "momentum_threshold", 0.5),
-				OrderSize:         stringValue(cfg, "order_size", "1"),
-				Cooldown:          durationValue(cfg, "cooldown", 5*time.Second),
-				DryRun:            boolValue(cfg, "dry_run", true),
-			}, nil
-		},
-	})
-
-	m.registerStrategy(StrategyDefinition{
-		meta: strategies.CloneMetadata(strategies.MeanReversionMetadata),
-		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
-			return &strategies.MeanReversion{
-				Lambda:             nil,
-				WindowSize:         intValue(cfg, "window_size", 20),
-				DeviationThreshold: floatValue(cfg, "deviation_threshold", 0.5),
-				OrderSize:          stringValue(cfg, "order_size", "1"),
-				DryRun:             boolValue(cfg, "dry_run", true),
-			}, nil
-		},
-	})
-
-	m.registerStrategy(StrategyDefinition{
-		meta: strategies.CloneMetadata(strategies.GridMetadata),
-		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
-			return &strategies.Grid{
-				Lambda:      nil,
-				GridLevels:  intValue(cfg, "grid_levels", 3),
-				GridSpacing: floatValue(cfg, "grid_spacing", 0.5),
-				OrderSize:   stringValue(cfg, "order_size", "1"),
-				BasePrice:   floatValue(cfg, "base_price", 0),
-				DryRun:      boolValue(cfg, "dry_run", true),
-			}, nil
-		},
-	})
-
-	m.registerStrategy(StrategyDefinition{
-		meta: strategies.CloneMetadata(strategies.MarketMakingMetadata),
-		factory: func(cfg map[string]any) (core.TradingStrategy, error) {
-			maxOrders := intValue(cfg, "max_open_orders", 2)
-			if maxOrders > int(^uint32(0)>>1) {
-				maxOrders = int(^uint32(0) >> 1)
-			}
-			// #nosec G115 - bounds checked above
-			return &strategies.MarketMaking{
-				Lambda:        nil,
-				SpreadBps:     floatValue(cfg, "spread_bps", 25),
-				OrderSize:     stringValue(cfg, "order_size", "1"),
-				MaxOpenOrders: int32(maxOrders),
-				DryRun:        boolValue(cfg, "dry_run", true),
-			}, nil
-		},
-	})
 }
 
 // RiskLimits returns the currently applied risk limits.
@@ -323,13 +250,44 @@ func (m *Manager) ApplyRiskConfig(cfg config.RiskConfig) risk.Limits {
 	return limits
 }
 
+// RefreshJavaScriptStrategies reloads JavaScript modules and restarts affected instances.
+func (m *Manager) RefreshJavaScriptStrategies(ctx context.Context) error {
+	previous := m.currentDynamicSet()
+	running := m.instanceIDsForStrategies(previous)
+
+	newSet, err := m.installJavaScriptStrategies(ctx)
+	if err != nil {
+		return err
+	}
+	m.stopInstances(running)
+	if newSet == nil {
+		newSet = map[string]struct{}{}
+	}
+	m.restartInstances(running, newSet, ctx)
+	return nil
+}
+
 func (m *Manager) registerStrategy(def StrategyDefinition) {
+	normalized, err := normalizeStrategyDefinition(def)
+	if err != nil {
+		panic(err)
+	}
+	if _, exists := m.strategies[normalized.meta.Name]; exists {
+		panic(fmt.Sprintf("strategy %s already registered", normalized.meta.Name))
+	}
+	m.strategies[normalized.meta.Name] = normalized
+	if m.base != nil {
+		m.base[normalized.meta.Name] = normalized
+	}
+}
+
+func normalizeStrategyDefinition(def StrategyDefinition) (StrategyDefinition, error) {
 	name := strings.ToLower(strings.TrimSpace(def.meta.Name))
 	if name == "" {
-		panic("strategy name required")
+		return StrategyDefinition{}, fmt.Errorf("strategy name required")
 	}
 	if def.factory == nil {
-		panic(fmt.Sprintf("strategy %s missing factory", name))
+		return StrategyDefinition{}, fmt.Errorf("strategy %s missing factory", name)
 	}
 	def.meta.Name = name
 
@@ -337,6 +295,7 @@ func (m *Manager) registerStrategy(def StrategyDefinition) {
 		strat, err := def.factory(map[string]any{})
 		if err == nil && strat != nil {
 			def.meta.Events = append([]schema.EventType(nil), strat.SubscribedEvents()...)
+			closeStrategy(strat)
 		}
 	}
 	def.meta.Events = append([]schema.EventType(nil), def.meta.Events...)
@@ -346,7 +305,116 @@ func (m *Manager) registerStrategy(def StrategyDefinition) {
 	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
 	def.meta.Config = fields
 
-	m.strategies[name] = def
+	return def, nil
+}
+
+func (m *Manager) installJavaScriptStrategies(ctx context.Context) (map[string]struct{}, error) {
+	if m.jsLoader == nil {
+		return nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := m.jsLoader.Refresh(ctx); err != nil {
+		return nil, fmt.Errorf("load javascript strategies: %w", err)
+	}
+
+	summaries := m.jsLoader.List()
+	definitions := make(map[string]StrategyDefinition, len(summaries))
+	for _, summary := range summaries {
+		module, err := m.jsLoader.Get(summary.Name)
+		if err != nil {
+			return nil, fmt.Errorf("load strategy %s: %w", summary.Name, err)
+		}
+		mod := module
+		def := StrategyDefinition{
+			meta: strategies.CloneMetadata(summary.Metadata),
+			factory: func(cfg map[string]any) (core.TradingStrategy, error) {
+				return js.NewStrategy(mod, cfg, m.logger)
+			},
+		}
+		normalized, err := normalizeStrategyDefinition(def)
+		if err != nil {
+			return nil, fmt.Errorf("strategy %s: %w", summary.Name, err)
+		}
+		definitions[normalized.meta.Name] = normalized
+	}
+
+	m.mu.Lock()
+	for name := range m.dynamic {
+		delete(m.strategies, name)
+		if baseDef, ok := m.base[name]; ok {
+			m.strategies[name] = baseDef
+		}
+	}
+	m.dynamic = make(map[string]struct{}, len(definitions))
+	for name, def := range definitions {
+		m.strategies[name] = def
+		m.dynamic[name] = struct{}{}
+	}
+	m.mu.Unlock()
+
+	return copyStringSet(m.dynamic), nil
+}
+
+func (m *Manager) currentDynamicSet() map[string]struct{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return copyStringSet(m.dynamic)
+}
+
+func (m *Manager) instanceIDsForStrategies(names map[string]struct{}) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ids := make([]string, 0)
+	for id := range m.instances {
+		spec, ok := m.specs[id]
+		if !ok {
+			continue
+		}
+		strategyName := strings.ToLower(strings.TrimSpace(spec.Strategy.Identifier))
+		if _, ok := names[strategyName]; ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func (m *Manager) stopInstances(ids []string) {
+	for _, id := range ids {
+		if err := m.Stop(id); err != nil && !errors.Is(err, ErrInstanceNotRunning) {
+			if m.logger != nil {
+				m.logger.Printf("stop strategy %s: %v", id, err)
+			}
+		}
+	}
+}
+
+func (m *Manager) restartInstances(ids []string, available map[string]struct{}, ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for _, id := range ids {
+		spec, err := m.specForID(id)
+		if err != nil {
+			if m.logger != nil {
+				m.logger.Printf("restart strategy %s: spec lookup failed: %v", id, err)
+			}
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(spec.Strategy.Identifier))
+		if _, ok := available[name]; !ok {
+			continue
+		}
+		if err := m.Start(ctx, id); err != nil {
+			if m.logger != nil && !errors.Is(err, ErrInstanceAlreadyRunning) {
+				m.logger.Printf("restart strategy %s: %v", id, err)
+			}
+		}
+	}
 }
 
 // StrategyCatalog returns all available strategy metadata.
@@ -473,7 +541,12 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 	}
 
 	orderRouter := &providerOrderRouter{catalog: m.providers}
-	dryRun := boolValue(spec.Strategy.Config, "dry_run", true)
+	dryRun := true
+	if raw, ok := spec.Strategy.Config["dry_run"]; ok {
+		if val, ok := raw.(bool); ok {
+			dryRun = val
+		}
+	}
 	baseCfg := core.Config{Providers: resolvedProviders, ProviderSymbols: spec.ProviderSymbolMap(), DryRun: dryRun}
 	base := core.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
 	bindStrategy(strategy, base, m.logger)
@@ -489,10 +562,10 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 	}
 
 	m.mu.Lock()
-	m.instances[spec.ID] = &lambdaInstance{base: base, cancel: cancel, errs: errs}
+	m.instances[spec.ID] = &lambdaInstance{base: base, cancel: cancel, errs: errs, strat: strategy}
 	m.mu.Unlock()
 
-	go m.observe(runCtx, spec.ID, errs)
+	go m.observe(runCtx, spec.ID, errs, strategy)
 	return base, resolvedProviders, routes, nil
 }
 
@@ -530,6 +603,7 @@ func (m *Manager) Stop(id string) error {
 	if m.registrar != nil {
 		_ = m.registrar.UnregisterLambda(context.Background(), id)
 	}
+	closeStrategy(inst.strat)
 	return nil
 }
 
@@ -666,7 +740,8 @@ func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
 	}
 }
 
-func (m *Manager) observe(ctx context.Context, id string, errs <-chan error) {
+func (m *Manager) observe(ctx context.Context, id string, errs <-chan error, strat core.TradingStrategy) {
+	defer closeStrategy(strat)
 	for {
 		select {
 		case <-ctx.Done():
@@ -702,6 +777,21 @@ func (r *providerOrderRouter) SubmitOrder(ctx context.Context, req schema.OrderR
 		return fmt.Errorf("submit order to provider %q: %w", providerName, err)
 	}
 	return nil
+}
+
+func closeStrategy(strat core.TradingStrategy) {
+	if strat == nil {
+		return
+	}
+	type closer interface {
+		Close()
+	}
+	switch s := strat.(type) {
+	case closer:
+		s.Close()
+	case io.Closer:
+		_ = s.Close()
+	}
 }
 
 func (m *Manager) buildStrategy(name string, cfg map[string]any) (core.TradingStrategy, error) {
@@ -754,6 +844,65 @@ func copyMap(src map[string]any) map[string]any {
 		dst[k] = v
 	}
 	return dst
+}
+
+func copyStringSet(src map[string]struct{}) map[string]struct{} {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]struct{}, len(src))
+	for key := range src {
+		dst[key] = struct{}{}
+	}
+	return dst
+}
+
+// StrategyModules returns metadata for the currently loaded JavaScript strategy modules.
+func (m *Manager) StrategyModules() []js.ModuleSummary {
+	if m == nil || m.jsLoader == nil {
+		return nil
+	}
+	return m.jsLoader.List()
+}
+
+// StrategyModule returns module metadata for a specific strategy.
+func (m *Manager) StrategyModule(name string) (js.ModuleSummary, error) {
+	if m == nil || m.jsLoader == nil {
+		return js.ModuleSummary{}, js.ErrModuleNotFound
+	}
+	return m.jsLoader.Module(name)
+}
+
+// StrategySource retrieves the raw JavaScript source for the named strategy.
+func (m *Manager) StrategySource(name string) ([]byte, error) {
+	if m == nil || m.jsLoader == nil {
+		return nil, js.ErrModuleNotFound
+	}
+	return m.jsLoader.Read(name)
+}
+
+// UpsertStrategy writes or replaces a JavaScript strategy file.
+func (m *Manager) UpsertStrategy(filename string, source []byte) error {
+	if m == nil || m.jsLoader == nil {
+		return fmt.Errorf("strategy loader unavailable")
+	}
+	return m.jsLoader.Write(filename, source)
+}
+
+// RemoveStrategy deletes the JavaScript strategy file by name.
+func (m *Manager) RemoveStrategy(name string) error {
+	if m == nil || m.jsLoader == nil {
+		return js.ErrModuleNotFound
+	}
+	return m.jsLoader.Delete(name)
+}
+
+// StrategyDirectory returns the filesystem directory backing JavaScript strategies.
+func (m *Manager) StrategyDirectory() string {
+	if m == nil {
+		return ""
+	}
+	return m.strategyDir
 }
 
 func providerInstrumentField(provider string) string {
@@ -893,204 +1042,7 @@ func buildRouteDeclarations(strategy core.TradingStrategy, spec config.LambdaSpe
 
 func bindStrategy(strategy core.TradingStrategy, base *core.BaseLambda, _ *log.Logger) {
 	switch s := strategy.(type) {
-	case *strategies.Momentum:
-		s.Lambda = &momentumAdapter{base: base}
-	case *strategies.MeanReversion:
-		s.Lambda = &orderStrategyAdapter{base: base}
-	case *strategies.Grid:
-		s.Lambda = &orderStrategyAdapter{base: base}
-	case *strategies.MarketMaking:
-		s.Lambda = &marketMakingAdapter{base: base}
+	case *js.Strategy:
+		s.Attach(base)
 	}
-}
-
-func stringValue(cfg map[string]any, key, def string) string {
-	if cfg == nil {
-		return def
-	}
-	if raw, ok := cfg[key]; ok {
-		if val, ok := raw.(string); ok && strings.TrimSpace(val) != "" {
-			return val
-		}
-	}
-	return def
-}
-
-func boolValue(cfg map[string]any, key string, def bool) bool {
-	if cfg == nil {
-		return def
-	}
-	if raw, ok := cfg[key]; ok {
-		switch v := raw.(type) {
-		case bool:
-			return v
-		case string:
-			trimmed := strings.TrimSpace(v)
-			if trimmed == "" {
-				return def
-			}
-			if parsed, err := strconv.ParseBool(trimmed); err == nil {
-				return parsed
-			}
-		case int:
-			return v != 0
-		case int64:
-			return v != 0
-		case float64:
-			return v != 0
-		}
-	}
-	return def
-}
-
-func intValue(cfg map[string]any, key string, def int) int {
-	if cfg == nil {
-		return def
-	}
-	if raw, ok := cfg[key]; ok {
-		switch v := raw.(type) {
-		case int:
-			return v
-		case int64:
-			return int(v)
-		case float64:
-			return int(v)
-		case string:
-			if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-				return parsed
-			}
-		}
-	}
-	return def
-}
-
-func floatValue(cfg map[string]any, key string, def float64) float64 {
-	if cfg == nil {
-		return def
-	}
-	if raw, ok := cfg[key]; ok {
-		switch v := raw.(type) {
-		case float64:
-			return v
-		case float32:
-			return float64(v)
-		case int:
-			return float64(v)
-		case int64:
-			return float64(v)
-		case string:
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
-				return parsed
-			}
-		}
-	}
-	return def
-}
-
-func durationValue(cfg map[string]any, key string, def time.Duration) time.Duration {
-	if cfg == nil {
-		return def
-	}
-	if raw, ok := cfg[key]; ok {
-		switch v := raw.(type) {
-		case time.Duration:
-			return v
-		case string:
-			if parsed, err := time.ParseDuration(strings.TrimSpace(v)); err == nil {
-				return parsed
-			}
-		case int:
-			return time.Duration(v) * time.Second
-		case float64:
-			return time.Duration(v * float64(time.Second))
-		}
-	}
-	return def
-}
-
-func submitOrderWithFloat(ctx context.Context, base *core.BaseLambda, provider string, side schema.TradeSide, quantity string, price *float64) error {
-	var priceStr *string
-	if price != nil {
-		formatted := strconv.FormatFloat(*price, 'f', -1, 64)
-		priceStr = &formatted
-	}
-	if err := base.SubmitOrder(ctx, provider, side, quantity, priceStr); err != nil {
-		return fmt.Errorf("submit order: %w", err)
-	}
-	return nil
-}
-
-type momentumAdapter struct {
-	base *core.BaseLambda
-}
-
-func (a *momentumAdapter) Logger() *log.Logger   { return a.base.Logger() }
-func (a *momentumAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
-func (a *momentumAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
-func (a *momentumAdapter) Providers() []string   { return a.base.Providers() }
-func (a *momentumAdapter) IsDryRun() bool        { return a.base.IsDryRun() }
-func (a *momentumAdapter) SelectProvider(seed uint64) (string, error) {
-	provider, err := a.base.SelectProvider(seed)
-	if err != nil {
-		return "", fmt.Errorf("select provider: %w", err)
-	}
-	return provider, nil
-}
-func (a *momentumAdapter) SubmitMarketOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string) error {
-	if err := a.base.SubmitMarketOrder(ctx, provider, side, quantity); err != nil {
-		return fmt.Errorf("submit market order: %w", err)
-	}
-	return nil
-}
-
-type orderStrategyAdapter struct {
-	base *core.BaseLambda
-}
-
-func (a *orderStrategyAdapter) Logger() *log.Logger   { return a.base.Logger() }
-func (a *orderStrategyAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
-func (a *orderStrategyAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
-func (a *orderStrategyAdapter) Providers() []string   { return a.base.Providers() }
-func (a *orderStrategyAdapter) IsDryRun() bool        { return a.base.IsDryRun() }
-func (a *orderStrategyAdapter) SelectProvider(seed uint64) (string, error) {
-	provider, err := a.base.SelectProvider(seed)
-	if err != nil {
-		return "", fmt.Errorf("select provider: %w", err)
-	}
-	return provider, nil
-}
-func (a *orderStrategyAdapter) SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error {
-	return submitOrderWithFloat(ctx, a.base, provider, side, quantity, price)
-}
-
-type marketMakingAdapter struct {
-	base *core.BaseLambda
-}
-
-func (a *marketMakingAdapter) Logger() *log.Logger { return a.base.Logger() }
-func (a *marketMakingAdapter) GetMarketState() strategies.MarketState {
-	state := a.base.GetMarketState()
-	return strategies.MarketState{
-		LastPrice: state.LastPrice,
-		BidPrice:  state.BidPrice,
-		AskPrice:  state.AskPrice,
-		Spread:    state.Spread,
-		SpreadPct: state.SpreadPct,
-	}
-}
-func (a *marketMakingAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
-func (a *marketMakingAdapter) GetBidPrice() float64  { return a.base.GetBidPrice() }
-func (a *marketMakingAdapter) GetAskPrice() float64  { return a.base.GetAskPrice() }
-func (a *marketMakingAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
-func (a *marketMakingAdapter) Providers() []string   { return a.base.Providers() }
-func (a *marketMakingAdapter) IsDryRun() bool        { return a.base.IsDryRun() }
-func (a *marketMakingAdapter) SelectProvider(seed uint64) (string, error) {
-	provider, err := a.base.SelectProvider(seed)
-	if err != nil {
-		return "", fmt.Errorf("select provider: %w", err)
-	}
-	return provider, nil
-}
-func (a *marketMakingAdapter) SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error {
-	return submitOrderWithFloat(ctx, a.base, provider, side, quantity, price)
 }

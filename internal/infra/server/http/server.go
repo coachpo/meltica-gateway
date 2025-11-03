@@ -11,6 +11,7 @@ import (
 
 	json "github.com/goccy/go-json"
 
+	"github.com/coachpo/meltica/internal/app/lambda/js"
 	"github.com/coachpo/meltica/internal/app/lambda/runtime"
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/app/risk"
@@ -23,6 +24,10 @@ const (
 
 	strategiesPath       = "/strategies"
 	strategyDetailPrefix = strategiesPath + "/"
+	strategyModulesPath  = strategiesPath + "/modules"
+	strategyModulePrefix = strategyModulesPath + "/"
+	strategyRefreshPath  = strategiesPath + "/refresh"
+	strategySourceSuffix = "/source"
 
 	providersPath        = "/providers"
 	providerDetailPrefix = providersPath + "/"
@@ -63,6 +68,11 @@ type contextBackup struct {
 	Risk      config.RiskConfig     `json:"risk"`
 }
 
+type strategyModulePayload struct {
+	Filename string `json:"filename"`
+	Source   string `json:"source"`
+}
+
 // NewHandler creates an HTTP handler for lambda management operations.
 func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *provider.Manager) http.Handler {
 	baseProviders := make(map[string]struct{}, len(appCfg.Providers))
@@ -92,6 +102,14 @@ func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *pr
 	}))
 	mux.Handle(strategyDetailPrefix, server.methodHandlers(map[string]handlerFunc{
 		http.MethodGet: server.getStrategy,
+	}))
+	mux.Handle(strategyModulesPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet:  server.listStrategyModules,
+		http.MethodPost: server.createStrategyModule,
+	}))
+	mux.Handle(strategyModulePrefix, http.HandlerFunc(server.handleStrategyModule))
+	mux.Handle(strategyRefreshPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodPost: server.refreshStrategies,
 	}))
 
 	mux.Handle(providersPath, server.methodHandlers(map[string]handlerFunc{
@@ -166,6 +184,157 @@ func (s *httpServer) getStrategy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, meta)
+}
+
+func (s *httpServer) listStrategyModules(w http.ResponseWriter, _ *http.Request) {
+	modules := []js.ModuleSummary{}
+	if s.manager != nil {
+		modules = s.manager.StrategyModules()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"modules": modules})
+}
+
+func (s *httpServer) createStrategyModule(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+	limitRequestBody(w, r)
+	payload, err := decodeStrategyModulePayload(r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	filename := strings.TrimSpace(payload.Filename)
+	if filename == "" {
+		writeError(w, http.StatusBadRequest, "filename required")
+		return
+	}
+	if strings.TrimSpace(payload.Source) == "" {
+		writeError(w, http.StatusBadRequest, "source required")
+		return
+	}
+	if err := s.manager.UpsertStrategy(filename, []byte(payload.Source)); err != nil {
+		s.writeStrategyModuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"filename":          filename,
+		"status":            "pending_refresh",
+		"strategyDirectory": s.manager.StrategyDirectory(),
+	})
+}
+
+func (s *httpServer) handleStrategyModule(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, strategyModulePrefix)
+	trimmed = strings.Trim(trimmed, "/")
+	if trimmed == "" {
+		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
+		return
+	}
+	segments := strings.Split(trimmed, "/")
+	name := strings.TrimSpace(segments[0])
+	if name == "" {
+		writeError(w, http.StatusNotFound, "module identifier required")
+		return
+	}
+	if len(segments) == 2 && segments[1] == strings.TrimPrefix(strategySourceSuffix, "/") {
+		s.getStrategyModuleSource(w, r, name)
+		return
+	}
+	if len(segments) != 1 {
+		writeError(w, http.StatusNotFound, "invalid module path")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.getStrategyModule(w, name)
+	case http.MethodPut:
+		s.updateStrategyModule(w, r, name)
+	case http.MethodDelete:
+		s.deleteStrategyModule(w, name)
+	default:
+		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
+	}
+}
+
+func (s *httpServer) getStrategyModule(w http.ResponseWriter, name string) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+	summary, err := s.manager.StrategyModule(name)
+	if err != nil {
+		s.writeStrategyModuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
+}
+
+func (s *httpServer) updateStrategyModule(w http.ResponseWriter, r *http.Request, filename string) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+	limitRequestBody(w, r)
+	payload, err := decodeStrategyModulePayload(r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	source := payload.Source
+	if source == "" {
+		writeError(w, http.StatusBadRequest, "source required")
+		return
+	}
+	if err := s.manager.UpsertStrategy(filename, []byte(source)); err != nil {
+		s.writeStrategyModuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"filename":          filename,
+		"status":            "pending_refresh",
+		"strategyDirectory": s.manager.StrategyDirectory(),
+	})
+}
+
+func (s *httpServer) deleteStrategyModule(w http.ResponseWriter, name string) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+	if err := s.manager.RemoveStrategy(name); err != nil {
+		s.writeStrategyModuleError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *httpServer) getStrategyModuleSource(w http.ResponseWriter, _ *http.Request, name string) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+	source, err := s.manager.StrategySource(name)
+	if err != nil {
+		s.writeStrategyModuleError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(source)
+}
+
+func (s *httpServer) refreshStrategies(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+	if err := s.manager.RefreshJavaScriptStrategies(r.Context()); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "refreshed"})
 }
 
 func (s *httpServer) listProviders(w http.ResponseWriter, _ *http.Request) {
@@ -602,11 +771,32 @@ func (s *httpServer) writeProviderError(w http.ResponseWriter, err error) {
 	}
 }
 
+func (s *httpServer) writeStrategyModuleError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, js.ErrModuleNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	default:
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
+}
+
 func decodeProviderPayload(r *http.Request) (providerPayload, error) {
 	defer func() {
 		_ = r.Body.Close()
 	}()
 	var payload providerPayload
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		return payload, fmt.Errorf("decode payload: %w", err)
+	}
+	return payload, nil
+}
+
+func decodeStrategyModulePayload(r *http.Request) (strategyModulePayload, error) {
+	defer func() {
+		_ = r.Body.Close()
+	}()
+	var payload strategyModulePayload
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&payload); err != nil {
 		return payload, fmt.Errorf("decode payload: %w", err)

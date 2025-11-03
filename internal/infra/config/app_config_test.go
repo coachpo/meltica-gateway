@@ -136,6 +136,10 @@ lambdaManifest:
 		t.Fatalf("expected telemetry metrics disabled")
 	}
 
+	if cfg.Strategies.Directory != "strategies" {
+		t.Fatalf("expected default strategies directory, got %q", cfg.Strategies.Directory)
+	}
+
 	if cfg.Pools.Event.Size != 100 {
 		t.Fatalf("expected pool event size 100, got %d", cfg.Pools.Event.Size)
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,7 +14,103 @@ import (
 
 func newTestManager(t *testing.T) *Manager {
 	t.Helper()
-	return NewManager(config.AppConfig{}, nil, nil, nil, log.New(io.Discard, "", 0), nil)
+	cfg := config.AppConfig{
+		Strategies: config.StrategiesConfig{
+			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
+		},
+	}
+	manager, err := NewManager(cfg, nil, nil, nil, log.New(io.Discard, "", 0), nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	return manager
+}
+
+func TestManagerRefreshJavaScriptStrategies(t *testing.T) {
+	dir := t.TempDir()
+	initialSource := `module.exports = {
+	  metadata: {
+	    name: "alpha",
+	    displayName: "Alpha",
+	    description: "Alpha v1",
+	    config: [],
+	    events: ["Trade"]
+	  },
+	  create: function () {
+	    return {};
+	  }
+};
+`
+	if err := os.WriteFile(filepath.Join(dir, "alpha.js"), []byte(initialSource), 0o600); err != nil {
+		t.Fatalf("write strategy: %v", err)
+	}
+
+	cfg := config.AppConfig{
+		Environment: config.EnvDev,
+		Eventbus:    config.EventbusConfig{BufferSize: 1},
+		Pools: config.PoolConfig{
+			Event:        config.ObjectPoolConfig{Size: 1, WaitQueueSize: 1},
+			OrderRequest: config.ObjectPoolConfig{Size: 1, WaitQueueSize: 1},
+		},
+		Risk: config.RiskConfig{
+			MaxPositionSize:  "1",
+			MaxNotionalValue: "1",
+			NotionalCurrency: "USD",
+			OrderThrottle:    1,
+			OrderBurst:       1,
+		},
+		Telemetry: config.TelemetryConfig{ServiceName: "test"},
+		APIServer: config.APIServerConfig{Addr: ":0"},
+		Strategies: config.StrategiesConfig{
+			Directory: dir,
+		},
+	}
+
+	mgr, err := NewManager(cfg, nil, nil, nil, log.New(io.Discard, "", 0), nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	meta, ok := mgr.StrategyDetail("alpha")
+	if !ok {
+		t.Fatalf("expected alpha strategy to be registered")
+	}
+	if meta.DisplayName != "Alpha" {
+		t.Fatalf("unexpected display name %q", meta.DisplayName)
+	}
+
+	updatedSource := strings.ReplaceAll(initialSource, "Alpha v1", "Alpha v2")
+	if err := mgr.UpsertStrategy("alpha.js", []byte(updatedSource)); err != nil {
+		t.Fatalf("UpsertStrategy: %v", err)
+	}
+
+	meta, ok = mgr.StrategyDetail("alpha")
+	if !ok {
+		t.Fatalf("alpha strategy missing after upsert")
+	}
+	if meta.Description != "Alpha v1" {
+		t.Fatalf("expected stale metadata before refresh, got %q", meta.Description)
+	}
+
+	if err := mgr.RefreshJavaScriptStrategies(context.Background()); err != nil {
+		t.Fatalf("RefreshJavaScriptStrategies: %v", err)
+	}
+
+	meta, ok = mgr.StrategyDetail("alpha")
+	if !ok {
+		t.Fatalf("alpha strategy missing after refresh")
+	}
+	if meta.Description != "Alpha v2" {
+		t.Fatalf("expected refreshed metadata, got %q", meta.Description)
+	}
+
+	source, err := mgr.StrategySource("alpha.js")
+	if err != nil {
+		t.Fatalf("StrategySource: %v", err)
+	}
+	if !strings.Contains(string(source), "Alpha v2") {
+		t.Fatalf("expected updated source, got %q", string(source))
+	}
 }
 
 func baseLambdaSpec() config.LambdaSpec {

@@ -153,6 +153,11 @@ type TelemetryConfig struct {
 	EnableMetrics bool   `yaml:"enableMetrics"`
 }
 
+// StrategiesConfig defines where JavaScript strategy sources are discovered.
+type StrategiesConfig struct {
+	Directory string `yaml:"directory"`
+}
+
 // AppConfig is the unified Meltica application configuration sourced from YAML.
 type AppConfig struct {
 	Environment    Environment                 `yaml:"environment"`
@@ -162,6 +167,7 @@ type AppConfig struct {
 	Risk           RiskConfig                  `yaml:"risk"`
 	APIServer      APIServerConfig             `yaml:"apiServer"`
 	Telemetry      TelemetryConfig             `yaml:"telemetry"`
+	Strategies     StrategiesConfig            `yaml:"strategies"`
 	LambdaManifest LambdaManifest              `yaml:"lambdaManifest"`
 }
 
@@ -257,6 +263,12 @@ func (c *AppConfig) normalise() error {
 	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
 	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
 
+	strategyDir := strings.TrimSpace(c.Strategies.Directory)
+	if strategyDir == "" {
+		strategyDir = "strategies"
+	}
+	c.Strategies.Directory = filepath.Clean(strategyDir)
+
 	if c.Risk.OrderBurst <= 0 {
 		c.Risk.OrderBurst = 1
 	}
@@ -351,6 +363,9 @@ func (c AppConfig) Validate() error {
 
 	if strings.TrimSpace(c.Telemetry.ServiceName) == "" {
 		return fmt.Errorf("telemetry serviceName required")
+	}
+	if strings.TrimSpace(c.Strategies.Directory) == "" {
+		return fmt.Errorf("strategies directory required")
 	}
 
 	if err := c.LambdaManifest.Validate(); err != nil {

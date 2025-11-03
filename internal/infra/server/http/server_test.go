@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -94,6 +95,9 @@ func TestBuildContextBackup(t *testing.T) {
 			OTLPInsecure:  true,
 			EnableMetrics: true,
 		},
+		Strategies: config.StrategiesConfig{
+			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
+		},
 	}
 
 	poolMgr := pool.NewPoolManager()
@@ -131,7 +135,10 @@ func TestBuildContextBackup(t *testing.T) {
 
 	logger := log.New(ioDiscards{}, "", 0)
 	registrar := dispatcher.NewRegistrar(table, providerManager)
-	lambdaManager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+	lambdaManager, err := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
 
 	manifest := config.LambdaManifest{
 		Lambdas: []config.LambdaSpec{
@@ -203,7 +210,11 @@ func TestBuildContextBackup(t *testing.T) {
 }
 
 func TestApplyContextBackupRestoresState(t *testing.T) {
-	appCfg := config.AppConfig{}
+	appCfg := config.AppConfig{
+		Strategies: config.StrategiesConfig{
+			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
+		},
+	}
 
 	poolMgr := pool.NewPoolManager()
 	if err := poolMgr.RegisterPool("Event", 8, 8, func() interface{} { return new(schema.Event) }); err != nil {
@@ -223,7 +234,10 @@ func TestApplyContextBackupRestoresState(t *testing.T) {
 	providerManager := provider.NewManager(nil, poolMgr, bus, table, log.New(ioDiscards{}, "", 0))
 	logger := log.New(ioDiscards{}, "", 0)
 	registrar := dispatcher.NewRegistrar(table, providerManager)
-	lambdaManager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+	lambdaManager, err := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
 
 	server := &httpServer{
 		manager:       lambdaManager,
@@ -380,7 +394,11 @@ func TestBuildProviderSpecFromPayload_OmitsEmptyConfig(t *testing.T) {
 }
 
 func TestHandleProviderDeleteBlockedWhenInUse(t *testing.T) {
-	appCfg := config.AppConfig{}
+	appCfg := config.AppConfig{
+		Strategies: config.StrategiesConfig{
+			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
+		},
+	}
 
 	poolMgr := pool.NewPoolManager()
 	if err := poolMgr.RegisterPool("Event", 8, 8, func() interface{} { return new(schema.Event) }); err != nil {
@@ -400,7 +418,10 @@ func TestHandleProviderDeleteBlockedWhenInUse(t *testing.T) {
 	providerManager := provider.NewManager(nil, poolMgr, bus, table, log.New(ioDiscards{}, "", 0))
 	logger := log.New(ioDiscards{}, "", 0)
 	registrar := dispatcher.NewRegistrar(table, providerManager)
-	lambdaManager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+	lambdaManager, err := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
 
 	server := &httpServer{
 		manager:       lambdaManager,
@@ -470,7 +491,11 @@ func TestHandleProviderDeleteBlockedWhenInUse(t *testing.T) {
 }
 
 func TestProviderUsageInfersProvidersFromScope(t *testing.T) {
-	appCfg := config.AppConfig{}
+	appCfg := config.AppConfig{
+		Strategies: config.StrategiesConfig{
+			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
+		},
+	}
 
 	poolMgr := pool.NewPoolManager()
 	if err := poolMgr.RegisterPool("Event", 8, 8, func() interface{} { return new(schema.Event) }); err != nil {
@@ -490,7 +515,10 @@ func TestProviderUsageInfersProvidersFromScope(t *testing.T) {
 	providerManager := provider.NewManager(nil, poolMgr, bus, table, log.New(ioDiscards{}, "", 0))
 	logger := log.New(ioDiscards{}, "", 0)
 	registrar := dispatcher.NewRegistrar(table, providerManager)
-	lambdaManager := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+	lambdaManager, err := lambdaruntime.NewManager(appCfg, bus, poolMgr, providerManager, logger, registrar)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
 
 	if _, err := providerManager.Create(context.Background(), config.ProviderSpec{
 		Name:    "binance",

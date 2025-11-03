@@ -6,53 +6,28 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/coachpo/meltica/internal/app/lambda/core"
-	"github.com/coachpo/meltica/internal/app/lambda/strategies"
-	"github.com/coachpo/meltica/internal/domain/schema"
+	"github.com/coachpo/meltica/internal/app/lambda/js"
 	"github.com/coachpo/meltica/internal/support/backtest"
 )
-
-type orderStrategyAdapter struct {
-	base *core.BaseLambda
-}
-
-func (a *orderStrategyAdapter) Logger() *log.Logger   { return a.base.Logger() }
-func (a *orderStrategyAdapter) GetLastPrice() float64 { return a.base.GetLastPrice() }
-func (a *orderStrategyAdapter) IsTradingActive() bool { return a.base.IsTradingActive() }
-func (a *orderStrategyAdapter) IsDryRun() bool        { return a.base.IsDryRun() }
-func (a *orderStrategyAdapter) Providers() []string   { return a.base.Providers() }
-func (a *orderStrategyAdapter) SelectProvider(seed uint64) (string, error) {
-	provider, err := a.base.SelectProvider(seed)
-	if err != nil {
-		return "", fmt.Errorf("select provider: %w", err)
-	}
-	return provider, nil
-}
-func (a *orderStrategyAdapter) SubmitOrder(ctx context.Context, provider string, side schema.TradeSide, quantity string, price *float64) error {
-	var priceStr *string
-	if price != nil {
-		formatted := fmt.Sprintf("%f", *price)
-		priceStr = &formatted
-	}
-	if err := a.base.SubmitOrder(ctx, provider, side, quantity, priceStr); err != nil {
-		return fmt.Errorf("submit order: %w", err)
-	}
-	return nil
-}
 
 func main() {
 	dataPath := flag.String("data", "", "Path to the historical data file (CSV)")
 	strategyName := flag.String("strategy", "noop", "Name of the strategy to backtest")
+	strategiesDir := flag.String("strategies.dir", "strategies", "Directory containing JavaScript strategies")
 
 	// Grid strategy parameters.
 	gridLevels := flag.Int("grid.levels", 5, "Number of grid levels")
-	gridSpacing := flag.Float64("grid.spacing", 0.5, "Grid spacing")
+	gridSpacing := flag.Float64("grid.spacing", 0.5, "Grid spacing (percent)")
 	gridOrderSize := flag.String("grid.orderSize", "1", "Order size for each grid level")
 
 	flag.Parse()
 
-	if *dataPath == "" {
+	if strings.TrimSpace(*dataPath) == "" {
 		log.Fatal("data path is required")
 	}
 
@@ -61,28 +36,66 @@ func main() {
 		log.Fatalf("create csv feeder: %v", err)
 	}
 
-	var strategy core.TradingStrategy
-	switch *strategyName {
-	case "noop":
-		strategy = &strategies.NoOp{}
-	case "grid":
-		gridStrategy := &strategies.Grid{
-			Lambda:      nil,
-			GridLevels:  *gridLevels,
-			GridSpacing: *gridSpacing,
-			OrderSize:   *gridOrderSize,
-			BasePrice:   0,
-			DryRun:      true,
-		}
-		baseLambda := core.NewBaseLambda("backtest", core.Config{Providers: []string{"backtest"}, ProviderSymbols: nil, DryRun: true}, nil, nil, nil, gridStrategy, nil)
-		gridStrategy.Lambda = &orderStrategyAdapter{base: baseLambda}
-		strategy = gridStrategy
-	default:
-		log.Fatalf("unknown strategy: %s", *strategyName)
+	strategyID := strings.ToLower(strings.TrimSpace(*strategyName))
+	if strategyID == "" {
+		log.Fatal("strategy name is required")
 	}
 
-	exchange := backtest.NewSimulatedExchange(strategy)
+	absStrategiesPath, err := filepath.Abs(*strategiesDir)
+	if err != nil {
+		log.Fatalf("resolve strategies dir: %v", err)
+	}
 
+	loader, err := js.NewLoader(absStrategiesPath)
+	if err != nil {
+		log.Fatalf("create strategy loader: %v", err)
+	}
+	if err := loader.Refresh(context.Background()); err != nil {
+		log.Fatalf("load strategies: %v", err)
+	}
+
+	config := map[string]any{}
+	switch strategyID {
+	case "grid":
+		config = map[string]any{
+			"grid_levels":  *gridLevels,
+			"grid_spacing": *gridSpacing,
+			"order_size":   *gridOrderSize,
+			"base_price":   0.0,
+			"dry_run":      true,
+		}
+	case "noop":
+		// no additional configuration
+	default:
+		config = map[string]any{}
+	}
+
+	module, err := loader.Get(strategyID)
+	if err != nil {
+		log.Fatalf("strategy %q not found: %v", strategyID, err)
+	}
+
+	strategyLogger := log.New(os.Stdout, "[strategy] ", log.LstdFlags)
+	jsStrategy, err := js.NewStrategy(module, config, strategyLogger)
+	if err != nil {
+		log.Fatalf("instantiate strategy %q: %v", strategyID, err)
+	}
+
+	base := core.NewBaseLambda(
+		"backtest",
+		core.Config{Providers: []string{"backtest"}, ProviderSymbols: nil, DryRun: true},
+		nil,
+		nil,
+		nil,
+		jsStrategy,
+		nil,
+	)
+	jsStrategy.Attach(base)
+	base.EnableTrading(true)
+
+	strategy := core.TradingStrategy(jsStrategy)
+
+	exchange := backtest.NewSimulatedExchange(strategy)
 	engine := backtest.NewEngine(feeder, exchange, strategy)
 
 	if err := engine.Run(context.Background()); err != nil {
