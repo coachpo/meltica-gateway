@@ -12,8 +12,17 @@ export interface Strategy {
   name: string;
   displayName: string;
   description: string;
+  version?: string;
   config: StrategyConfig[];
   events: string[];
+}
+
+export interface StrategyModuleRevision {
+  hash: string;
+  tag?: string;
+  path: string;
+  version?: string;
+  size: number;
 }
 
 export interface StrategyModuleSummary {
@@ -21,19 +30,37 @@ export interface StrategyModuleSummary {
   file: string;
   path: string;
   hash: string;
+  version?: string;
+  tags: string[];
+  tagAliases?: Record<string, string>;
+  revisions?: StrategyModuleRevision[];
   size: number;
   metadata: Strategy;
 }
 
 export interface StrategyModulePayload {
-  filename: string;
+  filename?: string;
   source: string;
+  name?: string;
+  tag?: string;
+  aliases?: string[];
+  promoteLatest?: boolean;
+}
+
+export interface StrategyModuleResolution {
+  name: string;
+  hash: string;
+  tag?: string;
+  version?: string;
+  file?: string;
+  path?: string;
 }
 
 export interface StrategyModuleOperationResponse {
-  filename: string;
+  filename?: string;
   status: string;
   strategyDirectory: string;
+  module?: StrategyModuleResolution | null;
 }
 
 export type ProviderSettings = Record<string, unknown>;
@@ -110,6 +137,10 @@ export interface ProviderRequest {
 export interface InstanceSummary {
   id: string;
   strategyIdentifier: string;
+  strategyTag?: string;
+  strategyHash?: string;
+  strategyVersion?: string;
+  strategySelector?: string;
   providers: string[];
   aggregatedSymbols: string[];
   running: boolean;
@@ -123,6 +154,10 @@ export interface InstanceSpec {
   id: string;
   strategy: {
     identifier: string;
+    selector?: string;
+    tag?: string;
+    hash?: string;
+    version?: string;
     config: Record<string, unknown>;
   };
   scope: Record<string, ProviderSymbols>;

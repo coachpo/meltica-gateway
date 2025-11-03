@@ -2,16 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
-import { InstanceSummary, Strategy, Provider } from '@/lib/types';
+import { InstanceSummary, Strategy, Provider, StrategyModuleSummary } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon } from 'lucide-react';
+import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon, Copy } from 'lucide-react';
 import { useToast } from '@/components/ui/toast-provider';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ConfirmDialog } from '@/components/confirm-dialog';
@@ -22,10 +22,49 @@ type ProviderInstrumentStatus = {
   error: string | null;
 };
 
+type ParsedSelector = {
+  identifier: string;
+  tag?: string;
+  hash?: string;
+};
+
+function parseStrategySelector(raw: string): ParsedSelector {
+  const selector = raw.trim();
+  if (!selector) {
+    return { identifier: '' };
+  }
+  if (selector.includes('@')) {
+    const [identifierPart, hashPart] = selector.split('@');
+    return {
+      identifier: identifierPart.trim(),
+      hash: hashPart.trim(),
+    };
+  }
+  if (selector.includes(':')) {
+    const [identifierPart, ...rest] = selector.split(':');
+    return {
+      identifier: identifierPart.trim(),
+      tag: rest.join(':').trim(),
+    };
+  }
+  return { identifier: selector };
+}
+
+function formatHash(hash: string | undefined | null, length = 12): string {
+  if (!hash) {
+    return '—';
+  }
+  if (hash.length <= length) {
+    return hash;
+  }
+  return `${hash.slice(0, length)}…`;
+}
+
 export default function InstancesPage() {
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [modules, setModules] = useState<StrategyModuleSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -40,6 +79,7 @@ export default function InstancesPage() {
     id: '',
     strategyIdentifier: '',
   });
+  const [strategySelectorInput, setStrategySelectorInput] = useState('');
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const [providerSymbols, setProviderSymbols] = useState<Record<string, string[]>>({});
   const [providerSymbolFilters, setProviderSymbolFilters] = useState<Record<string, string>>({});
@@ -56,6 +96,40 @@ export default function InstancesPage() {
   const selectedStrategy = useMemo(
     () => strategies.find((strategy) => strategy.name === newInstance.strategyIdentifier),
     [strategies, newInstance.strategyIdentifier]
+  );
+
+  const moduleStatusByName = useMemo(() => {
+    const map = new Map<
+      string,
+      { pinnedHash: string | null; latestHash: string | null; latestTag: string | null }
+    >();
+    modules.forEach((module) => {
+      const key = module.name.toLowerCase();
+      const pinnedHash = module.hash || null;
+      const latestHash = module.tagAliases?.latest ?? pinnedHash;
+      let latestTag: string | null = null;
+      if (latestHash) {
+        const aliasEntries = Object.entries(module.tagAliases ?? {}).filter(
+          ([tag, hash]) => tag !== 'latest' && hash === latestHash,
+        );
+        if (aliasEntries.length > 0) {
+          latestTag = aliasEntries[0][0];
+        } else if (module.version) {
+          latestTag = module.version;
+        }
+      }
+      map.set(key, {
+        pinnedHash,
+        latestHash,
+        latestTag,
+      });
+    });
+    return map;
+  }, [modules]);
+
+  const anyActionInFlight = useMemo(
+    () => Object.values(actionInProgress).some(Boolean),
+    [actionInProgress],
   );
 
   useEffect(() => {
@@ -88,6 +162,7 @@ export default function InstancesPage() {
       id: '',
       strategyIdentifier: '',
     });
+    setStrategySelectorInput('');
     setSelectedProviders([]);
     setProviderSymbols({});
     setProviderSymbolFilters({});
@@ -204,14 +279,16 @@ export default function InstancesPage() {
 
   const fetchData = async () => {
     try {
-      const [instancesRes, strategiesRes, providersRes] = await Promise.all([
+      const [instancesRes, strategiesRes, providersRes, modulesRes] = await Promise.all([
         apiClient.getInstances(),
         apiClient.getStrategies(),
         apiClient.getProviders(),
+        apiClient.getStrategyModules(),
       ]);
       setInstances(instancesRes.instances);
       setStrategies(strategiesRes.strategies);
       setProviders(providersRes.providers);
+      setModules(Array.isArray(modulesRes.modules) ? modulesRes.modules : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
     } finally {
@@ -233,7 +310,32 @@ export default function InstancesPage() {
       return;
     }
 
-    const strategyMeta = selectedStrategy;
+    const selectorCandidate = strategySelectorInput.trim() || newInstance.strategyIdentifier.trim();
+    const parsedSelector = parseStrategySelector(selectorCandidate);
+    let identifier = parsedSelector.identifier || newInstance.strategyIdentifier.trim();
+    if (!identifier) {
+      setFormError('Strategy identifier is required');
+      return;
+    }
+    if (
+      dialogMode === 'edit' &&
+      identifier.toLowerCase() !== newInstance.strategyIdentifier.trim().toLowerCase()
+    ) {
+      setFormError('Strategy identifier cannot be changed after creation.');
+      return;
+    }
+    if (dialogMode === 'edit') {
+      identifier = newInstance.strategyIdentifier.trim();
+    }
+    const tag = parsedSelector.tag?.trim() ? parsedSelector.tag.trim() : undefined;
+    const hash = parsedSelector.hash?.trim() ? parsedSelector.hash.trim() : undefined;
+    const selectorValue = hash
+      ? `${identifier}@${hash}`
+      : tag
+        ? `${identifier}:${tag}`
+        : identifier;
+
+    const strategyMeta = strategies.find((strategy) => strategy.name === identifier);
     if (!strategyMeta) {
       setFormError('Strategy metadata is unavailable');
       return;
@@ -301,7 +403,10 @@ export default function InstancesPage() {
     const payload = {
       id: newInstance.id.trim(),
       strategy: {
-        identifier: newInstance.strategyIdentifier,
+        identifier,
+        selector: selectorValue,
+        tag,
+        hash,
         config: configPayload,
       },
       scope,
@@ -431,6 +536,30 @@ export default function InstancesPage() {
     setConfirmState({ type: 'delete-instance', id });
   };
 
+  const copyValue = async (value: string, label: string) => {
+    if (!value) {
+      return;
+    }
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard) {
+        throw new Error('Clipboard API unavailable');
+      }
+      await navigator.clipboard.writeText(value);
+      showToast({
+        title: `${label} copied`,
+        description: value,
+        variant: 'success',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Copy failed';
+      showToast({
+        title: 'Copy failed',
+        description: message,
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleEdit = async (id: string) => {
     setDialogMode('edit');
     setEditingInstanceId(id);
@@ -461,6 +590,14 @@ export default function InstancesPage() {
         id: instance.id,
         strategyIdentifier: instance.strategy.identifier,
       });
+      const selectorRaw =
+        (instance.strategy.selector && instance.strategy.selector.trim()) ||
+        (instance.strategy.hash
+          ? `${instance.strategy.identifier}@${instance.strategy.hash}`
+          : instance.strategy.tag
+            ? `${instance.strategy.identifier}:${instance.strategy.tag}`
+            : instance.strategy.identifier);
+      setStrategySelectorInput(selectorRaw);
       setSelectedProviders(providerList);
       setProviderSymbols(symbolMap);
 
@@ -598,6 +735,12 @@ export default function InstancesPage() {
                         setFormError(null);
                         setPrefilledConfig(false);
                         setNewInstance({ ...newInstance, strategyIdentifier: value });
+                        if (
+                          !strategySelectorInput.trim() ||
+                          strategySelectorInput.trim() === newInstance.strategyIdentifier.trim()
+                        ) {
+                          setStrategySelectorInput(value);
+                        }
                       }}
                     >
                       <SelectTrigger disabled={dialogMode === 'edit'}>
@@ -611,6 +754,30 @@ export default function InstancesPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="strategy-selector">Strategy selector</Label>
+                    <Input
+                      id="strategy-selector"
+                      value={strategySelectorInput}
+                      onChange={(event) => {
+                        setStrategySelectorInput(event.target.value);
+                        if (dialogMode === 'create') {
+                          const parsed = parseStrategySelector(event.target.value);
+                          if (parsed.identifier) {
+                            setNewInstance((prev) => ({
+                              ...prev,
+                              strategyIdentifier: parsed.identifier,
+                            }));
+                          }
+                        }
+                      }}
+                      placeholder="grid, grid:stable, or grid@sha256:abc123"
+                      disabled={dialogMode === 'edit' && instanceLoading}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Use <span className="font-mono">name</span>, <span className="font-mono">name:tag</span>, or <span className="font-mono">name@hash</span> to pin a revision.
+                    </p>
                   </div>
                   <div className="grid gap-2">
                     <Label>
@@ -903,102 +1070,183 @@ export default function InstancesPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {instances.map((instance) => (
-          <Card key={instance.id}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>{instance.id}</CardTitle>
-                <Badge 
-                  variant={instance.running ? 'default' : 'secondary'}
-                  className={instance.running ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-500 hover:bg-gray-600'}
-                >
-                  {instance.running ? 'Running' : 'Stopped'}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="text-sm space-y-2">
-                <div>
-                  <span className="font-medium">Strategy:</span>{' '}
-                  <span className="text-muted-foreground">{instance.strategyIdentifier}</span>
-                </div>
-                <div>
-                  <span className="font-medium">Providers:</span>{' '}
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {instance.providers.map((provider) => (
-                      <Badge key={provider} variant="outline">
-                        {provider}
+        {instances.map((instance) => {
+          const moduleStatus = moduleStatusByName.get(
+            instance.strategyIdentifier.trim().toLowerCase(),
+          );
+          const latestHash = moduleStatus?.latestHash ?? null;
+          const pinnedHash = moduleStatus?.pinnedHash ?? null;
+          const latestTag = moduleStatus?.latestTag ?? null;
+          const selectorDisplay = instance.strategySelector || instance.strategyIdentifier;
+          const drift = Boolean(
+            latestHash &&
+              instance.strategyHash &&
+              latestHash.toLowerCase() !== instance.strategyHash.toLowerCase(),
+          );
+          return (
+            <Card key={instance.id}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>{instance.id}</CardTitle>
+                  <div className="flex items-center gap-2">
+                    {drift ? (
+                      <Badge variant="destructive" className="bg-amber-500 text-black hover:bg-amber-600">
+                        Out of date
                       </Badge>
-                    ))}
+                    ) : null}
+                    <Badge
+                      variant={instance.running ? 'default' : 'secondary'}
+                      className={
+                        instance.running
+                          ? 'bg-green-600 hover:bg-green-700'
+                          : 'bg-gray-500 hover:bg-gray-600'
+                      }
+                    >
+                      {instance.running ? 'Running' : 'Stopped'}
+                    </Badge>
                   </div>
                 </div>
-                <div>
-                  <span className="font-medium">Symbols:</span>{' '}
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {instance.aggregatedSymbols.map((symbol) => (
-                      <Badge key={symbol} variant="outline">
-                        {symbol}
-                      </Badge>
-                    ))}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="text-sm space-y-2">
+                  <div>
+                    <span className="font-medium">Strategy:</span>{' '}
+                    <span className="text-muted-foreground">{instance.strategyIdentifier}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium">Selector:</span>{' '}
+                    <span className="font-mono text-xs text-muted-foreground">{selectorDisplay}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium">Tag:</span>{' '}
+                    <span className="text-muted-foreground">{instance.strategyTag || latestTag || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium">Version:</span>{' '}
+                    <span className="text-muted-foreground">{instance.strategyVersion || '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">Hash:</span>
+                    {instance.strategyHash ? (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => void copyValue(instance.strategyHash, 'Strategy hash')}
+                      >
+                        <span className="font-mono">{formatHash(instance.strategyHash, 18)}</span>
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </div>
+                  {latestHash ? (
+                    <div className="text-xs text-muted-foreground">
+                      Latest revision: <span className="font-mono">{formatHash(latestHash, 18)}</span>
+                      {latestTag ? ` (${latestTag})` : ''}
+                      {pinnedHash && pinnedHash !== latestHash ? (
+                        <span>
+                          {' '}| Pinned: <span className="font-mono">{formatHash(pinnedHash, 18)}</span>
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div>
+                    <span className="font-medium">Providers:</span>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {instance.providers.length > 0 ? (
+                        instance.providers.map((provider) => (
+                          <Badge key={provider} variant="outline">
+                            {provider}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="font-medium">Symbols:</span>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {instance.aggregatedSymbols.length > 0 ? (
+                        instance.aggregatedSymbols.map((symbol) => (
+                          <Badge key={symbol} variant="outline">
+                            {symbol}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleEdit(instance.id)}
-                  disabled={Object.values(actionInProgress).some(Boolean)}
-                >
-                  <PencilIcon className="mr-1 h-3 w-3" />
-                  Edit
-                </Button>
-                {instance.running ? (
+                {drift ? (
+                  <Alert>
+                    <AlertTitle>Revision drift detected</AlertTitle>
+                    <AlertDescription>
+                      Latest module hash {formatHash(latestHash, 18)} differs from the instance hash{' '}
+                      {formatHash(instance.strategyHash, 18)}. Stop and restart this instance to deploy
+                      the latest revision.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleStop(instance.id)}
-                    disabled={actionInProgress[`stop-${instance.id}`] || Object.values(actionInProgress).some(Boolean)}
+                    onClick={() => handleEdit(instance.id)}
+                    disabled={anyActionInFlight}
                   >
-                    {actionInProgress[`stop-${instance.id}`] ? (
-                      <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
-                    ) : (
-                      <CircleStopIcon className="mr-1 h-3 w-3" />
-                    )}
-                    Stop
+                    <PencilIcon className="mr-1 h-3 w-3" />
+                    Edit
                   </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleStart(instance.id)}
-                    disabled={actionInProgress[`start-${instance.id}`] || Object.values(actionInProgress).some(Boolean)}
-                  >
-                    {actionInProgress[`start-${instance.id}`] ? (
-                      <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
-                    ) : (
-                      <PlayIcon className="mr-1 h-3 w-3" />
-                    )}
-                    Start
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => handleDelete(instance.id)}
-                  disabled={actionInProgress[`delete-${instance.id}`] || Object.values(actionInProgress).some(Boolean)}
-                >
-                  {actionInProgress[`delete-${instance.id}`] ? (
-                    <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
+                  {instance.running ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleStop(instance.id)}
+                      disabled={actionInProgress[`stop-${instance.id}`] || anyActionInFlight}
+                    >
+                      {actionInProgress[`stop-${instance.id}`] ? (
+                        <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
+                      ) : (
+                        <CircleStopIcon className="mr-1 h-3 w-3" />
+                      )}
+                      Stop
+                    </Button>
                   ) : (
-                    <TrashIcon className="mr-1 h-3 w-3" />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleStart(instance.id)}
+                      disabled={actionInProgress[`start-${instance.id}`] || anyActionInFlight}
+                    >
+                      {actionInProgress[`start-${instance.id}`] ? (
+                        <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
+                      ) : (
+                        <PlayIcon className="mr-1 h-3 w-3" />
+                      )}
+                      Start
+                    </Button>
                   )}
-                  Delete
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => handleDelete(instance.id)}
+                    disabled={actionInProgress[`delete-${instance.id}`] || anyActionInFlight}
+                  >
+                    {actionInProgress[`delete-${instance.id}`] ? (
+                      <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <TrashIcon className="mr-1 h-3 w-3" />
+                    )}
+                    Delete
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       {instances.length === 0 && (

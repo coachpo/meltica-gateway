@@ -37,9 +37,15 @@ test('createStrategyModule issues POST with JSON payload', async () => {
       status: 201,
       text: async () =>
         JSON.stringify({
-          filename: 'alpha.js',
           status: 'pending_refresh',
           strategyDirectory: '/srv/strategies',
+          module: {
+            name: 'alpha',
+            hash: 'sha256:abc123',
+            tag: 'v1.0.0',
+            version: 'v1.0.0',
+            file: 'alpha.js',
+          },
         }),
     } as unknown as Response;
   }) as typeof fetch;
@@ -54,6 +60,8 @@ test('createStrategyModule issues POST with JSON payload', async () => {
   );
   expect(response.status).toBe('pending_refresh');
   expect(response.strategyDirectory).toBe('/srv/strategies');
+  expect(response.module).toBeDefined();
+  expect(response.module?.hash).toBe('sha256:abc123');
 });
 
 test('refreshStrategies returns status payload', async () => {

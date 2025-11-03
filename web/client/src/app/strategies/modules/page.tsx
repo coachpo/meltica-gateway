@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
-import type { StrategyModuleSummary } from '@/lib/types';
+import type { StrategyModuleRevision, StrategyModuleSummary } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -27,15 +27,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/toast-provider';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
+  ArrowUpCircle,
   Copy,
   Eye,
   FileCode,
   Loader2,
   Pencil,
   RefreshCw,
+  Tag,
   Trash2,
   UploadCloud,
 } from 'lucide-react';
@@ -51,9 +54,22 @@ type RefreshOptions = {
   notifySuccess?: boolean;
 };
 
-const defaultFormState = {
+type ModuleFormState = {
+  name: string;
+  filename: string;
+  tag: string;
+  aliases: string;
+  source: string;
+  promoteLatest: boolean;
+};
+
+const defaultFormState: ModuleFormState = {
+  name: '',
   filename: '',
+  tag: '',
+  aliases: '',
   source: '',
+  promoteLatest: true,
 };
 
 function formatBytes(size: number): string {
@@ -83,6 +99,26 @@ function directoryFromPath(path: string | undefined): string | null {
 }
 
 const FILE_EXTENSION_HINT = '.js or .mjs';
+const PINNED_REVISION_MESSAGE =
+  'Revision is pinned by running instances. Stop or redeploy them before deleting.';
+
+function friendlyDeletionMessage(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes('in use') || lower.includes('pinned')) {
+    return PINNED_REVISION_MESSAGE;
+  }
+  return message;
+}
+
+function buildRevisionSelector(module: StrategyModuleSummary, revision: StrategyModuleRevision): string {
+  if (revision.hash) {
+    return `${module.name}@${revision.hash}`;
+  }
+  if (revision.tag) {
+    return `${module.name}:${revision.tag}`;
+  }
+  return module.name;
+}
 
 export default function StrategyModulesPage() {
   const [modules, setModules] = useState<StrategyModuleSummary[]>([]);
@@ -103,6 +139,23 @@ export default function StrategyModulesPage() {
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<StrategyModuleSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [revisionToDelete, setRevisionToDelete] = useState<{
+    module: StrategyModuleSummary;
+    revision: StrategyModuleRevision;
+  } | null>(null);
+  const [revisionActionBusy, setRevisionActionBusy] = useState<string | null>(null);
+  const [aliasDialogTarget, setAliasDialogTarget] = useState<{
+    module: StrategyModuleSummary;
+    revision: StrategyModuleRevision;
+  } | null>(null);
+  const [aliasValue, setAliasValue] = useState('');
+  const [aliasPromoteLatest, setAliasPromoteLatest] = useState(false);
+  const [aliasError, setAliasError] = useState<string | null>(null);
+  const [aliasProcessing, setAliasProcessing] = useState(false);
+  const [promoteTarget, setPromoteTarget] = useState<{
+    module: StrategyModuleSummary;
+    revision: StrategyModuleRevision;
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -211,17 +264,32 @@ export default function StrategyModulesPage() {
     setFormError(null);
     setFormProcessing(false);
     setFormPrefillLoading(true);
+    const aliasKeys = Object.keys(module.tagAliases ?? {}).filter((tag) => {
+      if (tag === 'latest') {
+        return false;
+      }
+      if (module.version && tag === module.version) {
+        return false;
+      }
+      return true;
+    });
     setFormData({
+      name: module.name,
       filename: module.file,
+      tag: module.version ?? '',
+      aliases: aliasKeys.join(', '),
       source: '',
+      promoteLatest:
+        (module.tagAliases?.latest ?? module.hash) === module.hash || !module.tagAliases?.latest,
     });
     setFormOpen(true);
     try {
-      const source = await apiClient.getStrategyModuleSource(module.file || module.name);
-      setFormData({
-        filename: module.file,
+      const identifier = module.file || module.name;
+      const source = await apiClient.getStrategyModuleSource(identifier);
+      setFormData((prev) => ({
+        ...prev,
         source,
-      });
+      }));
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to load strategy source';
@@ -248,6 +316,7 @@ export default function StrategyModulesPage() {
     try {
       const text = await file.text();
       setFormData((prev) => ({
+        ...prev,
         filename: prev.filename || file.name,
         source: text,
       }));
@@ -263,15 +332,18 @@ export default function StrategyModulesPage() {
   };
 
   const validateForm = () => {
-    const trimmedFilename = formData.filename.trim();
-    if (!trimmedFilename) {
-      setFormError('Filename is required.');
+    const trimmedName = formData.name.trim();
+    if (!trimmedName) {
+      setFormError('Strategy name is required.');
       return false;
     }
-    const lower = trimmedFilename.toLowerCase();
-    if (!lower.endsWith('.js') && !lower.endsWith('.mjs')) {
-      setFormError(`Filename must end with ${FILE_EXTENSION_HINT}.`);
-      return false;
+    const trimmedFilename = formData.filename.trim();
+    if (trimmedFilename) {
+      const lower = trimmedFilename.toLowerCase();
+      if (!lower.endsWith('.js') && !lower.endsWith('.mjs')) {
+        setFormError(`Filename must end with ${FILE_EXTENSION_HINT}.`);
+        return false;
+      }
     }
     if (!formData.source || formData.source.trim().length === 0) {
       setFormError('Strategy source code cannot be empty.');
@@ -285,26 +357,38 @@ export default function StrategyModulesPage() {
     if (!validateForm()) {
       return;
     }
+    const trimmedName = formData.name.trim();
     const trimmedFilename = formData.filename.trim();
+    const trimmedTag = formData.tag.trim();
+    const aliases = formData.aliases
+      .split(',')
+      .map((alias) => alias.trim())
+      .filter((alias) => alias.length > 0);
     const payload = {
-      filename: trimmedFilename,
       source: formData.source,
+      promoteLatest: formData.promoteLatest,
+      ...(trimmedName ? { name: trimmedName } : {}),
+      ...(trimmedFilename ? { filename: trimmedFilename } : {}),
+      ...(trimmedTag ? { tag: trimmedTag } : {}),
+      ...(aliases.length > 0 ? { aliases } : {}),
     };
     setFormProcessing(true);
     try {
       if (formMode === 'create') {
         const response = await apiClient.createStrategyModule(payload);
+        const identifier = response.module?.name ?? trimmedName ?? response.filename ?? 'module';
         showToast({
           title: 'Strategy module saved',
-          description: `Saved ${response.filename}. Refreshing catalog…`,
+          description: `Saved ${identifier}. Refreshing catalog…`,
           variant: 'success',
         });
       } else if (formTarget) {
         const targetIdentifier = formTarget.file || formTarget.name;
         const response = await apiClient.updateStrategyModule(targetIdentifier, payload);
+        const identifier = response.module?.name ?? trimmedName ?? response.filename ?? targetIdentifier;
         showToast({
           title: 'Strategy module updated',
-          description: `Updated ${response.filename}. Refreshing catalog…`,
+          description: `Updated ${identifier}. Refreshing catalog…`,
           variant: 'success',
         });
       }
@@ -347,8 +431,9 @@ export default function StrategyModulesPage() {
       await refreshCatalog({ silent: true, notifySuccess: false });
       setDeleteTarget(null);
     } catch (err) {
-      const message =
+      const messageRaw =
         err instanceof Error ? err.message : 'Failed to delete strategy module';
+      const message = friendlyDeletionMessage(messageRaw);
       showToast({
         title: 'Delete failed',
         description: message,
@@ -424,6 +509,136 @@ export default function StrategyModulesPage() {
         description: message,
         variant: 'destructive',
       });
+    }
+  };
+
+  const revisionKey = (
+    module: StrategyModuleSummary,
+    revision: StrategyModuleRevision,
+    action: string,
+  ) => `${module.name}:${revision.hash || revision.tag || 'latest'}:${action}`;
+
+  const revisionLabel = (revision: StrategyModuleRevision) => {
+    if (revision.tag) {
+      return revision.tag;
+    }
+    if (revision.version) {
+      return revision.version;
+    }
+    if (revision.hash) {
+      return `${revision.hash.slice(0, 12)}…`;
+    }
+    return 'revision';
+  };
+
+  const handlePromoteRevision = async (
+    module: StrategyModuleSummary,
+    revision: StrategyModuleRevision,
+  ) => {
+    const key = revisionKey(module, revision, 'promote');
+    setRevisionActionBusy(key);
+    try {
+      const selector = buildRevisionSelector(module, revision);
+      const source = await apiClient.getStrategyModuleSource(selector);
+      const payload = {
+        source,
+        name: module.name,
+        promoteLatest: true,
+        ...(revision.tag ? { tag: revision.tag } : {}),
+      };
+      await apiClient.updateStrategyModule(selector, payload);
+      await refreshCatalog({ silent: true, notifySuccess: false });
+      const description = `Revision ${revisionLabel(revision)} promoted to latest.`;
+      showToast({
+        title: 'Tag promoted',
+        description,
+        variant: 'success',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to promote revision';
+      showToast({
+        title: 'Promotion failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setRevisionActionBusy(null);
+      setPromoteTarget(null);
+    }
+  };
+
+  const handleDeleteRevision = async (
+    module: StrategyModuleSummary,
+    revision: StrategyModuleRevision,
+  ) => {
+    const key = revisionKey(module, revision, 'delete');
+    setRevisionActionBusy(key);
+    try {
+      const selector = buildRevisionSelector(module, revision);
+      await apiClient.deleteStrategyModule(selector);
+      await refreshCatalog({ silent: true, notifySuccess: false });
+      showToast({
+        title: 'Revision removed',
+        description: `${module.name} revision ${revisionLabel(revision)} deleted.`,
+        variant: 'success',
+      });
+    } catch (err) {
+      const messageRaw =
+        err instanceof Error ? err.message : 'Failed to delete revision';
+      const message = friendlyDeletionMessage(messageRaw);
+      showToast({
+        title: 'Deletion failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setRevisionActionBusy(null);
+      setRevisionToDelete(null);
+    }
+  };
+
+  const handleAliasSubmit = async () => {
+    if (!aliasDialogTarget) {
+      return;
+    }
+    const alias = aliasValue.trim();
+    if (!alias) {
+      setAliasError('Alias name is required.');
+      return;
+    }
+    if (alias.toLowerCase() === 'latest') {
+      setAliasError('Use “Promote latest” to update the latest alias.');
+      return;
+    }
+    setAliasProcessing(true);
+    setAliasError(null);
+    const { module, revision } = aliasDialogTarget;
+    try {
+      const selector = buildRevisionSelector(module, revision);
+      const source = await apiClient.getStrategyModuleSource(selector);
+      const payload = {
+        source,
+        name: module.name,
+        aliases: [alias],
+        promoteLatest: aliasPromoteLatest,
+        ...(revision.tag ? { tag: revision.tag } : {}),
+      };
+      await apiClient.updateStrategyModule(selector, payload);
+      await refreshCatalog({ silent: true, notifySuccess: false });
+      showToast({
+        title: 'Alias added',
+        description: `Alias ${alias} now points to ${revisionLabel(revision)}.`,
+        variant: 'success',
+      });
+      setAliasDialogTarget(null);
+      setAliasValue('');
+      setAliasPromoteLatest(false);
+      setAliasError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to add alias';
+      setAliasError(message);
+    } finally {
+      setAliasProcessing(false);
     }
   };
 
@@ -510,9 +725,10 @@ export default function StrategyModulesPage() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Display Name</TableHead>
-                  <TableHead>File</TableHead>
+                  <TableHead>Version</TableHead>
+                  <TableHead>Aliases</TableHead>
+                  <TableHead>Latest hash</TableHead>
                   <TableHead>Size</TableHead>
-                  <TableHead>Hash</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -524,19 +740,56 @@ export default function StrategyModulesPage() {
                     </TableCell>
                     <TableCell>{module.metadata.displayName || '—'}</TableCell>
                     <TableCell>
-                      <span className="font-mono text-xs sm:text-sm">{module.file}</span>
+                      {module.version ? (
+                        <Badge variant="outline">{module.version}</Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {Object.entries(module.tagAliases ?? {})
+                          .filter(([tag]) => tag !== 'latest')
+                          .map(([tag]) => (
+                            <Badge key={tag} variant="secondary" className="text-xs">
+                              {tag}
+                            </Badge>
+                          ))}
+                        {Object.keys(module.tagAliases ?? {}).filter((tag) => tag !== 'latest')
+                          .length === 0 ? (
+                            <span className="text-xs text-muted-foreground">No aliases</span>
+                          ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">latest</Badge>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                            onClick={() => copyHash(module.tagAliases?.latest ?? module.hash)}
+                          >
+                            <span className="font-mono">
+                              {(module.tagAliases?.latest ?? module.hash).slice(0, 12)}…
+                            </span>
+                            <Copy className="h-3 w-3" />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">pinned</Badge>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                            onClick={() => copyHash(module.hash)}
+                          >
+                            <span className="font-mono">{module.hash.slice(0, 12)}…</span>
+                            <Copy className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
                     </TableCell>
                     <TableCell>{formatBytes(module.size)}</TableCell>
-                    <TableCell>
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => copyHash(module.hash)}
-                      >
-                        <span className="font-mono">{module.hash.slice(0, 12)}…</span>
-                        <Copy className="h-3 w-3" />
-                      </button>
-                    </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">
                         <Button
@@ -607,7 +860,67 @@ export default function StrategyModulesPage() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid gap-2">
-              <Label htmlFor="strategy-filename">Filename</Label>
+              <Label htmlFor="strategy-name">Strategy name</Label>
+              <Input
+                id="strategy-name"
+                placeholder="grid"
+                value={formData.name}
+                disabled={formMode === 'edit'}
+                onChange={(event) =>
+                  setFormData((prev) => ({ ...prev, name: event.target.value }))
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Provide the canonical strategy identifier. This cannot be changed after creation.
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="strategy-tag">Tag (optional)</Label>
+                <Input
+                  id="strategy-tag"
+                  placeholder="v1.2.0"
+                  value={formData.tag}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, tag: event.target.value }))
+                  }
+                  disabled={formProcessing}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Supply a semantic version or release tag for this revision.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="strategy-aliases">Aliases</Label>
+                <Input
+                  id="strategy-aliases"
+                  placeholder="stable, canary"
+                  value={formData.aliases}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, aliases: event.target.value }))
+                  }
+                  disabled={formProcessing}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Comma-separated alias tags that should resolve to this revision.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="promote-latest"
+                checked={formData.promoteLatest}
+                disabled={formProcessing}
+                onChange={(event) =>
+                  setFormData((prev) => ({ ...prev, promoteLatest: event.target.checked }))
+                }
+              />
+              <Label htmlFor="promote-latest" className="text-sm font-normal">
+                Promote this revision to the <span className="font-semibold">latest</span> tag after save
+              </Label>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="strategy-filename">Filename (optional)</Label>
               <Input
                 id="strategy-filename"
                 placeholder={`example${FILE_EXTENSION_HINT}`}
@@ -618,7 +931,7 @@ export default function StrategyModulesPage() {
                 }
               />
               <p className="text-xs text-muted-foreground">
-                Filenames must end with {FILE_EXTENSION_HINT}. Renaming requires deleting and re-uploading the module.
+                Leave blank to derive a versioned filename from the strategy name and tag. Manual filenames must end with {FILE_EXTENSION_HINT}.
               </p>
             </div>
             <div className="grid gap-2">
@@ -689,6 +1002,13 @@ export default function StrategyModulesPage() {
         onOpenChange={(open) => {
           if (!open) {
             setDetailModule(null);
+            setRevisionToDelete(null);
+            setPromoteTarget(null);
+            setAliasDialogTarget(null);
+            setAliasValue('');
+            setAliasError(null);
+            setAliasPromoteLatest(false);
+            setAliasProcessing(false);
           }
         }}
       >
@@ -700,10 +1020,10 @@ export default function StrategyModulesPage() {
             </DialogDescription>
           </DialogHeader>
           {detailModule ? (
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
                 <h4 className="text-sm font-semibold">Identifiers</h4>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
                     <p className="text-xs text-muted-foreground uppercase">Strategy name</p>
                     <p className="font-mono text-sm">{detailModule.name}</p>
@@ -711,6 +1031,10 @@ export default function StrategyModulesPage() {
                   <div>
                     <p className="text-xs text-muted-foreground uppercase">Module file</p>
                     <p className="font-mono text-sm">{detailModule.file}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase">Version</p>
+                    <p className="font-mono text-sm">{detailModule.version || '—'}</p>
                   </div>
                 </div>
               </div>
@@ -729,6 +1053,147 @@ export default function StrategyModulesPage() {
                     {formatBytes(detailModule.size)}
                   </span>
                 </div>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold">Tag aliases</h4>
+                <div className="mt-2 space-y-2">
+                  {Object.entries(detailModule.tagAliases ?? {}).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No tag aliases defined.</p>
+                  ) : (
+                    Object.entries(detailModule.tagAliases ?? {}).map(([tag, hash]) => (
+                      <div
+                        key={tag}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Badge variant={tag === 'latest' ? 'default' : 'secondary'}>{tag}</Badge>
+                          <span className="font-mono">{hash}</span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2"
+                          onClick={() => copyHash(hash)}
+                        >
+                          <Copy className="mr-1 h-3 w-3" /> Copy
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold">Revision history</h4>
+                {detailModule.revisions && detailModule.revisions.length > 0 ? (
+                  <div className="mt-2 overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Tag / version</TableHead>
+                          <TableHead>Hash</TableHead>
+                          <TableHead>Size</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {detailModule.revisions.map((revision) => {
+                          const promoteBusy =
+                            revisionActionBusy === revisionKey(detailModule, revision, 'promote');
+                          const deleteBusy =
+                            revisionActionBusy === revisionKey(detailModule, revision, 'delete');
+                          return (
+                            <TableRow key={`${revision.hash}-${revision.tag ?? 'untagged'}`}>
+                              <TableCell>
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {revision.tag ? (
+                                      <Badge variant="secondary">{revision.tag}</Badge>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">—</span>
+                                    )}
+                                    {revision.version && revision.version !== revision.tag ? (
+                                      <Badge variant="outline">{revision.version}</Badge>
+                                    ) : null}
+                                  </div>
+                                  <p className="text-xs text-muted-foreground">
+                                    {revision.path || '—'}
+                                  </p>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                  onClick={() => copyHash(revision.hash)}
+                                >
+                                  <span className="font-mono">{revision.hash.slice(0, 18)}…</span>
+                                  <Copy className="h-3 w-3" />
+                                </button>
+                              </TableCell>
+                              <TableCell>{formatBytes(revision.size)}</TableCell>
+                              <TableCell>
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      setPromoteTarget({ module: detailModule, revision })
+                                    }
+                                    disabled={promoteBusy || deleteBusy}
+                                    className="h-8 px-2"
+                                  >
+                                    {promoteBusy ? (
+                                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <ArrowUpCircle className="mr-1 h-3 w-3" />
+                                    )}
+                                    Promote
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-2"
+                                    onClick={() => {
+                                      setAliasDialogTarget({ module: detailModule, revision });
+                                      setAliasValue('');
+                                      setAliasPromoteLatest(false);
+                                      setAliasError(null);
+                                    }}
+                                    disabled={deleteBusy}
+                                  >
+                                    <Tag className="mr-1 h-3 w-3" /> Alias
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-2 text-destructive"
+                                    onClick={() => setRevisionToDelete({ module: detailModule, revision })}
+                                    disabled={deleteBusy || promoteBusy}
+                                  >
+                                    {deleteBusy ? (
+                                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="mr-1 h-3 w-3" />
+                                    )}
+                                    Delete
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    No revision history available for this strategy yet.
+                  </p>
+                )}
               </div>
               {detailModule.metadata.description ? (
                 <div>
@@ -859,6 +1324,140 @@ export default function StrategyModulesPage() {
         loading={deleting}
         onConfirm={() => void handleDelete()}
       />
+      <ConfirmDialog
+        open={Boolean(revisionToDelete)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRevisionToDelete(null);
+          }
+        }}
+        title="Delete revision"
+        description={
+          revisionToDelete ? (
+            <span>
+              Are you sure you want to delete revision{' '}
+              <span className="font-semibold">
+                {revisionLabel(revisionToDelete.revision)}
+              </span>{' '}
+              for <span className="font-semibold">{revisionToDelete.module.name}</span>?
+            </span>
+          ) : undefined
+        }
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        loading={Boolean(
+          revisionToDelete &&
+            revisionActionBusy ===
+              revisionKey(revisionToDelete.module, revisionToDelete.revision, 'delete'),
+        )}
+        onConfirm={() =>
+          revisionToDelete
+            ? void handleDeleteRevision(revisionToDelete.module, revisionToDelete.revision)
+            : undefined
+        }
+      />
+      <ConfirmDialog
+        open={Boolean(promoteTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPromoteTarget(null);
+          }
+        }}
+        title="Promote revision to latest"
+        description={
+          promoteTarget ? (
+            <span>
+              Move the <span className="font-semibold">latest</span> tag to revision{' '}
+              <span className="font-semibold">{revisionLabel(promoteTarget.revision)}</span>?
+            </span>
+          ) : undefined
+        }
+        confirmLabel="Promote"
+        confirmVariant="default"
+        loading={Boolean(
+          promoteTarget &&
+            revisionActionBusy ===
+              revisionKey(promoteTarget.module, promoteTarget.revision, 'promote'),
+        )}
+        onConfirm={() =>
+          promoteTarget
+            ? void handlePromoteRevision(promoteTarget.module, promoteTarget.revision)
+            : undefined
+        }
+      />
+      <Dialog
+        open={Boolean(aliasDialogTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAliasDialogTarget(null);
+            setAliasValue('');
+            setAliasPromoteLatest(false);
+            setAliasError(null);
+            setAliasProcessing(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add alias</DialogTitle>
+            <DialogDescription>
+              Point an additional tag to revision{' '}
+              {aliasDialogTarget ? revisionLabel(aliasDialogTarget.revision) : ''}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="revision-alias">Alias name</Label>
+              <Input
+                id="revision-alias"
+                value={aliasValue}
+                onChange={(event) => {
+                  setAliasValue(event.target.value);
+                  setAliasError(null);
+                }}
+                placeholder="stable"
+                disabled={aliasProcessing}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="alias-promote-latest"
+                checked={aliasPromoteLatest}
+                onChange={(event) => setAliasPromoteLatest(event.target.checked)}
+                disabled={aliasProcessing}
+              />
+              <Label htmlFor="alias-promote-latest" className="text-sm font-normal">
+                Promote to <span className="font-semibold">latest</span> after assigning this alias
+              </Label>
+            </div>
+            {aliasError ? (
+              <p className="text-sm text-destructive">{aliasError}</p>
+            ) : null}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setAliasDialogTarget(null);
+                setAliasValue('');
+                setAliasPromoteLatest(false);
+                setAliasError(null);
+              }}
+              disabled={aliasProcessing}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleAliasSubmit()}
+              disabled={aliasProcessing}
+            >
+              {aliasProcessing ? 'Saving…' : 'Save alias'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
