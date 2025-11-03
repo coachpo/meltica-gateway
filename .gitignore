@@ -55,3 +55,6 @@ coverage/
 !web/**/*
 web/node_modules
 web/.next
+
+# Strategies
+!strategies/**/*
