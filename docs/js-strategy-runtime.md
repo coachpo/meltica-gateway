@@ -154,3 +154,28 @@ This guarantees repository CI exercises the Goja strategy path end-to-end.
 - **Error handling**: Exceptions thrown within JS handlers bubble out of Goja; the bridge logs them through `Strategy.logError` along with the strategy name and method.
 
 With these changes, strategies can be edited, hot-loaded, and iterated without recompiling the Go binaries. Use the helper surface to integrate JS logic cleanly with Go infrastructure, and leverage the REST endpoints for lifecycle management.
+
+---
+
+## Capabilities & Limitations of JavaScript Strategies
+
+### What You Can Do
+
+- **Access runtime context** through the injected helpers:
+  - Query trading status, providers, market state, and prices.
+  - Submit market or limit orders via the bridge.
+  - Use logging and sleep utilities in Goja.
+- **Maintain arbitrary in-memory state** inside the module (arrays, objects, timers).
+- **Implement any business logic** expressible in ECMAScript 5.1+ (Goja’s supported subset), including deterministic math, state machines, and orchestration based on events.
+- **Share code via CommonJS patterns** (e.g., require) as long as you bundle the modules in the strategy directory and load them before refresh.
+
+### What You Cannot Do (Current Limitations)
+
+- **No direct access to Go libraries** beyond the exposed helper surface. You cannot import Go packages or call arbitrary Go functions from JS.
+- **Limited standard library**: Goja implements ES5.1 (+ some ES6). Features like `fetch`, `setTimeout`, or Node.js APIs are not available unless explicitly polyfilled.
+- **No built-in I/O or network access**: the runtime executes inside the Go process without direct filesystem, network, or database connectors. If you need database access, you must expose that functionality via additional Go helpers; the JS module itself cannot open network connections or sockets.
+- **Synchronous execution only**: the helper bridge runs callbacks on a single goroutine queue; long-running/blocking operations inside JS will stall other handlers. Use the provided `helpers.sleep` for delays instead of busy waits.
+- **Resource isolation**: each strategy runs in its own Goja VM, but shares the process heap. Avoid unbounded memory growth; the runtime does not enforce per-strategy memory limits.
+- **No automatic versioning or sandboxing** out of the box—strategy promotions and tagging must be handled externally (see the strategy versioning plan for a proposed upgrade).
+
+If you need capabilities outside this surface (e.g., database CRUD, REST calls), expose them as Go helper functions in the bridge—take care to keep them deterministic and to manage blocking semantics so that strategy handlers remain responsive.
