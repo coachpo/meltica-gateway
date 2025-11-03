@@ -17,6 +17,10 @@ type LambdaManifest struct {
 type LambdaStrategySpec struct {
 	Identifier string         `yaml:"identifier" json:"identifier"`
 	Config     map[string]any `yaml:"config" json:"config"`
+	Selector   string         `yaml:"-" json:"selector,omitempty"`
+	Tag        string         `yaml:"-" json:"tag,omitempty"`
+	Hash       string         `yaml:"-" json:"hash,omitempty"`
+	Version    string         `yaml:"-" json:"version,omitempty"`
 }
 
 func (s *LambdaStrategySpec) normalize() {
@@ -27,6 +31,10 @@ func (s *LambdaStrategySpec) normalize() {
 	if s.Config == nil {
 		s.Config = make(map[string]any)
 	}
+	s.Selector = strings.TrimSpace(s.Selector)
+	s.Tag = strings.TrimSpace(s.Tag)
+	s.Hash = strings.TrimSpace(s.Hash)
+	s.Version = strings.TrimSpace(s.Version)
 }
 
 // Normalize applies canonical formatting to the strategy definition.

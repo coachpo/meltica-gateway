@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/coachpo/meltica/internal/app/lambda/js"
 	"github.com/coachpo/meltica/internal/infra/config"
 )
 
@@ -80,7 +81,7 @@ func TestManagerRefreshJavaScriptStrategies(t *testing.T) {
 	}
 
 	updatedSource := strings.ReplaceAll(initialSource, "Alpha v1", "Alpha v2")
-	if err := mgr.UpsertStrategy("alpha.js", []byte(updatedSource)); err != nil {
+	if _, err := mgr.UpsertStrategy([]byte(updatedSource), js.ModuleWriteOptions{Filename: "alpha.js"}); err != nil {
 		t.Fatalf("UpsertStrategy: %v", err)
 	}
 
@@ -125,6 +126,74 @@ func baseLambdaSpec() config.LambdaSpec {
 }
 
 func TestManagerUpdateImmutableFields(t *testing.T) {
+	t.Run("strategy selector resolution", func(t *testing.T) {
+		mgr := newTestManager(t)
+		resolution, err := mgr.jsLoader.ResolveReference("delay")
+		if err != nil {
+			t.Fatalf("resolve delay: %v", err)
+		}
+		hash := resolution.Hash
+
+		testCases := []struct {
+			id         string
+			identifier string
+			expectTag  string
+			expectSel  string
+		}{
+			{
+				id:         "delay-default",
+				identifier: "delay",
+				expectTag:  "latest",
+				expectSel:  "delay",
+			},
+			{
+				id:         "delay-tag",
+				identifier: "delay:v1.0.0",
+				expectTag:  "v1.0.0",
+				expectSel:  "delay:v1.0.0",
+			},
+			{
+				id:         "delay-hash",
+				identifier: "delay@" + hash,
+				expectTag:  "",
+				expectSel:  "delay@" + hash,
+			},
+		}
+
+		for _, tc := range testCases {
+			spec := config.LambdaSpec{
+				ID: tc.id,
+				Strategy: config.LambdaStrategySpec{
+					Identifier: tc.identifier,
+					Config:     map[string]any{},
+				},
+				ProviderSymbols: map[string]config.ProviderSymbols{
+					"mock": {Symbols: []string{"BTC-USDT"}},
+				},
+				Providers: []string{"mock"},
+			}
+			if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
+				t.Fatalf("%s: StartFromManifest: %v", tc.id, err)
+			}
+			stored, err := mgr.specForID(tc.id)
+			if err != nil {
+				t.Fatalf("%s: specForID: %v", tc.id, err)
+			}
+			if stored.Strategy.Hash == "" {
+				t.Fatalf("%s: expected hash resolution", tc.id)
+			}
+			if tc.expectTag != "" && stored.Strategy.Tag != tc.expectTag {
+				t.Fatalf("%s: expected tag %s, got %s", tc.id, tc.expectTag, stored.Strategy.Tag)
+			}
+			if tc.expectSel != "" && stored.Strategy.Selector != tc.expectSel {
+				t.Fatalf("%s: expected selector %s, got %s", tc.id, tc.expectSel, stored.Strategy.Selector)
+			}
+			if tc.identifier == "delay@"+hash && stored.Strategy.Hash != hash {
+				t.Fatalf("%s: expected hash %s, got %s", tc.id, hash, stored.Strategy.Hash)
+			}
+		}
+	})
+
 	t.Run("strategy immutable", func(t *testing.T) {
 		mgr := newTestManager(t)
 		spec := baseLambdaSpec()
@@ -188,4 +257,32 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 			t.Fatalf("expected updated logger_prefix, got %v", snapshot.Strategy.Config["logger_prefix"])
 		}
 	})
+}
+
+func TestRemoveStrategyGuardedWhenHashInUse(t *testing.T) {
+	mgr := newTestManager(t)
+	spec := config.LambdaSpec{
+		ID: "guarded",
+		Strategy: config.LambdaStrategySpec{
+			Identifier: "logging",
+			Config:     map[string]any{},
+		},
+		ProviderSymbols: map[string]config.ProviderSymbols{
+			"mock": {Symbols: []string{"BTC-USDT"}},
+		},
+		Providers: []string{"mock"},
+	}
+	if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
+		t.Fatalf("StartFromManifest: %v", err)
+	}
+	stored, err := mgr.specForID("guarded")
+	if err != nil {
+		t.Fatalf("specForID: %v", err)
+	}
+	if err := mgr.RemoveStrategy("logging@" + stored.Strategy.Hash); err == nil {
+		t.Fatalf("expected removal to fail for hash in use")
+	}
+	if err := mgr.RemoveStrategy("logging"); err == nil {
+		t.Fatalf("expected removal to fail for strategy in use")
+	}
 }

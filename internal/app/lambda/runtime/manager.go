@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -164,6 +166,15 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 	if err != nil {
 		return nil, fmt.Errorf("lambda manager: create loader: %w", err)
 	}
+	if cfg.Strategies.RequireRegistry {
+		registryPath := filepath.Join(loader.Root(), "registry.json")
+		if _, err := os.Stat(registryPath); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("lambda manager: registry required but %s missing", registryPath)
+			}
+			return nil, fmt.Errorf("lambda manager: check registry: %w", err)
+		}
+	}
 
 	mgr := &Manager{
 		mu:           sync.RWMutex{},
@@ -252,18 +263,79 @@ func (m *Manager) ApplyRiskConfig(cfg config.RiskConfig) risk.Limits {
 
 // RefreshJavaScriptStrategies reloads JavaScript modules and restarts affected instances.
 func (m *Manager) RefreshJavaScriptStrategies(ctx context.Context) error {
-	previous := m.currentDynamicSet()
-	running := m.instanceIDsForStrategies(previous)
-
-	newSet, err := m.installJavaScriptStrategies(ctx)
-	if err != nil {
+	if _, err := m.installJavaScriptStrategies(ctx); err != nil {
 		return err
 	}
-	m.stopInstances(running)
-	if newSet == nil {
-		newSet = map[string]struct{}{}
+	selections := m.snapshotStrategySelections()
+	if len(selections) == 0 {
+		return nil
 	}
-	m.restartInstances(ctx, running, newSet)
+
+	dynamicSet := m.currentDynamicSet()
+	updates := make(map[string]config.LambdaSpec)
+	var restartIDs []string
+	var stopOnly []string
+
+	for id, selection := range selections {
+		spec := selection.Spec
+		name := strings.ToLower(strings.TrimSpace(spec.Strategy.Identifier))
+		if _, ok := dynamicSet[name]; !ok && spec.Strategy.Hash == "" {
+			continue
+		}
+		selector := spec.Strategy.Selector
+		if selector == "" {
+			selector = spec.Strategy.Identifier
+		}
+		if selector == "" || m.jsLoader == nil {
+			continue
+		}
+		resolution, err := m.jsLoader.ResolveReference(selector)
+		if err != nil {
+			stopOnly = append(stopOnly, id)
+			continue
+		}
+		oldHash := spec.Strategy.Hash
+		spec.Strategy.Identifier = resolution.Name
+		spec.Strategy.Hash = resolution.Hash
+		spec.Strategy.Tag = resolution.Tag
+		spec.Strategy.Version = resolution.Module.Version
+		spec.Strategy.Selector = canonicalSelector(selector, resolution)
+		updates[id] = spec
+
+		if selection.Running && oldHash != resolution.Hash {
+			restartIDs = append(restartIDs, id)
+		}
+	}
+
+	if len(updates) > 0 {
+		m.mu.Lock()
+		for id, updated := range updates {
+			m.specs[id] = cloneSpec(updated)
+		}
+		m.mu.Unlock()
+	}
+
+	for _, id := range restartIDs {
+		if err := m.Stop(id); err != nil && !errors.Is(err, ErrInstanceNotRunning) {
+			if m.logger != nil {
+				m.logger.Printf("stop strategy %s: %v", id, err)
+			}
+		}
+	}
+	for _, id := range restartIDs {
+		if err := m.Start(ctx, id); err != nil && m.logger != nil {
+			if !errors.Is(err, ErrInstanceAlreadyRunning) {
+				m.logger.Printf("restart strategy %s: %v", id, err)
+			}
+		}
+	}
+	for _, id := range stopOnly {
+		if err := m.Stop(id); err != nil && !errors.Is(err, ErrInstanceNotRunning) {
+			if m.logger != nil {
+				m.logger.Printf("stop strategy %s: %v", id, err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -349,60 +421,6 @@ func (m *Manager) currentDynamicSet() map[string]struct{} {
 	return copyStringSet(m.dynamic)
 }
 
-func (m *Manager) instanceIDsForStrategies(names map[string]struct{}) []string {
-	if len(names) == 0 {
-		return nil
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	ids := make([]string, 0)
-	for id := range m.instances {
-		spec, ok := m.specs[id]
-		if !ok {
-			continue
-		}
-		strategyName := strings.ToLower(strings.TrimSpace(spec.Strategy.Identifier))
-		if _, ok := names[strategyName]; ok {
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
-
-func (m *Manager) stopInstances(ids []string) {
-	for _, id := range ids {
-		if err := m.Stop(id); err != nil && !errors.Is(err, ErrInstanceNotRunning) {
-			if m.logger != nil {
-				m.logger.Printf("stop strategy %s: %v", id, err)
-			}
-		}
-	}
-}
-
-func (m *Manager) restartInstances(ctx context.Context, ids []string, available map[string]struct{}) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	for _, id := range ids {
-		spec, err := m.specForID(id)
-		if err != nil {
-			if m.logger != nil {
-				m.logger.Printf("restart strategy %s: spec lookup failed: %v", id, err)
-			}
-			continue
-		}
-		name := strings.ToLower(strings.TrimSpace(spec.Strategy.Identifier))
-		if _, ok := available[name]; !ok {
-			continue
-		}
-		if err := m.Start(ctx, id); err != nil {
-			if m.logger != nil && !errors.Is(err, ErrInstanceAlreadyRunning) {
-				m.logger.Printf("restart strategy %s: %v", id, err)
-			}
-		}
-	}
-}
-
 // StrategyCatalog returns all available strategy metadata.
 func (m *Manager) StrategyCatalog() []strategies.Metadata {
 	m.mu.RLock()
@@ -458,6 +476,39 @@ func (m *Manager) ensureSpec(spec config.LambdaSpec, allowReplace bool) error {
 	if spec.Strategy.Config == nil {
 		spec.Strategy.Config = make(map[string]any)
 	}
+
+	rawIdentifier := strings.TrimSpace(spec.Strategy.Identifier)
+	baseName := strings.ToLower(rawIdentifier)
+	requireResolution := strings.ContainsAny(rawIdentifier, ":@")
+	if !requireResolution {
+		if current := m.currentDynamicSet(); len(current) > 0 {
+			if _, ok := current[baseName]; ok {
+				requireResolution = true
+			}
+		}
+	}
+
+	if requireResolution {
+		if m.jsLoader == nil {
+			return fmt.Errorf("strategy loader unavailable")
+		}
+		res, err := m.jsLoader.ResolveReference(rawIdentifier)
+		if err != nil {
+			return err
+		}
+		spec.Strategy.Identifier = res.Name
+		spec.Strategy.Hash = res.Hash
+		spec.Strategy.Tag = res.Tag
+		spec.Strategy.Version = res.Module.Version
+		spec.Strategy.Selector = canonicalSelector(rawIdentifier, res)
+	} else {
+		spec.Strategy.Identifier = strings.ToLower(rawIdentifier)
+		spec.Strategy.Selector = spec.Strategy.Identifier
+		spec.Strategy.Hash = ""
+		spec.Strategy.Tag = ""
+		spec.Strategy.Version = ""
+	}
+
 	name := strings.ToLower(strings.TrimSpace(spec.Strategy.Identifier))
 	if _, ok := m.strategies[name]; !ok {
 		return fmt.Errorf("strategy %q not registered", spec.Strategy.Identifier)
@@ -509,7 +560,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 		return nil, nil, nil, fmt.Errorf("strategy %s: no valid providers resolved", spec.ID)
 	}
 
-	strategy, err := m.buildStrategy(spec.Strategy.Identifier, spec.Strategy.Config)
+	strategy, err := m.buildStrategy(spec.Strategy)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("strategy %s: %w", spec.ID, err)
 	}
@@ -652,6 +703,10 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 type InstanceSummary struct {
 	ID                 string   `json:"id"`
 	StrategyIdentifier string   `json:"strategyIdentifier"`
+	StrategyTag        string   `json:"strategyTag,omitempty"`
+	StrategyHash       string   `json:"strategyHash,omitempty"`
+	StrategyVersion    string   `json:"strategyVersion,omitempty"`
+	StrategySelector   string   `json:"strategySelector,omitempty"`
 	Providers          []string `json:"providers"`
 	AggregatedSymbols  []string `json:"aggregatedSymbols"`
 	Running            bool     `json:"running"`
@@ -705,6 +760,10 @@ func summaryOf(spec config.LambdaSpec, running bool) InstanceSummary {
 	return InstanceSummary{
 		ID:                 spec.ID,
 		StrategyIdentifier: spec.Strategy.Identifier,
+		StrategyTag:        spec.Strategy.Tag,
+		StrategyHash:       spec.Strategy.Hash,
+		StrategyVersion:    spec.Strategy.Version,
+		StrategySelector:   spec.Strategy.Selector,
 		Providers:          providers,
 		AggregatedSymbols:  aggregated,
 		Running:            running,
@@ -717,8 +776,15 @@ func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
 	assignments := cloneProviderSymbols(spec.ProviderSymbols)
 	aggregated := spec.AllSymbols()
 	return InstanceSnapshot{
-		ID:                spec.ID,
-		Strategy:          config.LambdaStrategySpec{Identifier: spec.Strategy.Identifier, Config: strategyConfig},
+		ID: spec.ID,
+		Strategy: config.LambdaStrategySpec{
+			Identifier: spec.Strategy.Identifier,
+			Config:     strategyConfig,
+			Selector:   spec.Strategy.Selector,
+			Tag:        spec.Strategy.Tag,
+			Hash:       spec.Strategy.Hash,
+			Version:    spec.Strategy.Version,
+		},
 		Providers:         providers,
 		ProviderSymbols:   assignments,
 		AggregatedSymbols: aggregated,
@@ -780,12 +846,32 @@ func closeStrategy(strat core.TradingStrategy) {
 	}
 }
 
-func (m *Manager) buildStrategy(name string, cfg map[string]any) (core.TradingStrategy, error) {
-	def, ok := m.strategies[strings.ToLower(strings.TrimSpace(name))]
-	if !ok {
-		return nil, fmt.Errorf("strategy %q not registered", name)
+func (m *Manager) buildStrategy(spec config.LambdaStrategySpec) (core.TradingStrategy, error) {
+	name := strings.ToLower(strings.TrimSpace(spec.Identifier))
+	if name == "" {
+		return nil, fmt.Errorf("strategy identifier required")
 	}
-	return def.factory(copyMap(cfg))
+	if spec.Hash != "" && m.jsLoader != nil {
+		module, err := m.jsLoader.Get(spec.Hash)
+		if err != nil {
+			if errors.Is(err, js.ErrModuleNotFound) {
+				return nil, fmt.Errorf("strategy %s: revision %s unavailable", name, spec.Hash)
+			}
+			return nil, fmt.Errorf("strategy %s: %w", name, err)
+		}
+		if module == nil {
+			return nil, fmt.Errorf("strategy %s: revision %s unavailable", name, spec.Hash)
+		}
+		if !strings.EqualFold(module.Name, name) {
+			return nil, fmt.Errorf("strategy %s: revision %s belongs to %s", name, spec.Hash, module.Name)
+		}
+		return js.NewStrategy(module, spec.Config, m.logger)
+	}
+	def, ok := m.strategies[name]
+	if !ok {
+		return nil, fmt.Errorf("strategy %q not registered", spec.Identifier)
+	}
+	return def.factory(copyMap(spec.Config))
 }
 
 func sanitizeSpec(spec config.LambdaSpec) config.LambdaSpec {
@@ -802,6 +888,10 @@ func sanitizeSpec(spec config.LambdaSpec) config.LambdaSpec {
 func cloneSpec(spec config.LambdaSpec) config.LambdaSpec {
 	clone := spec
 	clone.Strategy.Config = copyMap(spec.Strategy.Config)
+	clone.Strategy.Selector = spec.Strategy.Selector
+	clone.Strategy.Tag = spec.Strategy.Tag
+	clone.Strategy.Hash = spec.Strategy.Hash
+	clone.Strategy.Version = spec.Strategy.Version
 	clone.Providers = append([]string(nil), spec.Providers...)
 	clone.ProviderSymbols = cloneProviderSymbols(spec.ProviderSymbols)
 	return clone
@@ -843,6 +933,43 @@ func copyStringSet(src map[string]struct{}) map[string]struct{} {
 	return dst
 }
 
+type strategySelection struct {
+	Spec    config.LambdaSpec
+	Running bool
+}
+
+func (m *Manager) snapshotStrategySelections() map[string]strategySelection {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]strategySelection, len(m.specs))
+	for id, spec := range m.specs {
+		_, running := m.instances[id]
+		out[id] = strategySelection{
+			Spec:    cloneSpec(spec),
+			Running: running,
+		}
+	}
+	return out
+}
+
+func canonicalSelector(raw string, res js.ModuleResolution) string {
+	name := strings.ToLower(strings.TrimSpace(res.Name))
+	if name == "" {
+		name = strings.ToLower(strings.TrimSpace(raw))
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return name
+	}
+	if strings.Contains(trimmed, "@") && res.Hash != "" {
+		return fmt.Sprintf("%s@%s", name, res.Hash)
+	}
+	if strings.Contains(trimmed, ":") && res.Tag != "" {
+		return fmt.Sprintf("%s:%s", name, res.Tag)
+	}
+	return name
+}
+
 // StrategyModules returns metadata for the currently loaded JavaScript strategy modules.
 func (m *Manager) StrategyModules() []js.ModuleSummary {
 	if m == nil || m.jsLoader == nil {
@@ -875,15 +1002,26 @@ func (m *Manager) StrategySource(name string) ([]byte, error) {
 	return source, nil
 }
 
-// UpsertStrategy writes or replaces a JavaScript strategy file.
-func (m *Manager) UpsertStrategy(filename string, source []byte) error {
+// UpsertStrategy writes or replaces a JavaScript strategy module.
+func (m *Manager) UpsertStrategy(source []byte, opts js.ModuleWriteOptions) (js.ModuleResolution, error) {
 	if m == nil || m.jsLoader == nil {
-		return fmt.Errorf("strategy loader unavailable")
+		return js.ModuleResolution{}, fmt.Errorf("strategy loader unavailable")
+	}
+	resolution, err := m.jsLoader.Store(source, opts)
+	if err == nil {
+		return resolution, nil
+	}
+	if !errors.Is(err, js.ErrRegistryUnavailable) {
+		return js.ModuleResolution{}, fmt.Errorf("strategy upsert: %w", err)
+	}
+	filename := opts.Filename
+	if strings.TrimSpace(filename) == "" {
+		filename = "strategy.js"
 	}
 	if err := m.jsLoader.Write(filename, source); err != nil {
-		return fmt.Errorf("strategy upsert %q: %w", filename, err)
+		return js.ModuleResolution{}, fmt.Errorf("strategy upsert %q: %w", filename, err)
 	}
-	return nil
+	return js.ModuleResolution{}, nil
 }
 
 // RemoveStrategy deletes the JavaScript strategy file by name.
@@ -891,7 +1029,31 @@ func (m *Manager) RemoveStrategy(name string) error {
 	if m == nil || m.jsLoader == nil {
 		return js.ErrModuleNotFound
 	}
-	if err := m.jsLoader.Delete(name); err != nil {
+
+	selector := strings.TrimSpace(name)
+	if selector == "" {
+		return fmt.Errorf("strategy remove: selector required")
+	}
+
+	var (
+		inUseErr error
+	)
+	if strings.ContainsAny(selector, "@:") {
+		resolution, err := m.jsLoader.ResolveReference(selector)
+		if err != nil {
+			return fmt.Errorf("strategy remove %q: %w", selector, err)
+		}
+		if resolution.Hash != "" && m.hashInUse(resolution.Hash) {
+			inUseErr = fmt.Errorf("strategy revision %s is in use", resolution.Hash)
+		}
+	} else if m.strategyInUse(selector) {
+		inUseErr = fmt.Errorf("strategy %s is in use by running instances", selector)
+	}
+	if inUseErr != nil {
+		return inUseErr
+	}
+
+	if err := m.jsLoader.Delete(selector); err != nil {
 		return fmt.Errorf("strategy remove %q: %w", name, err)
 	}
 	return nil
@@ -903,6 +1065,36 @@ func (m *Manager) StrategyDirectory() string {
 		return ""
 	}
 	return m.strategyDir
+}
+
+func (m *Manager) strategyInUse(name string) bool {
+	if name == "" {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(name))
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, spec := range m.specs {
+		if strings.EqualFold(spec.Strategy.Identifier, lower) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Manager) hashInUse(hash string) bool {
+	if hash == "" {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(hash))
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, spec := range m.specs {
+		if strings.EqualFold(spec.Strategy.Hash, normalized) {
+			return true
+		}
+	}
+	return false
 }
 
 func providerInstrumentField(provider string) string {

@@ -15,6 +15,7 @@ type ConfigField struct {
 // Metadata captures descriptive information about a strategy.
 type Metadata struct {
 	Name        string             `json:"name"`
+	Version     string             `json:"version,omitempty"`
 	DisplayName string             `json:"displayName"`
 	Description string             `json:"description,omitempty"`
 	Config      []ConfigField      `json:"config"`

@@ -110,3 +110,33 @@ func TestLambdaManifestSingleSymbolAssignment(t *testing.T) {
 		t.Fatalf("unexpected symbols for binance: %+v", normalized.SymbolsForProvider("binance"))
 	}
 }
+
+func TestLambdaStrategySpecNormalizeTrimsSelectors(t *testing.T) {
+	spec := LambdaStrategySpec{
+		Identifier: " delay ",
+		Config:     nil,
+		Selector:   " delay:v1.0.0 ",
+		Tag:        " v1.0.0 ",
+		Hash:       " SHA256:ABC ",
+		Version:    " 1.0.0 ",
+	}
+	spec.Normalize()
+	if spec.Identifier != "delay" {
+		t.Fatalf("expected identifier normalized, got %q", spec.Identifier)
+	}
+	if spec.Selector != "delay:v1.0.0" {
+		t.Fatalf("expected selector trimmed, got %q", spec.Selector)
+	}
+	if spec.Tag != "v1.0.0" {
+		t.Fatalf("expected tag trimmed, got %q", spec.Tag)
+	}
+	if spec.Hash != "SHA256:ABC" {
+		t.Fatalf("expected hash trimmed, got %q", spec.Hash)
+	}
+	if spec.Version != "1.0.0" {
+		t.Fatalf("expected version trimmed, got %q", spec.Version)
+	}
+	if spec.Config == nil {
+		t.Fatalf("expected config map initialized")
+	}
+}

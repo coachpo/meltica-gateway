@@ -103,6 +103,8 @@ Introduce Docker-style version semantics:
 - Stage the change with real strategy directories to ensure registry parsing, refresh, and pinning work as intended.
 - Communicate rollout expectations: how operators tag new builds, promote `latest`, and roll back by selecting older hashes.
 
-## Summary
+## Summary & Rollout Resources
 
 This plan keeps the existing JS loader pipeline intact while layering Docker-like semantics on top: friendly tags for deployment workflows, content hashes for reproducibility, and registry tooling to keep the two in sync. Once implemented, operators can roll out new strategies via tag promotions, pin running instances to precise hashes, and audit which code version is live across the fleet.
+
+See [`docs/strategy-versioning-rollout.md`](strategy-versioning-rollout.md) for the end-to-end migration and operations playbook.

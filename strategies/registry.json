@@ -1,0 +1,86 @@
+{
+  "delay": {
+    "tags": {
+      "latest": "sha256:4e97e0da079895024abf8d47e0701ebf342735b61280f73f6a630b032cac6234",
+      "v1.0.0": "sha256:4e97e0da079895024abf8d47e0701ebf342735b61280f73f6a630b032cac6234"
+    },
+    "hashes": {
+      "sha256:4e97e0da079895024abf8d47e0701ebf342735b61280f73f6a630b032cac6234": {
+        "tag": "v1.0.0",
+        "path": "delay/v1.0.0/delay.js"
+      }
+    }
+  },
+  "logging": {
+    "tags": {
+      "latest": "sha256:175e2ae2018813840af9ccb8eab74bed757dba38c3812cb4f1478a56c7099224",
+      "v1.0.0": "sha256:175e2ae2018813840af9ccb8eab74bed757dba38c3812cb4f1478a56c7099224"
+    },
+    "hashes": {
+      "sha256:175e2ae2018813840af9ccb8eab74bed757dba38c3812cb4f1478a56c7099224": {
+        "tag": "v1.0.0",
+        "path": "logging/v1.0.0/logging.js"
+      }
+    }
+  },
+  "momentum": {
+    "tags": {
+      "latest": "sha256:243dcc31ebfa98faafaa8098e5b2f676191ecdbf1f9dc2bb083abc4ee493b955",
+      "v1.0.0": "sha256:243dcc31ebfa98faafaa8098e5b2f676191ecdbf1f9dc2bb083abc4ee493b955"
+    },
+    "hashes": {
+      "sha256:243dcc31ebfa98faafaa8098e5b2f676191ecdbf1f9dc2bb083abc4ee493b955": {
+        "tag": "v1.0.0",
+        "path": "momentum/v1.0.0/momentum.js"
+      }
+    }
+  },
+  "meanreversion": {
+    "tags": {
+      "latest": "sha256:5f3966bec09c7115ac62645c16282d34f2ed53118e822080a3082b22e29891cf",
+      "v1.0.0": "sha256:5f3966bec09c7115ac62645c16282d34f2ed53118e822080a3082b22e29891cf"
+    },
+    "hashes": {
+      "sha256:5f3966bec09c7115ac62645c16282d34f2ed53118e822080a3082b22e29891cf": {
+        "tag": "v1.0.0",
+        "path": "meanreversion/v1.0.0/meanreversion.js"
+      }
+    }
+  },
+  "grid": {
+    "tags": {
+      "latest": "sha256:5f41c95e1edf674561de3aa3badcdc7f168f6d29e8c889fbe3daf3a0e1672737",
+      "v1.0.0": "sha256:5f41c95e1edf674561de3aa3badcdc7f168f6d29e8c889fbe3daf3a0e1672737"
+    },
+    "hashes": {
+      "sha256:5f41c95e1edf674561de3aa3badcdc7f168f6d29e8c889fbe3daf3a0e1672737": {
+        "tag": "v1.0.0",
+        "path": "grid/v1.0.0/grid.js"
+      }
+    }
+  },
+  "marketmaking": {
+    "tags": {
+      "latest": "sha256:0b14c66189bbd64a73d16f78e75b7eaedc319f4aa256e3e9b5457067fe22d467",
+      "v1.0.0": "sha256:0b14c66189bbd64a73d16f78e75b7eaedc319f4aa256e3e9b5457067fe22d467"
+    },
+    "hashes": {
+      "sha256:0b14c66189bbd64a73d16f78e75b7eaedc319f4aa256e3e9b5457067fe22d467": {
+        "tag": "v1.0.0",
+        "path": "marketmaking/v1.0.0/marketmaking.js"
+      }
+    }
+  },
+  "noop": {
+    "tags": {
+      "latest": "sha256:f14c7cdb4239ad27dd83cb06fc03f589b2aaed4a2875c4314922cfb87d0b5b42",
+      "v1.0.0": "sha256:f14c7cdb4239ad27dd83cb06fc03f589b2aaed4a2875c4314922cfb87d0b5b42"
+    },
+    "hashes": {
+      "sha256:f14c7cdb4239ad27dd83cb06fc03f589b2aaed4a2875c4314922cfb87d0b5b42": {
+        "tag": "v1.0.0",
+        "path": "noop/v1.0.0/noop.js"
+      }
+    }
+  }
+}

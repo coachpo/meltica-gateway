@@ -17,7 +17,7 @@ import (
 
 func main() {
 	dataPath := flag.String("data", "", "Path to the historical data file (CSV)")
-	strategyName := flag.String("strategy", "noop", "Name of the strategy to backtest")
+	strategyName := flag.String("strategy", "noop", "Strategy selector to backtest (name, name:tag, or name@hash)")
 	strategiesDir := flag.String("strategies.dir", "strategies", "Directory containing JavaScript strategies")
 
 	// Grid strategy parameters.
@@ -36,9 +36,9 @@ func main() {
 		log.Fatalf("create csv feeder: %v", err)
 	}
 
-	strategyID := strings.ToLower(strings.TrimSpace(*strategyName))
-	if strategyID == "" {
-		log.Fatal("strategy name is required")
+	selector := strings.TrimSpace(*strategyName)
+	if selector == "" {
+		log.Fatal("strategy selector is required")
 	}
 
 	absStrategiesPath, err := filepath.Abs(*strategiesDir)
@@ -53,6 +53,12 @@ func main() {
 	if err := loader.Refresh(context.Background()); err != nil {
 		log.Fatalf("load strategies: %v", err)
 	}
+
+	resolution, err := loader.ResolveReference(selector)
+	if err != nil {
+		log.Fatalf("resolve strategy %q: %v", selector, err)
+	}
+	strategyID := resolution.Name
 
 	config := map[string]any{}
 	switch strategyID {
@@ -70,13 +76,8 @@ func main() {
 		config = map[string]any{}
 	}
 
-	module, err := loader.Get(strategyID)
-	if err != nil {
-		log.Fatalf("strategy %q not found: %v", strategyID, err)
-	}
-
 	strategyLogger := log.New(os.Stdout, "[strategy] ", log.LstdFlags)
-	jsStrategy, err := js.NewStrategy(module, config, strategyLogger)
+	jsStrategy, err := js.NewStrategy(resolution.Module, config, strategyLogger)
 	if err != nil {
 		log.Fatalf("instantiate strategy %q: %v", strategyID, err)
 	}

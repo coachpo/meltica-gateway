@@ -69,8 +69,12 @@ type contextBackup struct {
 }
 
 type strategyModulePayload struct {
-	Filename string `json:"filename"`
-	Source   string `json:"source"`
+	Filename      string   `json:"filename,omitempty"`
+	Name          string   `json:"name,omitempty"`
+	Tag           string   `json:"tag,omitempty"`
+	Aliases       []string `json:"aliases,omitempty"`
+	PromoteLatest *bool    `json:"promoteLatest,omitempty"`
+	Source        string   `json:"source"`
 }
 
 // NewHandler creates an HTTP handler for lambda management operations.
@@ -205,23 +209,34 @@ func (s *httpServer) createStrategyModule(w http.ResponseWriter, r *http.Request
 		writeDecodeError(w, err)
 		return
 	}
-	filename := strings.TrimSpace(payload.Filename)
-	if filename == "" {
-		writeError(w, http.StatusBadRequest, "filename required")
-		return
-	}
 	if strings.TrimSpace(payload.Source) == "" {
 		writeError(w, http.StatusBadRequest, "source required")
 		return
 	}
-	if err := s.manager.UpsertStrategy(filename, []byte(payload.Source)); err != nil {
+	aliases := sanitizeAliases(payload.Aliases)
+	promote := true
+	if payload.PromoteLatest != nil {
+		promote = *payload.PromoteLatest
+	}
+	nameHint := strings.TrimSpace(payload.Name)
+	opts := js.ModuleWriteOptions{
+		Filename:      strings.TrimSpace(payload.Filename),
+		Tag:           strings.TrimSpace(payload.Tag),
+		Aliases:       aliases,
+		PromoteLatest: promote,
+	}
+	if opts.Filename == "" && nameHint != "" {
+		opts.Filename = fmt.Sprintf("%s.js", strings.ToLower(nameHint))
+	}
+	resolution, err := s.manager.UpsertStrategy([]byte(payload.Source), opts)
+	if err != nil {
 		s.writeStrategyModuleError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"filename":          filename,
 		"status":            "pending_refresh",
 		"strategyDirectory": s.manager.StrategyDirectory(),
+		"module":            moduleResolutionPayload(resolution),
 	})
 }
 
@@ -287,14 +302,30 @@ func (s *httpServer) updateStrategyModule(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "source required")
 		return
 	}
-	if err := s.manager.UpsertStrategy(filename, []byte(source)); err != nil {
+	aliases := sanitizeAliases(payload.Aliases)
+	promote := true
+	if payload.PromoteLatest != nil {
+		promote = *payload.PromoteLatest
+	}
+	nameHint := strings.TrimSpace(payload.Name)
+	opts := js.ModuleWriteOptions{
+		Filename:      strings.TrimSpace(payload.Filename),
+		Tag:           strings.TrimSpace(payload.Tag),
+		Aliases:       aliases,
+		PromoteLatest: promote,
+	}
+	if opts.Filename == "" && nameHint != "" {
+		opts.Filename = fmt.Sprintf("%s.js", strings.ToLower(nameHint))
+	}
+	resolution, err := s.manager.UpsertStrategy([]byte(source), opts)
+	if err != nil {
 		s.writeStrategyModuleError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"filename":          filename,
 		"status":            "pending_refresh",
 		"strategyDirectory": s.manager.StrategyDirectory(),
+		"module":            moduleResolutionPayload(resolution),
 	})
 }
 
@@ -335,6 +366,47 @@ func (s *httpServer) refreshStrategies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "refreshed"})
+}
+
+func sanitizeAliases(aliases []string) []string {
+	if len(aliases) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(aliases))
+	out := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		trimmed := strings.TrimSpace(alias)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if _, exists := seen[lower]; exists {
+			continue
+		}
+		seen[lower] = struct{}{}
+		out = append(out, lower)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func moduleResolutionPayload(res js.ModuleResolution) map[string]any {
+	if res.Name == "" && res.Hash == "" {
+		return nil
+	}
+	payload := map[string]any{
+		"name": res.Name,
+		"hash": res.Hash,
+		"tag":  res.Tag,
+	}
+	if res.Module != nil {
+		payload["version"] = res.Module.Version
+		payload["file"] = res.Module.Filename
+		payload["path"] = res.Module.Path
+	}
+	return payload
 }
 
 func (s *httpServer) listProviders(w http.ResponseWriter, _ *http.Request) {
@@ -1145,8 +1217,15 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 	manifest := config.LambdaManifest{Lambdas: make([]config.LambdaSpec, 0, len(payload.Lambdas))}
 	for _, spec := range payload.Lambdas {
 		copied := config.LambdaSpec{
-			ID:              strings.TrimSpace(spec.ID),
-			Strategy:        config.LambdaStrategySpec{Identifier: strings.TrimSpace(spec.Strategy.Identifier), Config: cloneAnyMap(spec.Strategy.Config)},
+			ID: strings.TrimSpace(spec.ID),
+			Strategy: config.LambdaStrategySpec{
+				Identifier: strings.TrimSpace(spec.Strategy.Identifier),
+				Config:     cloneAnyMap(spec.Strategy.Config),
+				Selector:   strings.TrimSpace(spec.Strategy.Selector),
+				Tag:        strings.TrimSpace(spec.Strategy.Tag),
+				Hash:       strings.TrimSpace(spec.Strategy.Hash),
+				Version:    strings.TrimSpace(spec.Strategy.Version),
+			},
 			ProviderSymbols: cloneProviderSymbolsMap(spec.ProviderSymbols),
 			Providers:       cloneStringSlice(spec.Providers),
 		}
@@ -1244,8 +1323,15 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 
 func lambdaSpecFromSnapshot(snapshot runtime.InstanceSnapshot) config.LambdaSpec {
 	return config.LambdaSpec{
-		ID:              snapshot.ID,
-		Strategy:        config.LambdaStrategySpec{Identifier: snapshot.Strategy.Identifier, Config: cloneAnyMap(snapshot.Strategy.Config)},
+		ID: snapshot.ID,
+		Strategy: config.LambdaStrategySpec{
+			Identifier: snapshot.Strategy.Identifier,
+			Config:     cloneAnyMap(snapshot.Strategy.Config),
+			Selector:   snapshot.Strategy.Selector,
+			Tag:        snapshot.Strategy.Tag,
+			Hash:       snapshot.Strategy.Hash,
+			Version:    snapshot.Strategy.Version,
+		},
 		ProviderSymbols: cloneProviderSymbolsMap(snapshot.ProviderSymbols),
 		Providers:       cloneStringSlice(snapshot.Providers),
 	}

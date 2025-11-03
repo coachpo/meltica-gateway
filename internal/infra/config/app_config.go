@@ -155,7 +155,8 @@ type TelemetryConfig struct {
 
 // StrategiesConfig defines where JavaScript strategy sources are discovered.
 type StrategiesConfig struct {
-	Directory string `yaml:"directory"`
+	Directory       string `yaml:"directory"`
+	RequireRegistry bool   `yaml:"requireRegistry"`
 }
 
 // AppConfig is the unified Meltica application configuration sourced from YAML.
