@@ -1,3 +1,4 @@
+// Package strategies defines metadata structures for lambda strategies.
 package strategies
 
 import "github.com/coachpo/meltica/internal/domain/schema"

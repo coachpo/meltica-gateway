@@ -1,3 +1,4 @@
+// Package js implements the JavaScript strategy runtime helpers.
 package js
 
 import "errors"

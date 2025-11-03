@@ -35,6 +35,10 @@ func NewInstance(module *Module) (*Instance, error) {
 		rt:     rt,
 		export: export,
 		queue:  make(chan func(*goja.Runtime)),
+		wg:     sync.WaitGroup{},
+		mu:     sync.RWMutex{},
+		closed: false,
+		once:   sync.Once{},
 	}
 	instance.wg.Add(1)
 	go instance.loop()

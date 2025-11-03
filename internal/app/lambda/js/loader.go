@@ -57,10 +57,11 @@ func NewLoader(root string) (*Loader, error) {
 		return nil, fmt.Errorf("strategy loader: root directory required")
 	}
 	clean := filepath.Clean(trimmed)
-	if err := os.MkdirAll(clean, 0o755); err != nil {
+	if err := os.MkdirAll(clean, 0o750); err != nil {
 		return nil, fmt.Errorf("strategy loader: ensure directory %q: %w", clean, err)
 	}
 	return &Loader{
+		mu:     sync.RWMutex{},
 		root:   clean,
 		files:  make(map[string]*Module),
 		byName: make(map[string]*Module),
@@ -82,7 +83,10 @@ func (l *Loader) Refresh(ctx context.Context) error {
 	}
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("strategy loader: refresh canceled: %w", err)
+		}
+		return fmt.Errorf("strategy loader: refresh canceled")
 	default:
 	}
 
@@ -97,7 +101,10 @@ func (l *Loader) Refresh(ctx context.Context) error {
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("strategy loader: refresh canceled: %w", err)
+			}
+			return fmt.Errorf("strategy loader: refresh canceled")
 		default:
 		}
 
@@ -110,7 +117,7 @@ func (l *Loader) Refresh(ctx context.Context) error {
 		fullPath := filepath.Join(l.root, entry.Name())
 		module, err := compileModule(fullPath, entry)
 		if err != nil {
-			return err
+			return fmt.Errorf("strategy loader: compile module %q: %w", fullPath, err)
 		}
 		lowerName := strings.ToLower(module.Name)
 		if _, exists := nextByName[lowerName]; exists {
@@ -184,6 +191,7 @@ func (l *Loader) Get(name string) (*Module, error) {
 func (l *Loader) Read(name string) ([]byte, error) {
 	module, err := l.Get(name)
 	if err == nil {
+		// #nosec G304 -- module.Path is produced by compileModule which constrains it to files within loader root.
 		source, readErr := os.ReadFile(module.Path)
 		if readErr != nil {
 			return nil, fmt.Errorf("strategy loader: read %q: %w", module.Path, readErr)
@@ -202,6 +210,7 @@ func (l *Loader) Read(name string) ([]byte, error) {
 	if !strings.HasPrefix(target, l.root+string(os.PathSeparator)) && target != l.root {
 		return nil, fmt.Errorf("strategy loader: read %q outside root", filename)
 	}
+	// #nosec G304 -- target is constructed via filepath.Join using sanitized filename within loader root.
 	source, readErr := os.ReadFile(target)
 	if readErr != nil {
 		if errors.Is(readErr, fs.ErrNotExist) {
@@ -304,6 +313,7 @@ func isJavaScriptFile(name string) bool {
 }
 
 func compileModule(fullPath string, entry fs.DirEntry) (*Module, error) {
+	// #nosec G304 -- fullPath originates from os.ReadDir and filepath.Join within loader root.
 	source, err := os.ReadFile(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("strategy loader: read %q: %w", fullPath, err)
@@ -374,7 +384,7 @@ func runModule(rt *goja.Runtime, program *goja.Program) (*goja.Object, error) {
 	}
 
 	if _, err := rt.RunProgram(program); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("module run: %w", err)
 	}
 
 	value := module.Get("exports")

@@ -162,7 +162,7 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 
 	loader, err := js.NewLoader(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("lambda manager: create loader: %w", err)
 	}
 
 	mgr := &Manager{
@@ -184,7 +184,7 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 		instances:    make(map[string]*lambdaInstance),
 	}
 	if _, err := mgr.installJavaScriptStrategies(context.Background()); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("lambda manager: install javascript strategies: %w", err)
 	}
 	return mgr, nil
 }
@@ -263,22 +263,8 @@ func (m *Manager) RefreshJavaScriptStrategies(ctx context.Context) error {
 	if newSet == nil {
 		newSet = map[string]struct{}{}
 	}
-	m.restartInstances(running, newSet, ctx)
+	m.restartInstances(ctx, running, newSet)
 	return nil
-}
-
-func (m *Manager) registerStrategy(def StrategyDefinition) {
-	normalized, err := normalizeStrategyDefinition(def)
-	if err != nil {
-		panic(err)
-	}
-	if _, exists := m.strategies[normalized.meta.Name]; exists {
-		panic(fmt.Sprintf("strategy %s already registered", normalized.meta.Name))
-	}
-	m.strategies[normalized.meta.Name] = normalized
-	if m.base != nil {
-		m.base[normalized.meta.Name] = normalized
-	}
 }
 
 func normalizeStrategyDefinition(def StrategyDefinition) (StrategyDefinition, error) {
@@ -393,7 +379,7 @@ func (m *Manager) stopInstances(ids []string) {
 	}
 }
 
-func (m *Manager) restartInstances(ids []string, available map[string]struct{}, ctx context.Context) {
+func (m *Manager) restartInstances(ctx context.Context, ids []string, available map[string]struct{}) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -870,7 +856,11 @@ func (m *Manager) StrategyModule(name string) (js.ModuleSummary, error) {
 	if m == nil || m.jsLoader == nil {
 		return js.ModuleSummary{}, js.ErrModuleNotFound
 	}
-	return m.jsLoader.Module(name)
+	summary, err := m.jsLoader.Module(name)
+	if err != nil {
+		return js.ModuleSummary{}, fmt.Errorf("strategy module %q: %w", name, err)
+	}
+	return summary, nil
 }
 
 // StrategySource retrieves the raw JavaScript source for the named strategy.
@@ -878,7 +868,11 @@ func (m *Manager) StrategySource(name string) ([]byte, error) {
 	if m == nil || m.jsLoader == nil {
 		return nil, js.ErrModuleNotFound
 	}
-	return m.jsLoader.Read(name)
+	source, err := m.jsLoader.Read(name)
+	if err != nil {
+		return nil, fmt.Errorf("strategy source %q: %w", name, err)
+	}
+	return source, nil
 }
 
 // UpsertStrategy writes or replaces a JavaScript strategy file.
@@ -886,7 +880,10 @@ func (m *Manager) UpsertStrategy(filename string, source []byte) error {
 	if m == nil || m.jsLoader == nil {
 		return fmt.Errorf("strategy loader unavailable")
 	}
-	return m.jsLoader.Write(filename, source)
+	if err := m.jsLoader.Write(filename, source); err != nil {
+		return fmt.Errorf("strategy upsert %q: %w", filename, err)
+	}
+	return nil
 }
 
 // RemoveStrategy deletes the JavaScript strategy file by name.
@@ -894,7 +891,10 @@ func (m *Manager) RemoveStrategy(name string) error {
 	if m == nil || m.jsLoader == nil {
 		return js.ErrModuleNotFound
 	}
-	return m.jsLoader.Delete(name)
+	if err := m.jsLoader.Delete(name); err != nil {
+		return fmt.Errorf("strategy remove %q: %w", name, err)
+	}
+	return nil
 }
 
 // StrategyDirectory returns the filesystem directory backing JavaScript strategies.

@@ -84,11 +84,12 @@ func NewStrategy(module *Module, cfg map[string]any, logger *log.Logger) (*Strat
 	}
 
 	strategy := &Strategy{
-		instance: instance,
-		handler:  object,
-		metadata: strategies.CloneMetadata(module.Metadata),
-		logger:   baseLogger,
-		runtime:  bridge,
+		instance:            instance,
+		handler:             object,
+		metadata:            strategies.CloneMetadata(module.Metadata),
+		logger:              baseLogger,
+		runtime:             bridge,
+		crossProviderEvents: atomic.Bool{},
 	}
 	strategy.crossProviderEvents.Store(strategy.detectCrossProviderPreference())
 	return strategy, nil
@@ -331,7 +332,9 @@ type lambdaBridge struct {
 }
 
 func newLambdaBridge() *lambdaBridge {
-	return &lambdaBridge{}
+	return &lambdaBridge{
+		base: atomic.Pointer[core.BaseLambda]{},
+	}
 }
 
 func (b *lambdaBridge) attach(base *core.BaseLambda) {
@@ -453,7 +456,10 @@ func (b *lambdaBridge) submitMarketOrder(provider string, side any, quantity str
 		}
 		provider = providers[0]
 	}
-	return base.SubmitMarketOrder(context.Background(), provider, sideValue, quantity)
+	if err := base.SubmitMarketOrder(context.Background(), provider, sideValue, quantity); err != nil {
+		return fmt.Errorf("submit market order: %w", err)
+	}
+	return nil
 }
 
 func (b *lambdaBridge) submitOrder(provider string, side any, quantity string, price any) error {
@@ -476,7 +482,10 @@ func (b *lambdaBridge) submitOrder(provider string, side any, quantity string, p
 	if err != nil {
 		return err
 	}
-	return base.SubmitOrder(context.Background(), provider, sideValue, quantity, priceStr)
+	if err := base.SubmitOrder(context.Background(), provider, sideValue, quantity, priceStr); err != nil {
+		return fmt.Errorf("submit order: %w", err)
+	}
+	return nil
 }
 
 func convertSeed(seed any) uint64 {
@@ -515,7 +524,7 @@ func convertSeed(seed any) uint64 {
 	case string:
 		trimmed := strings.TrimSpace(v)
 		if trimmed == "" {
-			return uint64(time.Now().UnixNano())
+			return monotonicSeed()
 		}
 		if parsed, err := strconv.ParseUint(trimmed, 10, 64); err == nil {
 			return parsed
@@ -526,10 +535,18 @@ func convertSeed(seed any) uint64 {
 			}
 			return uint64(parsedFloat)
 		}
-		return uint64(time.Now().UnixNano())
+		return monotonicSeed()
 	default:
-		return uint64(time.Now().UnixNano())
+		return monotonicSeed()
 	}
+}
+
+func monotonicSeed() uint64 {
+	now := time.Now().UnixNano()
+	if now < 0 {
+		return uint64(-now)
+	}
+	return uint64(now)
 }
 
 func parseTradeSide(side any) (schema.TradeSide, error) {
