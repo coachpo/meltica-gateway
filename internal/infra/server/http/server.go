@@ -265,7 +265,7 @@ func (s *httpServer) handleStrategyModule(w http.ResponseWriter, r *http.Request
 	case http.MethodGet:
 		s.getStrategyModule(w, name)
 	case http.MethodPut:
-		s.updateStrategyModule(w, r, name)
+		s.updateStrategyModule(w, r)
 	case http.MethodDelete:
 		s.deleteStrategyModule(w, name)
 	default:
@@ -286,7 +286,7 @@ func (s *httpServer) getStrategyModule(w http.ResponseWriter, name string) {
 	writeJSON(w, http.StatusOK, summary)
 }
 
-func (s *httpServer) updateStrategyModule(w http.ResponseWriter, r *http.Request, filename string) {
+func (s *httpServer) updateStrategyModule(w http.ResponseWriter, r *http.Request) {
 	if s.manager == nil {
 		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
 		return

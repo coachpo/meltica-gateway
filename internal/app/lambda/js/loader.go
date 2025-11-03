@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
+	json "github.com/goccy/go-json"
 
 	"github.com/coachpo/meltica/internal/app/lambda/strategies"
 )
@@ -115,6 +115,7 @@ func NewLoader(root string) (*Loader, error) {
 	return &Loader{
 		mu:            sync.RWMutex{},
 		root:          clean,
+		registry:      nil,
 		files:         make(map[string]*Module),
 		byName:        make(map[string]*Module),
 		byHash:        make(map[string]*Module),
@@ -552,7 +553,7 @@ func (l *Loader) Write(filename string, source []byte) error {
 		return fmt.Errorf("strategy loader: load registry: %w", err)
 	}
 	if reg != nil {
-		_, writeErr := l.writeModuleWithRegistry(source, ModuleWriteOptions{PromoteLatest: true}, reg)
+		_, writeErr := l.writeModuleWithRegistry(source, ModuleWriteOptions{Filename: "", Tag: "", Aliases: nil, PromoteLatest: true}, reg)
 		return writeErr
 	}
 
@@ -618,16 +619,17 @@ func (l *Loader) Store(source []byte, opts ModuleWriteOptions) (ModuleResolution
 
 func loadRegistry(root string) (registry, error) {
 	path := filepath.Join(root, "registry.json")
+	// #nosec G304 -- path is derived from controlled loader root and fixed filename
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("strategy loader: read registry %q: %w", path, err)
 	}
 	var reg registry
 	if err := json.Unmarshal(data, &reg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("strategy loader: decode registry %q: %w", path, err)
 	}
 	return reg, nil
 }
@@ -688,7 +690,7 @@ func cloneStringMap(src map[string]string) map[string]string {
 func loadModule(path string) (*Module, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("strategy loader: stat %q: %w", path, err)
 	}
 	return compileModule(path, info)
 }
@@ -696,14 +698,16 @@ func loadModule(path string) (*Module, error) {
 func (m *Module) toSummary(name string) ModuleSummary {
 	clone := strategies.CloneMetadata(m.Metadata)
 	return ModuleSummary{
-		Name:     name,
-		File:     m.Filename,
-		Path:     m.Path,
-		Hash:     m.Hash,
-		Version:  m.Version,
-		Tags:     append([]string(nil), m.Tags...),
-		Size:     m.Size,
-		Metadata: clone,
+		Name:       name,
+		File:       m.Filename,
+		Path:       m.Path,
+		Hash:       m.Hash,
+		Version:    m.Version,
+		Tags:       append([]string(nil), m.Tags...),
+		TagAliases: nil,
+		Revisions:  nil,
+		Size:       m.Size,
+		Metadata:   clone,
 	}
 }
 
@@ -735,6 +739,8 @@ func compileModule(fullPath string, info fs.FileInfo) (*Module, error) {
 		Filename: filepath.Base(fullPath),
 		Path:     fullPath,
 		Hash:     fmt.Sprintf("sha256:%s", hash),
+		Version:  "",
+		Tags:     nil,
 		Metadata: meta,
 		Program:  program,
 		Size:     info.Size(),
@@ -787,7 +793,7 @@ func runModule(rt *goja.Runtime, program *goja.Program) (*goja.Object, error) {
 	}
 
 	if _, err := rt.RunProgram(program); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("strategy loader: execute module: %w", err)
 	}
 
 	value := module.Get("exports")
@@ -884,7 +890,7 @@ func (l *Loader) writeModuleWithRegistry(source []byte, opts ModuleWriteOptions,
 	}
 
 	dir := filepath.Join(l.root, name, tag)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		_ = os.Remove(tempPath)
 		return empty, fmt.Errorf("strategy loader: ensure directory %q: %w", dir, err)
 	}
@@ -1073,12 +1079,13 @@ type moduleSelector struct {
 func parseModuleSelector(selector string) (moduleSelector, error) {
 	trimmed := strings.TrimSpace(selector)
 	if trimmed == "" {
-		return moduleSelector{}, fmt.Errorf("strategy loader: selector required")
+		return moduleSelector{Name: "", Tag: "", Hash: ""}, fmt.Errorf("strategy loader: selector required")
 	}
 
 	if at := strings.Index(trimmed, "@"); at >= 0 {
 		return moduleSelector{
 			Name: strings.ToLower(strings.TrimSpace(trimmed[:at])),
+			Tag:  "",
 			Hash: strings.TrimSpace(trimmed[at+1:]),
 		}, nil
 	}
@@ -1087,11 +1094,14 @@ func parseModuleSelector(selector string) (moduleSelector, error) {
 		return moduleSelector{
 			Name: strings.ToLower(strings.TrimSpace(trimmed[:colon])),
 			Tag:  strings.TrimSpace(trimmed[colon+1:]),
+			Hash: "",
 		}, nil
 	}
 
 	return moduleSelector{
 		Name: strings.ToLower(trimmed),
+		Tag:  "",
+		Hash: "",
 	}, nil
 }
 

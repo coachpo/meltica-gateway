@@ -1,9 +1,9 @@
+// Command bootstrap_strategies normalizes strategy modules and emits a registry manifest.
 package main
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
+	json "github.com/goccy/go-json"
 
 	"github.com/coachpo/meltica/internal/app/lambda/strategies"
 )
@@ -103,9 +104,9 @@ type moduleInfo struct {
 
 func discoverModules(root string) ([]moduleInfo, error) {
 	var modules []moduleInfo
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("walk %s: %w", path, walkErr)
 		}
 		if d.IsDir() {
 			return nil
@@ -120,17 +121,21 @@ func discoverModules(root string) ([]moduleInfo, error) {
 		modules = append(modules, info)
 		return nil
 	})
-	return modules, err
+	if err != nil {
+		return nil, fmt.Errorf("discover modules under %s: %w", root, err)
+	}
+	return modules, nil
 }
 
 func loadModule(path string) (moduleInfo, error) {
+	// #nosec G304 -- path originates from filesystem walk scoped to the provided root
 	source, err := os.ReadFile(path)
 	if err != nil {
-		return moduleInfo{}, err
+		return moduleInfo{}, fmt.Errorf("read %q: %w", path, err)
 	}
 	meta, err := extractMetadata(path, source)
 	if err != nil {
-		return moduleInfo{}, err
+		return moduleInfo{}, fmt.Errorf("extract metadata %s: %w", path, err)
 	}
 	normalizedName := strings.ToLower(strings.TrimSpace(meta.Name))
 	if normalizedName == "" {
@@ -145,7 +150,7 @@ func loadModule(path string) (moduleInfo, error) {
 
 	rel, err := filepath.Rel(filepath.Dir(path), path)
 	if err != nil {
-		return moduleInfo{}, err
+		return moduleInfo{}, fmt.Errorf("relative path for %s: %w", path, err)
 	}
 	isVersioned := strings.Count(filepath.ToSlash(rel), "/") >= 1
 
@@ -165,18 +170,18 @@ func extractMetadata(filename string, source []byte) (strategies.Metadata, error
 	rt.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	program, err := goja.Compile(filename, string(source), true)
 	if err != nil {
-		return strategies.Metadata{}, err
+		return strategies.Metadata{}, fmt.Errorf("compile %s: %w", filename, err)
 	}
 	module := rt.NewObject()
 	exports := rt.NewObject()
 	if err := module.Set("exports", exports); err != nil {
-		return strategies.Metadata{}, err
+		return strategies.Metadata{}, fmt.Errorf("module init: %w", err)
 	}
 	if err := rt.Set("module", module); err != nil {
-		return strategies.Metadata{}, err
+		return strategies.Metadata{}, fmt.Errorf("module init: %w", err)
 	}
 	if _, err := rt.RunProgram(program); err != nil {
-		return strategies.Metadata{}, err
+		return strategies.Metadata{}, fmt.Errorf("execute %s: %w", filename, err)
 	}
 	value := module.Get("exports")
 	obj := value.ToObject(rt)
@@ -201,15 +206,15 @@ func materializeModule(root string, module moduleInfo) (string, error) {
 		return module.path, nil
 	}
 	targetDir := filepath.Join(root, module.name, module.version)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "", err
+	if err := os.MkdirAll(targetDir, 0o750); err != nil {
+		return "", fmt.Errorf("create directory %s: %w", targetDir, err)
 	}
 	target := filepath.Join(targetDir, fmt.Sprintf("%s.js", module.name))
 	if err := os.WriteFile(target, module.source, 0o600); err != nil {
-		return "", err
+		return "", fmt.Errorf("write module %s: %w", target, err)
 	}
 	if err := os.Remove(module.path); err != nil {
-		return "", err
+		return "", fmt.Errorf("remove original %s: %w", module.path, err)
 	}
 	return target, nil
 }
@@ -238,14 +243,17 @@ func pickLatestTag(tags map[string]string) string {
 func writeRegistry(root string, reg map[string]registryEntry) error {
 	data, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal registry: %w", err)
 	}
 	tmp := filepath.Join(root, "registry.json.tmp")
 	target := filepath.Join(root, "registry.json")
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
+		return fmt.Errorf("write temp registry %s: %w", tmp, err)
 	}
-	return os.Rename(tmp, target)
+	if err := os.Rename(tmp, target); err != nil {
+		return fmt.Errorf("rename registry %s: %w", target, err)
+	}
+	return nil
 }
 
 func ensureDir(path string) (string, error) {
@@ -254,8 +262,8 @@ func ensureDir(path string) (string, error) {
 		return "", fmt.Errorf("directory required")
 	}
 	clean := filepath.Clean(trimmed)
-	if err := os.MkdirAll(clean, 0o755); err != nil {
-		return "", err
+	if err := os.MkdirAll(clean, 0o750); err != nil {
+		return "", fmt.Errorf("ensure directory %s: %w", clean, err)
 	}
 	return clean, nil
 }

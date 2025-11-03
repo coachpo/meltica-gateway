@@ -467,7 +467,7 @@ func (m *Manager) Create(spec config.LambdaSpec) (*core.BaseLambda, error) {
 		return nil, fmt.Errorf("strategy %s: instrument symbols required", spec.ID)
 	}
 	if err := m.ensureSpec(spec, false); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ensure spec %s: %w", spec.ID, err)
 	}
 	return nil, nil
 }
@@ -494,7 +494,7 @@ func (m *Manager) ensureSpec(spec config.LambdaSpec, allowReplace bool) error {
 		}
 		res, err := m.jsLoader.ResolveReference(rawIdentifier)
 		if err != nil {
-			return err
+			return fmt.Errorf("resolve strategy %q: %w", rawIdentifier, err)
 		}
 		spec.Strategy.Identifier = res.Name
 		spec.Strategy.Hash = res.Hash
@@ -740,8 +740,15 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 	spec, err := m.specForID(id)
 	if err != nil {
 		return InstanceSnapshot{
-			ID:                "",
-			Strategy:          config.LambdaStrategySpec{Identifier: "", Config: map[string]any{}},
+			ID: "",
+			Strategy: config.LambdaStrategySpec{
+				Identifier: "",
+				Selector:   "",
+				Tag:        "",
+				Hash:       "",
+				Version:    "",
+				Config:     map[string]any{},
+			},
 			Providers:         []string{},
 			ProviderSymbols:   map[string]config.ProviderSymbols{},
 			AggregatedSymbols: []string{},
@@ -865,7 +872,11 @@ func (m *Manager) buildStrategy(spec config.LambdaStrategySpec) (core.TradingStr
 		if !strings.EqualFold(module.Name, name) {
 			return nil, fmt.Errorf("strategy %s: revision %s belongs to %s", name, spec.Hash, module.Name)
 		}
-		return js.NewStrategy(module, spec.Config, m.logger)
+		strategy, buildErr := js.NewStrategy(module, spec.Config, m.logger)
+		if buildErr != nil {
+			return nil, fmt.Errorf("strategy %s: %w", name, buildErr)
+		}
+		return strategy, nil
 	}
 	def, ok := m.strategies[name]
 	if !ok {
@@ -1005,23 +1016,23 @@ func (m *Manager) StrategySource(name string) ([]byte, error) {
 // UpsertStrategy writes or replaces a JavaScript strategy module.
 func (m *Manager) UpsertStrategy(source []byte, opts js.ModuleWriteOptions) (js.ModuleResolution, error) {
 	if m == nil || m.jsLoader == nil {
-		return js.ModuleResolution{}, fmt.Errorf("strategy loader unavailable")
+		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, fmt.Errorf("strategy loader unavailable")
 	}
 	resolution, err := m.jsLoader.Store(source, opts)
 	if err == nil {
 		return resolution, nil
 	}
 	if !errors.Is(err, js.ErrRegistryUnavailable) {
-		return js.ModuleResolution{}, fmt.Errorf("strategy upsert: %w", err)
+		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, fmt.Errorf("strategy upsert: %w", err)
 	}
 	filename := opts.Filename
 	if strings.TrimSpace(filename) == "" {
 		filename = "strategy.js"
 	}
 	if err := m.jsLoader.Write(filename, source); err != nil {
-		return js.ModuleResolution{}, fmt.Errorf("strategy upsert %q: %w", filename, err)
+		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, fmt.Errorf("strategy upsert %q: %w", filename, err)
 	}
-	return js.ModuleResolution{}, nil
+	return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, nil
 }
 
 // RemoveStrategy deletes the JavaScript strategy file by name.
