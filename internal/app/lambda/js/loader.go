@@ -1,6 +1,7 @@
 package js
 
 import (
+	"container/list"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dop251/goja"
 	json "github.com/goccy/go-json"
@@ -37,6 +39,23 @@ type registryLocation struct {
 	Path string `json:"path"`
 }
 
+// RegistrySnapshot captures the current registry manifest for audit and tooling exports.
+type RegistrySnapshot map[string]RegistryEntry
+
+// RegistryEntry describes the tags and hashes available for a module.
+type RegistryEntry struct {
+	Tags   map[string]string           `json:"tags"`
+	Hashes map[string]RegistryLocation `json:"hashes"`
+}
+
+// RegistryLocation records the origin of a module revision inside the registry.
+type RegistryLocation struct {
+	Tag  string `json:"tag"`
+	Path string `json:"path"`
+}
+
+const defaultResolutionCacheSize = 256
+
 // Loader manages JavaScript strategy modules sourced from an external directory.
 type Loader struct {
 	mu       sync.RWMutex
@@ -48,6 +67,10 @@ type Loader struct {
 	byHash        map[string]*Module            // hash -> module
 	modulesByName map[string]map[string]*Module // name -> hash -> module
 	tags          map[string]map[string]string  // name -> tag -> hash
+
+	resolutionCache    map[string]*list.Element
+	resolutionOrder    *list.List
+	resolutionCapacity int
 }
 
 // Module encapsulates the compiled program and metadata for a strategy.
@@ -91,6 +114,7 @@ type ModuleSummary struct {
 	Revisions  []ModuleRevision    `json:"revisions,omitempty"`
 	Size       int64               `json:"size"`
 	Metadata   strategies.Metadata `json:"metadata"`
+	Running    []ModuleUsage       `json:"running,omitempty"`
 }
 
 // ModuleRevision describes a specific strategy revision available to the loader.
@@ -100,6 +124,31 @@ type ModuleRevision struct {
 	Path    string `json:"path"`
 	Version string `json:"version,omitempty"`
 	Size    int64  `json:"size"`
+	Retired bool   `json:"retired,omitempty"`
+}
+
+// ModuleUsage captures runtime usage information for a module revision.
+type ModuleUsage struct {
+	Hash      string    `json:"hash"`
+	Instances []string  `json:"instances"`
+	Count     int       `json:"count"`
+	FirstSeen time.Time `json:"firstSeen"`
+	LastSeen  time.Time `json:"lastSeen"`
+}
+
+// ModuleUsageSnapshot conveys revision usage metrics to the loader.
+type ModuleUsageSnapshot struct {
+	Name      string
+	Hash      string
+	Instances []string
+	Count     int
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
+type cacheEntry struct {
+	key   string
+	value ModuleResolution
 }
 
 // NewLoader constructs a Loader rooted at the provided directory.
@@ -113,14 +162,17 @@ func NewLoader(root string) (*Loader, error) {
 		return nil, fmt.Errorf("strategy loader: ensure directory %q: %w", clean, err)
 	}
 	return &Loader{
-		mu:            sync.RWMutex{},
-		root:          clean,
-		registry:      nil,
-		files:         make(map[string]*Module),
-		byName:        make(map[string]*Module),
-		byHash:        make(map[string]*Module),
-		modulesByName: make(map[string]map[string]*Module),
-		tags:          make(map[string]map[string]string),
+		mu:                 sync.RWMutex{},
+		root:               clean,
+		registry:           nil,
+		files:              make(map[string]*Module),
+		byName:             make(map[string]*Module),
+		byHash:             make(map[string]*Module),
+		modulesByName:      make(map[string]map[string]*Module),
+		tags:               make(map[string]map[string]string),
+		resolutionCache:    make(map[string]*list.Element),
+		resolutionOrder:    list.New(),
+		resolutionCapacity: defaultResolutionCacheSize,
 	}, nil
 }
 
@@ -228,6 +280,7 @@ func (l *Loader) refreshFromRegistry(ctx context.Context, reg registry) error {
 	l.byHash = nextByHash
 	l.modulesByName = modulesByName
 	l.tags = tagsByName
+	l.clearResolutionCacheLocked()
 	l.mu.Unlock()
 	return nil
 }
@@ -286,14 +339,22 @@ func (l *Loader) refreshLegacy(ctx context.Context) error {
 	l.byHash = nextByHash
 	l.modulesByName = modulesByName
 	l.tags = make(map[string]map[string]string)
+	l.clearResolutionCacheLocked()
 	l.mu.Unlock()
 	return nil
 }
 
-// List returns the loaded module catalog.
+// List returns the loaded module catalog without usage annotations.
 func (l *Loader) List() []ModuleSummary {
+	return l.ListWithUsage(nil)
+}
+
+// ListWithUsage returns the loaded module catalog enriched with usage metadata.
+func (l *Loader) ListWithUsage(usages []ModuleUsageSnapshot) []ModuleSummary {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+
+	usageIndex := indexModuleUsage(usages)
 
 	out := make([]ModuleSummary, 0, len(l.byName))
 	for name, module := range l.byName {
@@ -304,13 +365,17 @@ func (l *Loader) List() []ModuleSummary {
 		if revisions, ok := l.modulesByName[name]; ok {
 			list := make([]ModuleRevision, 0, len(revisions))
 			for hash, revModule := range revisions {
-				list = append(list, ModuleRevision{
+				revision := ModuleRevision{
 					Hash:    hash,
 					Tag:     primaryTagForHash(l.tags[name], hash),
 					Path:    revModule.Path,
 					Version: revModule.Version,
 					Size:    revModule.Size,
-				})
+				}
+				if usage, ok := usageIndex.lookup(name, hash); ok {
+					revision.Retired = usage.Count == 0
+				}
+				list = append(list, revision)
 			}
 			sort.Slice(list, func(i, j int) bool {
 				if list[i].Tag != "" && list[j].Tag != "" && list[i].Tag != list[j].Tag {
@@ -319,6 +384,9 @@ func (l *Loader) List() []ModuleSummary {
 				return list[i].Hash < list[j].Hash
 			})
 			summary.Revisions = list
+		}
+		if running := buildModuleRunningUsage(usageIndex.forName(name)); len(running) > 0 {
+			summary.Running = running
 		}
 		out = append(out, summary)
 	}
@@ -330,12 +398,77 @@ func (l *Loader) List() []ModuleSummary {
 
 // Module returns the module metadata for the named strategy.
 func (l *Loader) Module(name string) (ModuleSummary, error) {
+	return l.ModuleWithUsage(name, nil)
+}
+
+// ModuleWithUsage returns module metadata annotated with usage metrics.
+func (l *Loader) ModuleWithUsage(name string, usages []ModuleUsageSnapshot) (ModuleSummary, error) {
 	module, err := l.Get(name)
 	if err != nil {
 		var empty ModuleSummary
 		return empty, err
 	}
-	return module.toSummary(strings.ToLower(strings.TrimSpace(module.Name))), nil
+
+	normalized := strings.ToLower(strings.TrimSpace(module.Name))
+	usageIndex := indexModuleUsage(usages)
+
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	summary := module.toSummary(normalized)
+	if aliases, ok := l.tags[normalized]; ok {
+		summary.TagAliases = cloneStringMap(aliases)
+	}
+	if revisions, ok := l.modulesByName[normalized]; ok {
+		list := make([]ModuleRevision, 0, len(revisions))
+		for hash, revModule := range revisions {
+			revision := ModuleRevision{
+				Hash:    hash,
+				Tag:     primaryTagForHash(l.tags[normalized], hash),
+				Path:    revModule.Path,
+				Version: revModule.Version,
+				Size:    revModule.Size,
+			}
+			if usage, ok := usageIndex.lookup(normalized, hash); ok {
+				revision.Retired = usage.Count == 0
+			}
+			list = append(list, revision)
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].Tag != "" && list[j].Tag != "" && list[i].Tag != list[j].Tag {
+				return list[i].Tag < list[j].Tag
+			}
+			return list[i].Hash < list[j].Hash
+		})
+		summary.Revisions = list
+	}
+	if running := buildModuleRunningUsage(usageIndex.forName(normalized)); len(running) > 0 {
+		summary.Running = running
+	}
+	return summary, nil
+}
+
+// RegistrySnapshot returns the on-disk registry manifest.
+func (l *Loader) RegistrySnapshot() (RegistrySnapshot, error) {
+	reg, err := loadRegistry(l.root)
+	if err != nil {
+		return nil, err
+	}
+	if reg == nil {
+		return nil, nil
+	}
+	snapshot := make(RegistrySnapshot, len(reg))
+	for name, entry := range reg {
+		cloned := RegistryEntry{
+			Tags:   cloneStringMap(entry.Tags),
+			Hashes: make(map[string]RegistryLocation, len(entry.Hashes)),
+		}
+		for hash, loc := range entry.Hashes {
+			cloned.Hashes[hash] = RegistryLocation{Tag: loc.Tag, Path: loc.Path}
+		}
+		snapshot[name] = cloned
+	}
+	return snapshot, nil
 }
 
 // ResolveReference resolves a strategy identifier of the form
@@ -356,20 +489,29 @@ func (l *Loader) ResolveReference(identifier string) (ModuleResolution, error) {
 		return empty, fmt.Errorf("strategy loader: identifier required")
 	}
 
+	key := normalizeResolutionKey(raw)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if cached, ok := l.cachedResolutionLocked(key); ok {
+		return cached, nil
+	}
+
 	if isHashIdentifier(raw) {
 		hash := normalizeHash(raw)
-		l.mu.RLock()
 		module := l.byHash[hash]
-		l.mu.RUnlock()
 		if module == nil {
 			return empty, fmt.Errorf("strategy loader: hash %q not found", hash)
 		}
-		return ModuleResolution{
+		resolution := ModuleResolution{
 			Name:   module.Name,
 			Hash:   hash,
 			Tag:    pickDefaultTag(module),
 			Module: module,
-		}, nil
+		}
+		l.storeResolutionLocked(key, resolution)
+		return resolution, nil
 	}
 
 	var (
@@ -392,9 +534,6 @@ func (l *Loader) ResolveReference(identifier string) (ModuleResolution, error) {
 	if name == "" {
 		return empty, fmt.Errorf("strategy loader: strategy name required")
 	}
-
-	l.mu.RLock()
-	defer l.mu.RUnlock()
 
 	var module *Module
 	var resolvedHash string
@@ -434,12 +573,14 @@ func (l *Loader) ResolveReference(identifier string) (ModuleResolution, error) {
 		return empty, ErrModuleNotFound
 	}
 
-	return ModuleResolution{
+	resolution := ModuleResolution{
 		Name:   module.Name,
 		Hash:   resolvedHash,
 		Tag:    resolvedTag,
 		Module: module,
-	}, nil
+	}
+	l.storeResolutionLocked(key, resolution)
+	return resolution, nil
 }
 
 // Get returns the in-memory module definition for instantiation.
@@ -1175,6 +1316,148 @@ func (l *Loader) resolveTagLocked(name, tag string) (*Module, string, error) {
 		}
 	}
 	return nil, "", fmt.Errorf("strategy loader: tag %q not found for %s", tag, name)
+}
+
+type moduleUsageIndex map[string]map[string]ModuleUsageSnapshot
+
+func indexModuleUsage(usages []ModuleUsageSnapshot) moduleUsageIndex {
+	if len(usages) == 0 {
+		return nil
+	}
+	index := make(moduleUsageIndex)
+	for _, snapshot := range usages {
+		name := strings.ToLower(strings.TrimSpace(snapshot.Name))
+		hash := normalizeHash(snapshot.Hash)
+		if name == "" || hash == "" {
+			continue
+		}
+		if _, ok := index[name]; !ok {
+			index[name] = make(map[string]ModuleUsageSnapshot)
+		}
+		copySnapshot := snapshot
+		copySnapshot.Name = name
+		copySnapshot.Hash = hash
+		sort.Strings(copySnapshot.Instances)
+		index[name][hash] = copySnapshot
+	}
+	return index
+}
+
+func (idx moduleUsageIndex) lookup(name, hash string) (ModuleUsageSnapshot, bool) {
+	if len(idx) == 0 {
+		return ModuleUsageSnapshot{}, false
+	}
+	normalizedName := strings.ToLower(strings.TrimSpace(name))
+	normalizedHash := normalizeHash(hash)
+	if normalizedName == "" || normalizedHash == "" {
+		return ModuleUsageSnapshot{}, false
+	}
+	if revisions, ok := idx[normalizedName]; ok {
+		if snapshot, ok := revisions[normalizedHash]; ok {
+			return snapshot, true
+		}
+	}
+	return ModuleUsageSnapshot{}, false
+}
+
+func (idx moduleUsageIndex) forName(name string) map[string]ModuleUsageSnapshot {
+	if len(idx) == 0 {
+		return nil
+	}
+	normalizedName := strings.ToLower(strings.TrimSpace(name))
+	return idx[normalizedName]
+}
+
+func buildModuleRunningUsage(entries map[string]ModuleUsageSnapshot) []ModuleUsage {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]ModuleUsage, 0, len(entries))
+	for hash, snapshot := range entries {
+		if snapshot.Count <= 0 {
+			continue
+		}
+		usage := ModuleUsage{
+			Hash:      hash,
+			Instances: append([]string(nil), snapshot.Instances...),
+			Count:     snapshot.Count,
+			FirstSeen: snapshot.FirstSeen,
+			LastSeen:  snapshot.LastSeen,
+		}
+		out = append(out, usage)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Hash < out[j].Hash
+	})
+	return out
+}
+
+func normalizeResolutionKey(identifier string) string {
+	return strings.ToLower(strings.TrimSpace(identifier))
+}
+
+func (l *Loader) cachedResolutionLocked(key string) (ModuleResolution, bool) {
+	if l == nil || key == "" {
+		return ModuleResolution{}, false
+	}
+	if elem, ok := l.resolutionCache[key]; ok {
+		if l.resolutionOrder != nil {
+			l.resolutionOrder.MoveToFront(elem)
+		}
+		if entry, ok := elem.Value.(*cacheEntry); ok {
+			return entry.value, true
+		}
+	}
+	return ModuleResolution{}, false
+}
+
+func (l *Loader) storeResolutionLocked(key string, value ModuleResolution) {
+	if l == nil || key == "" {
+		return
+	}
+	if l.resolutionOrder == nil {
+		l.resolutionOrder = list.New()
+	}
+	if elem, ok := l.resolutionCache[key]; ok {
+		if entry, ok := elem.Value.(*cacheEntry); ok {
+			entry.value = value
+		}
+		l.resolutionOrder.MoveToFront(elem)
+		return
+	}
+	entry := &cacheEntry{key: key, value: value}
+	elem := l.resolutionOrder.PushFront(entry)
+	if l.resolutionCache == nil {
+		l.resolutionCache = make(map[string]*list.Element, l.resolutionCapacity)
+	}
+	l.resolutionCache[key] = elem
+	if l.resolutionCapacity > 0 && l.resolutionOrder.Len() > l.resolutionCapacity {
+		last := l.resolutionOrder.Back()
+		if last != nil {
+			l.resolutionOrder.Remove(last)
+			if evicted, ok := last.Value.(*cacheEntry); ok {
+				delete(l.resolutionCache, evicted.key)
+			}
+		}
+	}
+}
+
+func (l *Loader) clearResolutionCacheLocked() {
+	if l == nil {
+		return
+	}
+	if l.resolutionOrder != nil {
+		l.resolutionOrder.Init()
+	}
+	for key := range l.resolutionCache {
+		delete(l.resolutionCache, key)
+	}
 }
 
 func normalizeHash(hash string) string {

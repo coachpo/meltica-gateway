@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coachpo/meltica/internal/domain/schema"
 )
@@ -397,5 +398,84 @@ func TestDeleteWithRegistrySelector(t *testing.T) {
 	}
 	if len(reg) != 0 {
 		t.Fatalf("expected registry cleared, got %+v", reg)
+	}
+}
+
+func TestLoaderListWithUsage(t *testing.T) {
+	dir := t.TempDir()
+	modulePath := writeVersionedModule(t, dir, "noop", "v1.0.0", []byte(sampleModule))
+	writeRegistry(t, dir, "noop", "v1.0.0", modulePath)
+
+	loader, err := NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	if err := loader.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	modules := loader.List()
+	if len(modules) != 1 {
+		t.Fatalf("expected module list of size 1, got %d", len(modules))
+	}
+	hash := modules[0].Hash
+	now := time.Now().UTC()
+	usageSnapshot := ModuleUsageSnapshot{
+		Name:      modules[0].Name,
+		Hash:      hash,
+		Instances: []string{"alpha"},
+		Count:     1,
+		FirstSeen: now,
+		LastSeen:  now,
+	}
+	withUsage := loader.ListWithUsage([]ModuleUsageSnapshot{usageSnapshot})
+	if len(withUsage[0].Running) != 1 {
+		t.Fatalf("expected running usage entry, got %+v", withUsage[0].Running)
+	}
+	if withUsage[0].Running[0].Hash != hash {
+		t.Fatalf("unexpected running hash %s", withUsage[0].Running[0].Hash)
+	}
+	if withUsage[0].Revisions[0].Retired {
+		t.Fatalf("expected revision not retired when count > 0")
+	}
+
+	zeroUsage := loader.ListWithUsage([]ModuleUsageSnapshot{{Name: modules[0].Name, Hash: hash, Count: 0}})
+	if len(zeroUsage[0].Running) != 0 {
+		t.Fatalf("expected no running entries for zero usage")
+	}
+	if !zeroUsage[0].Revisions[0].Retired {
+		t.Fatalf("expected revision marked retired when count == 0")
+	}
+
+	moduleSummary, err := loader.ModuleWithUsage("noop", []ModuleUsageSnapshot{usageSnapshot})
+	if err != nil {
+		t.Fatalf("ModuleWithUsage: %v", err)
+	}
+	if len(moduleSummary.Running) != 1 || moduleSummary.Running[0].Hash != hash {
+		t.Fatalf("unexpected module summary running payload: %+v", moduleSummary.Running)
+	}
+}
+
+func TestLoaderRegistrySnapshot(t *testing.T) {
+	dir := t.TempDir()
+	modulePath := writeVersionedModule(t, dir, "noop", "v1.0.0", []byte(sampleModule))
+	writeRegistry(t, dir, "noop", "v1.0.0", modulePath)
+
+	loader, err := NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	snapshot, err := loader.RegistrySnapshot()
+	if err != nil {
+		t.Fatalf("RegistrySnapshot: %v", err)
+	}
+	if len(snapshot) != 1 {
+		t.Fatalf("expected snapshot entry, got %d", len(snapshot))
+	}
+	entry, ok := snapshot["noop"]
+	if !ok {
+		t.Fatalf("expected noop entry in snapshot")
+	}
+	if len(entry.Hashes) != 1 {
+		t.Fatalf("expected one hash in snapshot entry, got %d", len(entry.Hashes))
 	}
 }

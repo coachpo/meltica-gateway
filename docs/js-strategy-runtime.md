@@ -25,6 +25,7 @@ All consumers (CLI, HTTP API, tests) use this pipeline to work with strategies.
 
 3. **Refresh**
    - `Manager.RefreshJavaScriptStrategies(ctx)` (also exposed via the `/strategies/refresh` endpoint) clears existing dynamic registrations, reloads modules from disk, and restarts any running instances that depend on the updated strategies.
+   - The HTTP endpoint now accepts an optional JSON payload `{ "hashes": [], "strategies": [] }` to target specific revisions. The response enumerates each requested selector with a reason code (`refreshed`, `alreadyPinned`, `retired`) so operators can confirm which instances actually restarted.
 
 4. **Stop / Shutdown**
    - `Manager.Stop(id)` cancels the strategy context, unregisters routes, and invokes the strategy’s `Close` method (implemented by `js.Strategy` to shut down the Goja goroutine).
@@ -93,13 +94,26 @@ Every JS exception is captured and logged via `Strategy.logError`.
 |--------|------|-------------|
 | `GET`  | `/strategies` | List in-memory strategy metadata. |
 | `GET`  | `/strategies/{name}` | Return metadata for a specific strategy. |
-| `GET`  | `/strategies/modules` | Return module summaries (hashes, tag aliases, metadata, revision list). |
+| `GET`  | `/strategies/modules` | Return module summaries (hashes, tag aliases, metadata, revision list) plus a `running` block for active hashes. Supports `strategy`, `hash`, `runningOnly`, `limit`, and `offset` query parameters. |
 | `POST` | `/strategies/modules` | Create a module. Body accepts `source` plus optional `name`, `filename`, `tag`, `aliases`, `promoteLatest`. Validates compilation, writes to `registry.json`. |
 | `GET`  | `/strategies/modules/{name}` | Fetch metadata/file info for a module by strategy name. |
 | `GET`  | `/strategies/modules/{name}/source` | Return raw JS source (`application/javascript`). Accepts canonical name or filename. |
 | `PUT`  | `/strategies/modules/{selector}` | Replace strategy source. Same payload as POST (`selector` may be name, `name:tag`, or `name@hash`). |
 | `DELETE` | `/strategies/modules/{selector}` | Remove a module or revision. Deletion is refused if the hash is referenced by any running instance. |
-| `POST` | `/strategies/refresh` | Reload modules from disk and restart affected lambdas. |
+| `GET`  | `/strategies/modules/{selector}/usage` | Resolve the selector and return revision usage (`count`, `instances`, `firstSeen`, `lastSeen`) plus paginated instance summaries. Supports `limit`, `offset`, and `includeStopped`. |
+| `POST` | `/strategies/refresh` | Reload modules from disk and restart affected lambdas. Accepts optional `{"hashes": [], "strategies": []}` payload for targeted refresh. |
+| `GET`  | `/strategies/registry` | Export the current `registry.json` merged with live usage counters for auditing or external tooling. |
+
+### Revision Usage Index & Metrics
+
+- The manager maintains a per-revision usage index keyed by `{strategy, hash}`. Each entry tracks running instance IDs, counts, and `firstSeen`/`lastSeen` timestamps. Instance summaries now include this metadata alongside HATEOAS links back to the module usage endpoint.
+- Module listings (`GET /strategies/modules`) expose a `running` block for active hashes and accept filters (`strategy`, `hash`, `runningOnly`) plus pagination so operators can focus on specific subsets.
+- Drill-down via `GET /strategies/modules/{selector}/usage` to inspect a single revision, optionally including stopped instances.
+- Export the full manifest together with usage counters via `GET /strategies/registry` for audits or scripting.
+- Prometheus metrics:
+  - `strategy_revision_instances` (`{strategy, hash}` gauge) reflects live instance counts.
+  - `strategy_revision_instances_total` (`{strategy, hash, action}` counter) logs lifecycle transitions (`start`, `stop`).
+- The bootstrap helper supports `--usage usage.json` to highlight revisions with zero usage before pruning.
 
 All errors surface as standard HTTP codes (400, 404, 409, etc.). Module CRUD endpoints touch disk; reload is required before changes take effect in memory.
 

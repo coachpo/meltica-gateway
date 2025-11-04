@@ -16,6 +16,9 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/coachpo/meltica/internal/app/dispatcher"
 	"github.com/coachpo/meltica/internal/app/lambda/core"
@@ -27,6 +30,7 @@ import (
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
+	"github.com/coachpo/meltica/internal/infra/telemetry"
 )
 
 var (
@@ -39,6 +43,129 @@ var (
 	// ErrInstanceNotRunning is returned when attempting to stop an instance that isn't running.
 	ErrInstanceNotRunning = errors.New("strategy instance not running")
 )
+
+const revisionKeySeparator = "\x1f"
+
+type revisionUsage struct {
+	strategy  string
+	hash      string
+	instances map[string]struct{}
+	firstSeen time.Time
+	lastSeen  time.Time
+}
+
+// RevisionUsageSummary captures runtime usage information for a strategy revision.
+type RevisionUsageSummary struct {
+	Strategy  string    `json:"strategy"`
+	Hash      string    `json:"hash"`
+	Instances []string  `json:"instances"`
+	Count     int       `json:"count"`
+	FirstSeen time.Time `json:"firstSeen"`
+	LastSeen  time.Time `json:"lastSeen"`
+	IsRunning bool      `json:"running"`
+}
+
+// RefreshTargets narrows refresh operations to specific strategies or revision hashes.
+type RefreshTargets struct {
+	Strategies []string
+	Hashes     []string
+}
+
+// RefreshResult captures the outcome of a targeted refresh operation.
+type RefreshResult struct {
+	Selector     string   `json:"selector"`
+	Strategy     string   `json:"strategy"`
+	Hash         string   `json:"hash"`
+	PreviousHash string   `json:"previousHash,omitempty"`
+	Instances    []string `json:"instances,omitempty"`
+	Reason       string   `json:"reason"`
+}
+
+type refreshTargetFilter struct {
+	all bool
+
+	selectors   map[string]struct{}
+	identifiers map[string]struct{}
+	hashes      map[string]struct{}
+
+	requestedSelectors []string
+	requestedHashes    []string
+
+	matchedSelectors map[string]bool
+	matchedHashes    map[string]bool
+}
+
+type refreshMatch struct {
+	matched       bool
+	byHash        bool
+	bySelector    bool
+	byIdentifier  bool
+	selectorKey   string
+	identifierKey string
+	hashKey       string
+}
+
+func newRevisionUsage(strategy, hash string) *revisionUsage {
+	return &revisionUsage{
+		strategy:  strategy,
+		hash:      hash,
+		instances: make(map[string]struct{}, 4),
+	}
+}
+
+func (u *revisionUsage) addInstance(id string, now time.Time) bool {
+	if u == nil || id == "" {
+		return false
+	}
+	if u.instances == nil {
+		u.instances = make(map[string]struct{}, 4)
+	}
+	if _, exists := u.instances[id]; exists {
+		u.lastSeen = now
+		return false
+	}
+	u.instances[id] = struct{}{}
+	if u.firstSeen.IsZero() {
+		u.firstSeen = now
+	}
+	u.lastSeen = now
+	return true
+}
+
+func (u *revisionUsage) removeInstance(id string, now time.Time) bool {
+	if u == nil || id == "" {
+		return false
+	}
+	if _, exists := u.instances[id]; !exists {
+		return false
+	}
+	delete(u.instances, id)
+	u.lastSeen = now
+	return true
+}
+
+func (u *revisionUsage) snapshot() RevisionUsageSummary {
+	if u == nil {
+		return RevisionUsageSummary{}
+	}
+	out := RevisionUsageSummary{
+		Strategy:  u.strategy,
+		Hash:      u.hash,
+		Count:     len(u.instances),
+		FirstSeen: u.firstSeen,
+		LastSeen:  u.lastSeen,
+		IsRunning: len(u.instances) > 0,
+	}
+	if len(u.instances) > 0 {
+		names := make([]string, 0, len(u.instances))
+		for id := range u.instances {
+			names = append(names, id)
+		}
+		sort.Strings(names)
+		out.Instances = names
+	}
+	return out
+}
 
 func buildRiskLimits(cfg config.RiskConfig, logger *log.Logger) risk.Limits {
 	maxPosSize, _ := decimal.NewFromString(cfg.MaxPositionSize)
@@ -134,12 +261,17 @@ type Manager struct {
 	riskManager *risk.Manager
 	jsLoader    *js.Loader
 	dynamic     map[string]struct{}
+	clock       func() time.Time
 	strategyDir string
 	base        map[string]StrategyDefinition
 
 	strategies map[string]StrategyDefinition
 	specs      map[string]config.LambdaSpec
 	instances  map[string]*lambdaInstance
+
+	revisionUsage           map[string]*revisionUsage
+	revisionGauge           metric.Int64ObservableGauge
+	revisionLifecycleMetric metric.Int64Counter
 }
 
 type lambdaInstance struct {
@@ -147,6 +279,7 @@ type lambdaInstance struct {
 	cancel context.CancelFunc
 	errs   <-chan error
 	strat  core.TradingStrategy
+	revKey string
 }
 
 // NewManager creates a new lambda manager with the specified dependencies.
@@ -177,27 +310,482 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 	}
 
 	mgr := &Manager{
-		mu:           sync.RWMutex{},
-		lifecycleMu:  sync.RWMutex{},
-		lifecycleCtx: context.Background(),
-		bus:          bus,
-		pools:        pools,
-		providers:    providers,
-		logger:       logger,
-		registrar:    registrar,
-		riskManager:  rm,
-		jsLoader:     loader,
-		dynamic:      make(map[string]struct{}),
-		strategyDir:  loader.Root(),
-		base:         make(map[string]StrategyDefinition),
-		strategies:   make(map[string]StrategyDefinition),
-		specs:        make(map[string]config.LambdaSpec),
-		instances:    make(map[string]*lambdaInstance),
+		mu:            sync.RWMutex{},
+		lifecycleMu:   sync.RWMutex{},
+		lifecycleCtx:  context.Background(),
+		bus:           bus,
+		pools:         pools,
+		providers:     providers,
+		logger:        logger,
+		registrar:     registrar,
+		riskManager:   rm,
+		jsLoader:      loader,
+		dynamic:       make(map[string]struct{}),
+		clock:         time.Now,
+		strategyDir:   loader.Root(),
+		base:          make(map[string]StrategyDefinition),
+		strategies:    make(map[string]StrategyDefinition),
+		specs:         make(map[string]config.LambdaSpec),
+		instances:     make(map[string]*lambdaInstance),
+		revisionUsage: make(map[string]*revisionUsage),
 	}
+	mgr.setupMetrics()
 	if _, err := mgr.installJavaScriptStrategies(context.Background()); err != nil {
 		return nil, fmt.Errorf("lambda manager: install javascript strategies: %w", err)
 	}
 	return mgr, nil
+}
+
+func (m *Manager) setupMetrics() {
+	if m == nil {
+		return
+	}
+	meter := otel.Meter("lambda-manager")
+	gauge, err := meter.Int64ObservableGauge("strategy_revision_instances",
+		metric.WithDescription("Number of running lambda instances per strategy revision"),
+		metric.WithUnit("{instance}"),
+		metric.WithInt64Callback(m.observeRevisionUsage),
+	)
+	if err == nil {
+		m.revisionGauge = gauge
+	} else if m.logger != nil {
+		m.logger.Printf("lambda manager: register revision gauge: %v", err)
+	}
+	counter, err := meter.Int64Counter("strategy_revision_instances_total",
+		metric.WithDescription("Lifecycle transitions for strategy revisions"),
+		metric.WithUnit("{event}"),
+	)
+	if err == nil {
+		m.revisionLifecycleMetric = counter
+	} else if m.logger != nil {
+		m.logger.Printf("lambda manager: register revision counter: %v", err)
+	}
+}
+
+func (m *Manager) observeRevisionUsage(_ context.Context, observer metric.Int64Observer) error {
+	if m == nil || observer == nil {
+		return nil
+	}
+	m.mu.RLock()
+	snapshot := m.revisionUsageSnapshotLocked()
+	m.mu.RUnlock()
+	env := telemetry.Environment()
+	for _, usage := range snapshot {
+		observer.Observe(int64(usage.Count), metric.WithAttributes(
+			attribute.String("environment", env),
+			attribute.String("strategy", usage.Strategy),
+			attribute.String("hash", usage.Hash),
+		))
+	}
+	return nil
+}
+
+func (m *Manager) now() time.Time {
+	if m == nil || m.clock == nil {
+		return time.Now()
+	}
+	return m.clock()
+}
+
+func (m *Manager) ensureRevisionUsageLocked(strategy, hash string) *revisionUsage {
+	key := buildRevisionKey(strategy, hash)
+	usage, ok := m.revisionUsage[key]
+	if !ok {
+		usage = newRevisionUsage(strategy, hash)
+		m.revisionUsage[key] = usage
+	}
+	return usage
+}
+
+func (m *Manager) markInstanceRunningLocked(spec config.LambdaSpec, instanceID string) string {
+	strategy, hash, key := revisionSignatureForSpec(spec)
+	usage := m.ensureRevisionUsageLocked(strategy, hash)
+	if usage.addInstance(instanceID, m.now()) {
+		m.recordRevisionLifecycle(usage, "start")
+	}
+	return key
+}
+
+func (m *Manager) markInstanceStoppedLocked(revisionKey, instanceID string) {
+	if revisionKey == "" {
+		return
+	}
+	usage, ok := m.revisionUsage[revisionKey]
+	if !ok {
+		return
+	}
+	if usage.removeInstance(instanceID, m.now()) {
+		m.recordRevisionLifecycle(usage, "stop")
+	}
+}
+
+func (m *Manager) revisionUsageSummary(spec config.LambdaSpec) *RevisionUsageSummary {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.revisionUsageSummaryLocked(spec)
+}
+
+func (m *Manager) revisionUsageSummaryLocked(spec config.LambdaSpec) *RevisionUsageSummary {
+	strategy, hash, key := revisionSignatureForSpec(spec)
+	if usage, ok := m.revisionUsage[key]; ok {
+		snapshot := usage.snapshot()
+		return &snapshot
+	}
+	summary := RevisionUsageSummary{
+		Strategy: strategy,
+		Hash:     hash,
+	}
+	return &summary
+}
+
+func (m *Manager) recordRevisionLifecycle(usage *revisionUsage, action string) {
+	if m == nil || usage == nil || m.revisionLifecycleMetric == nil {
+		return
+	}
+	ctx := context.Background()
+	m.revisionLifecycleMetric.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("environment", telemetry.Environment()),
+		attribute.String("strategy", usage.strategy),
+		attribute.String("hash", usage.hash),
+		attribute.String("action", strings.ToLower(strings.TrimSpace(action))),
+	))
+}
+
+func (m *Manager) revisionUsageSnapshotLocked() []RevisionUsageSummary {
+	if m == nil {
+		return nil
+	}
+	out := make([]RevisionUsageSummary, 0, len(m.revisionUsage))
+	for _, usage := range m.revisionUsage {
+		out = append(out, usage.snapshot())
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Strategy != out[j].Strategy {
+			return out[i].Strategy < out[j].Strategy
+		}
+		return out[i].Hash < out[j].Hash
+	})
+	return out
+}
+
+// RevisionUsageSnapshot returns a stable view of revision usage for external consumers.
+func (m *Manager) RevisionUsageSnapshot() []RevisionUsageSummary {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	snapshot := m.revisionUsageSnapshotLocked()
+	if len(snapshot) == 0 {
+		return nil
+	}
+	out := make([]RevisionUsageSummary, len(snapshot))
+	copy(out, snapshot)
+	return out
+}
+
+func revisionSignatureForSpec(spec config.LambdaSpec) (strategy string, hash string, key string) {
+	strategy = normalizeStrategyName(spec.Strategy.Identifier)
+	hash = normalizeRevisionHash(spec.Strategy.Hash)
+	key = buildRevisionKey(strategy, hash)
+	return
+}
+
+func normalizeStrategyName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func normalizeRevisionHash(hash string) string {
+	return strings.TrimSpace(hash)
+}
+
+func buildRevisionKey(strategy, hash string) string {
+	return strategy + revisionKeySeparator + hash
+}
+
+func normalizeSelector(selector string) string {
+	return strings.ToLower(strings.TrimSpace(selector))
+}
+
+func newRefreshTargetFilter(targets RefreshTargets) refreshTargetFilter {
+	filter := refreshTargetFilter{
+		selectors:          make(map[string]struct{}),
+		identifiers:        make(map[string]struct{}),
+		hashes:             make(map[string]struct{}),
+		requestedSelectors: make([]string, 0, len(targets.Strategies)),
+		requestedHashes:    make([]string, 0, len(targets.Hashes)),
+	}
+
+	for _, raw := range targets.Strategies {
+		if trimmed := strings.TrimSpace(raw); trimmed != "" {
+			selector := normalizeSelector(trimmed)
+			if selector != "" {
+				filter.selectors[selector] = struct{}{}
+				filter.requestedSelectors = append(filter.requestedSelectors, selector)
+			}
+			name := normalizeStrategyName(trimmed)
+			if name != "" {
+				filter.identifiers[name] = struct{}{}
+			}
+		}
+	}
+
+	for _, raw := range targets.Hashes {
+		if trimmed := normalizeRevisionHash(raw); trimmed != "" {
+			filter.hashes[trimmed] = struct{}{}
+			filter.requestedHashes = append(filter.requestedHashes, trimmed)
+		}
+	}
+
+	filter.all = len(filter.selectors) == 0 && len(filter.identifiers) == 0 && len(filter.hashes) == 0
+	return filter
+}
+
+func (f *refreshTargetFilter) matchSpec(spec config.LambdaSpec) refreshMatch {
+	if f == nil {
+		return refreshMatch{}
+	}
+	if f.all {
+		return refreshMatch{matched: true}
+	}
+
+	match := refreshMatch{}
+
+	hash := normalizeRevisionHash(spec.Strategy.Hash)
+	if hash != "" {
+		if _, ok := f.hashes[hash]; ok {
+			match.matched = true
+			match.byHash = true
+			match.hashKey = hash
+		}
+	}
+
+	selector := normalizeSelector(spec.Strategy.Selector)
+	if selector != "" {
+		if _, ok := f.selectors[selector]; ok {
+			match.matched = true
+			match.bySelector = true
+			match.selectorKey = selector
+		}
+	}
+
+	identifier := normalizeStrategyName(spec.Strategy.Identifier)
+	if identifier != "" {
+		if _, ok := f.identifiers[identifier]; ok {
+			match.matched = true
+			match.byIdentifier = true
+			match.identifierKey = identifier
+		}
+	}
+
+	if match.bySelector && match.selectorKey == "" {
+		match.selectorKey = selector
+	}
+	if match.byIdentifier && match.identifierKey == "" {
+		match.identifierKey = identifier
+	}
+
+	return match
+}
+
+func (f *refreshTargetFilter) recordMatch(match refreshMatch) {
+	if f == nil || f.all || !match.matched {
+		return
+	}
+	if match.byHash && match.hashKey != "" {
+		if f.matchedHashes == nil {
+			f.matchedHashes = make(map[string]bool, len(f.hashes))
+		}
+		f.matchedHashes[match.hashKey] = true
+	}
+	if match.bySelector && match.selectorKey != "" {
+		if f.matchedSelectors == nil {
+			f.matchedSelectors = make(map[string]bool, len(f.selectors)+len(f.identifiers))
+		}
+		f.matchedSelectors[match.selectorKey] = true
+	}
+	if match.byIdentifier && match.identifierKey != "" {
+		if f.matchedSelectors == nil {
+			f.matchedSelectors = make(map[string]bool, len(f.selectors)+len(f.identifiers))
+		}
+		f.matchedSelectors[match.identifierKey] = true
+	}
+}
+
+func (f refreshTargetFilter) unmatchedHashTargets() []string {
+	if f.all || len(f.requestedHashes) == 0 {
+		return nil
+	}
+	var out []string
+	for _, hash := range f.requestedHashes {
+		if f.matchedHashes != nil && f.matchedHashes[hash] {
+			continue
+		}
+		out = append(out, hash)
+	}
+	return out
+}
+
+func (f refreshTargetFilter) unmatchedSelectors() []string {
+	if f.all || len(f.requestedSelectors) == 0 {
+		return nil
+	}
+	var out []string
+	for _, selector := range f.requestedSelectors {
+		if f.matchedSelectors != nil && f.matchedSelectors[selector] {
+			continue
+		}
+		out = append(out, selector)
+	}
+	return out
+}
+
+func ensureRefreshResult(results map[string]*RefreshResult, id string, spec config.LambdaSpec) *RefreshResult {
+	if results == nil {
+		return nil
+	}
+	if existing, ok := results[id]; ok {
+		return existing
+	}
+	selector := spec.Strategy.Selector
+	if selector == "" {
+		selector = spec.Strategy.Identifier
+	}
+	result := &RefreshResult{
+		Selector:     selector,
+		Strategy:     spec.Strategy.Identifier,
+		Hash:         spec.Strategy.Hash,
+		PreviousHash: spec.Strategy.Hash,
+		Instances:    []string{id},
+	}
+	results[id] = result
+	return result
+}
+
+func pickRefreshReason(current, candidate string) string {
+	switch candidate {
+	case "":
+		return current
+	case "retired":
+		return "retired"
+	case "refreshed":
+		if current == "" || current == "alreadyPinned" {
+			return "refreshed"
+		}
+		return current
+	case "alreadyPinned":
+		if current == "" {
+			return "alreadyPinned"
+		}
+		return current
+	default:
+		if current == "" {
+			return candidate
+		}
+		return current
+	}
+}
+
+func buildUnmatchedRefreshResults(filter refreshTargetFilter) []RefreshResult {
+	if filter.all {
+		return nil
+	}
+	var out []RefreshResult
+	for _, hash := range filter.unmatchedHashTargets() {
+		out = append(out, RefreshResult{
+			Selector:     hash,
+			Hash:         hash,
+			PreviousHash: hash,
+			Reason:       "retired",
+		})
+	}
+	for _, selector := range filter.unmatchedSelectors() {
+		out = append(out, RefreshResult{
+			Selector: selector,
+			Reason:   "retired",
+		})
+	}
+	return out
+}
+
+func cloneRevisionUsage(src *RevisionUsageSummary) *RevisionUsageSummary {
+	if src == nil {
+		return nil
+	}
+	cloned := *src
+	if len(src.Instances) > 0 {
+		cloned.Instances = append([]string(nil), src.Instances...)
+	}
+	return &cloned
+}
+
+func convertModuleUsageSnapshots(usages []RevisionUsageSummary) []js.ModuleUsageSnapshot {
+	if len(usages) == 0 {
+		return nil
+	}
+	out := make([]js.ModuleUsageSnapshot, 0, len(usages))
+	for _, usage := range usages {
+		snapshot := js.ModuleUsageSnapshot{
+			Name:      usage.Strategy,
+			Hash:      usage.Hash,
+			Instances: append([]string(nil), usage.Instances...),
+			Count:     usage.Count,
+			FirstSeen: usage.FirstSeen,
+			LastSeen:  usage.LastSeen,
+		}
+		out = append(out, snapshot)
+	}
+	return out
+}
+
+// RevisionUsageFor returns usage metadata for the specified strategy revision.
+func (m *Manager) RevisionUsageFor(strategy, hash string) RevisionUsageSummary {
+	spec := config.LambdaSpec{
+		Strategy: config.LambdaStrategySpec{
+			Identifier: strategy,
+			Hash:       hash,
+		},
+	}
+	summary := m.revisionUsageSummary(spec)
+	if summary == nil {
+		return RevisionUsageSummary{
+			Strategy: normalizeStrategyName(strategy),
+			Hash:     normalizeRevisionHash(hash),
+		}
+	}
+	cloned := cloneRevisionUsage(summary)
+	if cloned == nil {
+		return RevisionUsageSummary{}
+	}
+	return *cloned
+}
+
+// RevisionInstances returns instance summaries pinned to the specified revision.
+func (m *Manager) RevisionInstances(strategy, hash string, includeStopped bool) []InstanceSummary {
+	normalizedStrategy := normalizeStrategyName(strategy)
+	normalizedHash := normalizeRevisionHash(hash)
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]InstanceSummary, 0)
+	for id, spec := range m.specs {
+		specStrategy := normalizeStrategyName(spec.Strategy.Identifier)
+		specHash := normalizeRevisionHash(spec.Strategy.Hash)
+		if specStrategy != normalizedStrategy || specHash != normalizedHash {
+			continue
+		}
+		_, running := m.instances[id]
+		if !running && !includeStopped {
+			continue
+		}
+		usage := m.revisionUsageSummaryLocked(spec)
+		out = append(out, summaryOf(spec, running, usage))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out
 }
 
 // SetLifecycleContext configures the parent context used to run lambda instances.
@@ -263,18 +851,31 @@ func (m *Manager) ApplyRiskConfig(cfg config.RiskConfig) risk.Limits {
 
 // RefreshJavaScriptStrategies reloads JavaScript modules and restarts affected instances.
 func (m *Manager) RefreshJavaScriptStrategies(ctx context.Context) error {
+	_, err := m.refreshJavaScriptStrategies(ctx, RefreshTargets{})
+	return err
+}
+
+// RefreshJavaScriptStrategiesWithTargets performs a filtered refresh limited to the supplied targets.
+func (m *Manager) RefreshJavaScriptStrategiesWithTargets(ctx context.Context, targets RefreshTargets) ([]RefreshResult, error) {
+	return m.refreshJavaScriptStrategies(ctx, targets)
+}
+
+func (m *Manager) refreshJavaScriptStrategies(ctx context.Context, targets RefreshTargets) ([]RefreshResult, error) {
 	if _, err := m.installJavaScriptStrategies(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	selections := m.snapshotStrategySelections()
+	filter := newRefreshTargetFilter(targets)
 	if len(selections) == 0 {
-		return nil
+		results := buildUnmatchedRefreshResults(filter)
+		return results, nil
 	}
 
 	dynamicSet := m.currentDynamicSet()
 	updates := make(map[string]config.LambdaSpec)
-	var restartIDs []string
-	var stopOnly []string
+	restartIDs := make([]string, 0)
+	stopOnly := make([]string, 0)
+	resultsByInstance := make(map[string]*RefreshResult)
 
 	for id, selection := range selections {
 		spec := selection.Spec
@@ -282,18 +883,29 @@ func (m *Manager) RefreshJavaScriptStrategies(ctx context.Context) error {
 		if _, ok := dynamicSet[name]; !ok && spec.Strategy.Hash == "" {
 			continue
 		}
+		match := filter.matchSpec(spec)
+		if !match.matched {
+			continue
+		}
+		filter.recordMatch(match)
+
+		result := ensureRefreshResult(resultsByInstance, id, spec)
 		selector := spec.Strategy.Selector
 		if selector == "" {
 			selector = spec.Strategy.Identifier
 		}
 		if selector == "" || m.jsLoader == nil {
+			result.Reason = pickRefreshReason(result.Reason, "retired")
+			stopOnly = append(stopOnly, id)
 			continue
 		}
 		resolution, err := m.jsLoader.ResolveReference(selector)
 		if err != nil {
+			result.Reason = pickRefreshReason(result.Reason, "retired")
 			stopOnly = append(stopOnly, id)
 			continue
 		}
+
 		oldHash := spec.Strategy.Hash
 		spec.Strategy.Identifier = resolution.Name
 		spec.Strategy.Hash = resolution.Hash
@@ -301,6 +913,14 @@ func (m *Manager) RefreshJavaScriptStrategies(ctx context.Context) error {
 		spec.Strategy.Version = resolution.Module.Version
 		spec.Strategy.Selector = canonicalSelector(selector, resolution)
 		updates[id] = spec
+
+		result.Hash = resolution.Hash
+		result.Selector = spec.Strategy.Selector
+		result.Strategy = spec.Strategy.Identifier
+		result.Reason = pickRefreshReason(result.Reason, "alreadyPinned")
+		if oldHash != resolution.Hash {
+			result.Reason = pickRefreshReason(result.Reason, "refreshed")
+		}
 
 		if selection.Running && oldHash != resolution.Hash {
 			restartIDs = append(restartIDs, id)
@@ -310,6 +930,8 @@ func (m *Manager) RefreshJavaScriptStrategies(ctx context.Context) error {
 	if len(updates) > 0 {
 		m.mu.Lock()
 		for id, updated := range updates {
+			strategy, hash, _ := revisionSignatureForSpec(updated)
+			m.ensureRevisionUsageLocked(strategy, hash)
 			m.specs[id] = cloneSpec(updated)
 		}
 		m.mu.Unlock()
@@ -336,7 +958,26 @@ func (m *Manager) RefreshJavaScriptStrategies(ctx context.Context) error {
 			}
 		}
 	}
-	return nil
+
+	results := make([]RefreshResult, 0, len(resultsByInstance))
+	for _, res := range resultsByInstance {
+		if res.Reason == "" {
+			res.Reason = "alreadyPinned"
+		}
+		results = append(results, *res)
+	}
+
+	unmatched := buildUnmatchedRefreshResults(filter)
+	results = append(results, unmatched...)
+
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Selector != results[j].Selector {
+			return results[i].Selector < results[j].Selector
+		}
+		return results[i].Strategy < results[j].Strategy
+	})
+
+	return results, nil
 }
 
 func normalizeStrategyDefinition(def StrategyDefinition) (StrategyDefinition, error) {
@@ -519,6 +1160,8 @@ func (m *Manager) ensureSpec(spec config.LambdaSpec, allowReplace bool) error {
 	if _, exists := m.specs[spec.ID]; exists && !allowReplace {
 		return ErrInstanceExists
 	}
+	strategy, hash, _ := revisionSignatureForSpec(spec)
+	m.ensureRevisionUsageLocked(strategy, hash)
 	m.specs[spec.ID] = cloneSpec(spec)
 	return nil
 }
@@ -599,7 +1242,8 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 	}
 
 	m.mu.Lock()
-	m.instances[spec.ID] = &lambdaInstance{base: base, cancel: cancel, errs: errs, strat: strategy}
+	revisionKey := m.markInstanceRunningLocked(spec, spec.ID)
+	m.instances[spec.ID] = &lambdaInstance{base: base, cancel: cancel, errs: errs, strat: strategy, revKey: revisionKey}
 	m.mu.Unlock()
 
 	go m.observe(runCtx, spec.ID, errs, strategy)
@@ -633,7 +1277,9 @@ func (m *Manager) Stop(id string) error {
 		m.mu.Unlock()
 		return ErrInstanceNotRunning
 	}
+	revKey := inst.revKey
 	delete(m.instances, id)
+	m.markInstanceStoppedLocked(revKey, id)
 	m.mu.Unlock()
 
 	inst.cancel()
@@ -701,15 +1347,16 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 
 // InstanceSummary provides a flattened overview of a lambda instance.
 type InstanceSummary struct {
-	ID                 string   `json:"id"`
-	StrategyIdentifier string   `json:"strategyIdentifier"`
-	StrategyTag        string   `json:"strategyTag,omitempty"`
-	StrategyHash       string   `json:"strategyHash,omitempty"`
-	StrategyVersion    string   `json:"strategyVersion,omitempty"`
-	StrategySelector   string   `json:"strategySelector,omitempty"`
-	Providers          []string `json:"providers"`
-	AggregatedSymbols  []string `json:"aggregatedSymbols"`
-	Running            bool     `json:"running"`
+	ID                 string                `json:"id"`
+	StrategyIdentifier string                `json:"strategyIdentifier"`
+	StrategyTag        string                `json:"strategyTag,omitempty"`
+	StrategyHash       string                `json:"strategyHash,omitempty"`
+	StrategyVersion    string                `json:"strategyVersion,omitempty"`
+	StrategySelector   string                `json:"strategySelector,omitempty"`
+	Providers          []string              `json:"providers"`
+	AggregatedSymbols  []string              `json:"aggregatedSymbols"`
+	Running            bool                  `json:"running"`
+	Usage              *RevisionUsageSummary `json:"usage,omitempty"`
 }
 
 // InstanceSnapshot captures the detailed state of a lambda instance.
@@ -720,6 +1367,7 @@ type InstanceSnapshot struct {
 	ProviderSymbols   map[string]config.ProviderSymbols `json:"scope"`
 	AggregatedSymbols []string                          `json:"aggregatedSymbols"`
 	Running           bool                              `json:"running"`
+	Usage             *RevisionUsageSummary             `json:"usage,omitempty"`
 }
 
 // Instances returns summaries of all lambda instances.
@@ -729,7 +1377,8 @@ func (m *Manager) Instances() []InstanceSummary {
 	out := make([]InstanceSummary, 0, len(m.specs))
 	for id, spec := range m.specs {
 		_, running := m.instances[id]
-		out = append(out, summaryOf(spec, running))
+		usage := m.revisionUsageSummaryLocked(spec)
+		out = append(out, summaryOf(spec, running, usage))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -753,15 +1402,17 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 			ProviderSymbols:   map[string]config.ProviderSymbols{},
 			AggregatedSymbols: []string{},
 			Running:           false,
+			Usage:             nil,
 		}, false
 	}
 	m.mu.RLock()
 	_, running := m.instances[spec.ID]
+	usage := m.revisionUsageSummaryLocked(spec)
 	m.mu.RUnlock()
-	return snapshotOf(spec, running), true
+	return snapshotOf(spec, running, usage), true
 }
 
-func summaryOf(spec config.LambdaSpec, running bool) InstanceSummary {
+func summaryOf(spec config.LambdaSpec, running bool, usage *RevisionUsageSummary) InstanceSummary {
 	providers := append([]string(nil), spec.Providers...)
 	aggregated := spec.AllSymbols()
 	return InstanceSummary{
@@ -774,10 +1425,11 @@ func summaryOf(spec config.LambdaSpec, running bool) InstanceSummary {
 		Providers:          providers,
 		AggregatedSymbols:  aggregated,
 		Running:            running,
+		Usage:              cloneRevisionUsage(usage),
 	}
 }
 
-func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
+func snapshotOf(spec config.LambdaSpec, running bool, usage *RevisionUsageSummary) InstanceSnapshot {
 	strategyConfig := copyMap(spec.Strategy.Config)
 	providers := append([]string(nil), spec.Providers...)
 	assignments := cloneProviderSymbols(spec.ProviderSymbols)
@@ -796,6 +1448,7 @@ func snapshotOf(spec config.LambdaSpec, running bool) InstanceSnapshot {
 		ProviderSymbols:   assignments,
 		AggregatedSymbols: aggregated,
 		Running:           running,
+		Usage:             cloneRevisionUsage(usage),
 	}
 }
 
@@ -986,7 +1639,8 @@ func (m *Manager) StrategyModules() []js.ModuleSummary {
 	if m == nil || m.jsLoader == nil {
 		return nil
 	}
-	return m.jsLoader.List()
+	usage := convertModuleUsageSnapshots(m.RevisionUsageSnapshot())
+	return m.jsLoader.ListWithUsage(usage)
 }
 
 // StrategyModule returns module metadata for a specific strategy.
@@ -994,11 +1648,48 @@ func (m *Manager) StrategyModule(name string) (js.ModuleSummary, error) {
 	if m == nil || m.jsLoader == nil {
 		return js.ModuleSummary{}, js.ErrModuleNotFound
 	}
-	summary, err := m.jsLoader.Module(name)
+	usage := convertModuleUsageSnapshots(m.RevisionUsageSnapshot())
+	summary, err := m.jsLoader.ModuleWithUsage(name, usage)
 	if err != nil {
 		return js.ModuleSummary{}, fmt.Errorf("strategy module %q: %w", name, err)
 	}
 	return summary, nil
+}
+
+// ResolveStrategySelector resolves a module selector into the corresponding revision.
+func (m *Manager) ResolveStrategySelector(selector string) (js.ModuleResolution, error) {
+	if m == nil || m.jsLoader == nil {
+		return js.ModuleResolution{}, fmt.Errorf("strategy loader unavailable")
+	}
+	return m.jsLoader.ResolveReference(selector)
+}
+
+// RevisionUsageDetail resolves a selector and returns usage metadata with matching instances.
+func (m *Manager) RevisionUsageDetail(selector string, includeStopped bool) (RevisionUsageSummary, string, []InstanceSummary, error) {
+	resolution, err := m.ResolveStrategySelector(selector)
+	if err != nil {
+		return RevisionUsageSummary{}, "", nil, err
+	}
+	summary := m.RevisionUsageFor(resolution.Name, resolution.Hash)
+	canonical := canonicalSelector(selector, resolution)
+	if canonical == "" {
+		canonical = selector
+	}
+	instances := m.RevisionInstances(resolution.Name, resolution.Hash, includeStopped)
+	return summary, canonical, instances, nil
+}
+
+// RegistryExport returns the registry manifest alongside usage summaries.
+func (m *Manager) RegistryExport() (js.RegistrySnapshot, []RevisionUsageSummary, error) {
+	if m == nil || m.jsLoader == nil {
+		return nil, nil, fmt.Errorf("strategy loader unavailable")
+	}
+	snapshot, err := m.jsLoader.RegistrySnapshot()
+	if err != nil {
+		return nil, nil, err
+	}
+	usage := m.RevisionUsageSnapshot()
+	return snapshot, usage, nil
 }
 
 // StrategySource retrieves the raw JavaScript source for the named strategy.

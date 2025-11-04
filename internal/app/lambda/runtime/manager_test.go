@@ -259,6 +259,65 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	})
 }
 
+func TestManagerRevisionUsageDetail(t *testing.T) {
+	mgr := newTestManager(t)
+	spec := baseLambdaSpec()
+	if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
+		t.Fatalf("StartFromManifest: %v", err)
+	}
+	stored, err := mgr.specForID(spec.ID)
+	if err != nil {
+		t.Fatalf("specForID: %v", err)
+	}
+	mgr.mu.Lock()
+	revisionKey := mgr.markInstanceRunningLocked(stored, spec.ID)
+	mgr.instances[spec.ID] = &lambdaInstance{revKey: revisionKey}
+	mgr.mu.Unlock()
+
+	usage := mgr.RevisionUsageFor(stored.Strategy.Identifier, stored.Strategy.Hash)
+	if usage.Count != 1 {
+		t.Fatalf("expected count 1, got %d", usage.Count)
+	}
+	if len(usage.Instances) != 1 || usage.Instances[0] != spec.ID {
+		t.Fatalf("unexpected instances slice: %+v", usage.Instances)
+	}
+
+	detail, canonical, instances, err := mgr.RevisionUsageDetail(stored.Strategy.Selector, false)
+	if err != nil {
+		t.Fatalf("RevisionUsageDetail: %v", err)
+	}
+	if canonical == "" {
+		t.Fatalf("expected canonical selector, got empty string")
+	}
+	if detail.Count != 1 {
+		t.Fatalf("expected detail count 1, got %d", detail.Count)
+	}
+	if len(instances) != 1 || !instances[0].Running {
+		t.Fatalf("expected single running instance, got %+v", instances)
+	}
+
+	mgr.mu.Lock()
+	delete(mgr.instances, spec.ID)
+	mgr.markInstanceStoppedLocked(revisionKey, spec.ID)
+	mgr.mu.Unlock()
+
+	post := mgr.RevisionUsageFor(stored.Strategy.Identifier, stored.Strategy.Hash)
+	if post.Count != 0 {
+		t.Fatalf("expected count 0 after stop, got %d", post.Count)
+	}
+	if post.LastSeen.IsZero() {
+		t.Fatalf("expected lastSeen to be recorded")
+	}
+
+	_, _, allInstances, err := mgr.RevisionUsageDetail(stored.Strategy.Selector, true)
+	if err != nil {
+		t.Fatalf("RevisionUsageDetail includeStopped: %v", err)
+	}
+	if len(allInstances) != 1 || allInstances[0].Running {
+		t.Fatalf("expected stopped instance in result, got %+v", allInstances)
+	}
+}
+
 func TestRemoveStrategyGuardedWhenHashInUse(t *testing.T) {
 	mgr := newTestManager(t)
 	spec := config.LambdaSpec{

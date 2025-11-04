@@ -752,3 +752,83 @@ func (i *httpTestProviderInstance) SubmitOrder(ctx context.Context, req schema.O
 func (i *httpTestProviderInstance) SubscribeRoute(route dispatcher.Route) error   { return nil }
 func (i *httpTestProviderInstance) UnsubscribeRoute(route dispatcher.Route) error { return nil }
 func (i *httpTestProviderInstance) Instruments() []schema.Instrument              { return nil }
+
+func TestFilterModuleSummaries(t *testing.T) {
+	modules := []js.ModuleSummary{
+		{
+			Name:      "alpha",
+			Revisions: []js.ModuleRevision{{Hash: "sha256:a"}},
+			Running:   []js.ModuleUsage{{Hash: "sha256:a", Count: 2, Instances: []string{"one"}}},
+		},
+		{
+			Name:      "beta",
+			Revisions: []js.ModuleRevision{{Hash: "sha256:b"}},
+		},
+	}
+
+	values := url.Values{}
+	values.Set("runningOnly", "true")
+	filtered, total, offset, limit, err := filterModuleSummaries(modules, values)
+	if err != nil {
+		t.Fatalf("runningOnly filter: %v", err)
+	}
+	if total != 1 || len(filtered) != 1 {
+		t.Fatalf("expected single running module, got total=%d filtered=%d", total, len(filtered))
+	}
+	if filtered[0].Name != "alpha" {
+		t.Fatalf("expected alpha module, got %s", filtered[0].Name)
+	}
+	if offset != 0 || limit != -1 {
+		t.Fatalf("unexpected pagination defaults offset=%d limit=%d", offset, limit)
+	}
+
+	values = url.Values{}
+	values.Set("hash", "sha256:b")
+	filtered, total, _, _, err = filterModuleSummaries(modules, values)
+	if err != nil {
+		t.Fatalf("hash filter: %v", err)
+	}
+	if total != 1 || len(filtered) != 1 {
+		t.Fatalf("expected single module after hash filter, got total=%d filtered=%d", total, len(filtered))
+	}
+	if len(filtered[0].Revisions) != 1 || filtered[0].Revisions[0].Hash != "sha256:b" {
+		t.Fatalf("expected revision filtered to sha256:b, got %+v", filtered[0].Revisions)
+	}
+
+	values = url.Values{}
+	values.Set("strategy", "alpha")
+	values.Set("limit", "1")
+	values.Set("offset", "0")
+	filtered, total, offset, limit, err = filterModuleSummaries(modules, values)
+	if err != nil {
+		t.Fatalf("pagination filter: %v", err)
+	}
+	if total != 1 || len(filtered) != 1 {
+		t.Fatalf("expected single module for strategy alpha, got total=%d filtered=%d", total, len(filtered))
+	}
+	if offset != 0 || limit != 1 {
+		t.Fatalf("expected offset=0 limit=1, got offset=%d limit=%d", offset, limit)
+	}
+
+	values = url.Values{}
+	values.Set("limit", "-1")
+	if _, _, _, _, err := filterModuleSummaries(modules, values); err == nil {
+		t.Fatalf("expected error for negative limit")
+	}
+}
+
+func TestBuildUsageSelector(t *testing.T) {
+	if sel := buildUsageSelector("noop@hash", "noop", "hash"); sel != "noop@hash" {
+		t.Fatalf("expected selector passthrough, got %s", sel)
+	}
+	if sel := buildUsageSelector("", "Logging", "sha256:abc"); sel != "logging@sha256:abc" {
+		t.Fatalf("expected auto selector, got %s", sel)
+	}
+	if sel := buildUsageSelector("", "", "sha256:abc"); sel != "" {
+		t.Fatalf("expected empty selector when identifier missing, got %s", sel)
+	}
+	expected := strategyModulePrefix + url.PathEscape("logging@sha256:abc") + strategyUsageSuffix
+	if url := buildModuleUsageURL("logging@sha256:abc"); url != expected {
+		t.Fatalf("unexpected usage URL %s", url)
+	}
+}

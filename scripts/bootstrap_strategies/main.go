@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dop251/goja"
 	json "github.com/goccy/go-json"
@@ -29,9 +30,23 @@ type registryLocation struct {
 	Path string `json:"path"`
 }
 
+type usageExport struct {
+	Usage []revisionUsage `json:"usage"`
+}
+
+type revisionUsage struct {
+	Strategy  string    `json:"strategy"`
+	Hash      string    `json:"hash"`
+	Instances []string  `json:"instances"`
+	Count     int       `json:"count"`
+	FirstSeen time.Time `json:"firstSeen"`
+	LastSeen  time.Time `json:"lastSeen"`
+}
+
 func main() {
 	root := flag.String("root", "strategies", "Path to the strategies directory")
 	write := flag.Bool("write", false, "Apply filesystem moves in addition to emitting registry.json")
+	usageFile := flag.String("usage", "", "Path to usage export JSON for highlighting unused revisions")
 	flag.Parse()
 
 	cleanRoot, err := ensureDir(*root)
@@ -89,6 +104,9 @@ func main() {
 	fmt.Printf("registry.json generated for %d strategies under %s\n", len(reg), cleanRoot)
 	if !*write {
 		fmt.Println("filesystem left untouched (pass -write to reorganize)")
+	}
+	if usagePath := strings.TrimSpace(*usageFile); usagePath != "" {
+		reportUsage(usagePath, reg)
 	}
 }
 
@@ -254,6 +272,59 @@ func writeRegistry(root string, reg map[string]registryEntry) error {
 		return fmt.Errorf("rename registry %s: %w", target, err)
 	}
 	return nil
+}
+
+func reportUsage(path string, reg map[string]registryEntry) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bootstrap: read usage export %s: %v\n", path, err)
+		return
+	}
+	var payload usageExport
+	if err := json.Unmarshal(data, &payload); err != nil {
+		var direct []revisionUsage
+		if err2 := json.Unmarshal(data, &direct); err2 != nil {
+			fmt.Fprintf(os.Stderr, "bootstrap: decode usage export %s: %v\n", path, err)
+			return
+		}
+		payload.Usage = direct
+	}
+	usageIndex := make(map[string]map[string]revisionUsage)
+	for _, usage := range payload.Usage {
+		name := strings.ToLower(strings.TrimSpace(usage.Strategy))
+		hash := strings.TrimSpace(usage.Hash)
+		if name == "" || hash == "" {
+			continue
+		}
+		if _, ok := usageIndex[name]; !ok {
+			usageIndex[name] = make(map[string]revisionUsage)
+		}
+		usageIndex[name][hash] = usage
+	}
+	var unused []string
+	for name, entry := range reg {
+		normalized := strings.ToLower(strings.TrimSpace(name))
+		for hash, loc := range entry.Hashes {
+			usage := usageIndex[normalized][hash]
+			if usage.Count == 0 {
+				tag := loc.Tag
+				if tag == "" {
+					tag = "(untagged)"
+				}
+				unused = append(unused, fmt.Sprintf("%s %s [%s]", name, tag, hash))
+			}
+		}
+	}
+	sort.Strings(unused)
+	fmt.Println()
+	if len(unused) == 0 {
+		fmt.Println("usage report: no unused revisions detected (all tracked hashes have usage).")
+		return
+	}
+	fmt.Println("usage report: revisions with zero running instances:")
+	for _, line := range unused {
+		fmt.Printf("  - %s\n", line)
+	}
 }
 
 func ensureDir(path string) (string, error) {

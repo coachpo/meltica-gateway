@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	json "github.com/goccy/go-json"
@@ -27,7 +30,9 @@ const (
 	strategyModulesPath  = strategiesPath + "/modules"
 	strategyModulePrefix = strategyModulesPath + "/"
 	strategyRefreshPath  = strategiesPath + "/refresh"
+	strategyRegistryPath = strategiesPath + "/registry"
 	strategySourceSuffix = "/source"
+	strategyUsageSuffix  = "/usage"
 
 	providersPath        = "/providers"
 	providerDetailPrefix = providersPath + "/"
@@ -77,6 +82,26 @@ type strategyModulePayload struct {
 	Source        string   `json:"source"`
 }
 
+type strategyRefreshPayload struct {
+	Hashes     []string `json:"hashes"`
+	Strategies []string `json:"strategies"`
+}
+
+type instanceLinks struct {
+	Self  string `json:"self,omitempty"`
+	Usage string `json:"usage,omitempty"`
+}
+
+type instanceSummaryResponse struct {
+	runtime.InstanceSummary
+	Links instanceLinks `json:"links"`
+}
+
+type instanceSnapshotResponse struct {
+	runtime.InstanceSnapshot
+	Links instanceLinks `json:"links"`
+}
+
 // NewHandler creates an HTTP handler for lambda management operations.
 func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *provider.Manager) http.Handler {
 	baseProviders := make(map[string]struct{}, len(appCfg.Providers))
@@ -114,6 +139,9 @@ func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *pr
 	mux.Handle(strategyModulePrefix, http.HandlerFunc(server.handleStrategyModule))
 	mux.Handle(strategyRefreshPath, server.methodHandlers(map[string]handlerFunc{
 		http.MethodPost: server.refreshStrategies,
+	}))
+	mux.Handle(strategyRegistryPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.exportStrategyRegistry,
 	}))
 
 	mux.Handle(providersPath, server.methodHandlers(map[string]handlerFunc{
@@ -190,12 +218,176 @@ func (s *httpServer) getStrategy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, meta)
 }
 
-func (s *httpServer) listStrategyModules(w http.ResponseWriter, _ *http.Request) {
+func (s *httpServer) listStrategyModules(w http.ResponseWriter, r *http.Request) {
 	modules := []js.ModuleSummary{}
 	if s.manager != nil {
 		modules = s.manager.StrategyModules()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"modules": modules})
+	filtered, total, offset, limit, err := filterModuleSummaries(modules, r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	response := map[string]any{
+		"modules": filtered,
+		"total":   total,
+		"offset":  offset,
+	}
+	if limit >= 0 {
+		response["limit"] = limit
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func filterModuleSummaries(modules []js.ModuleSummary, values url.Values) ([]js.ModuleSummary, int, int, int, error) {
+	if len(modules) == 0 {
+		return modules, 0, 0, -1, nil
+	}
+
+	strategyFilter := strings.TrimSpace(values.Get("strategy"))
+	hashFilter := strings.TrimSpace(values.Get("hash"))
+	runningOnly := false
+	if raw := values.Get("runningOnly"); raw != "" {
+		val, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("runningOnly must be a boolean")
+		}
+		runningOnly = val
+	}
+
+	limit := -1
+	if raw := values.Get("limit"); raw != "" {
+		val, err := strconv.Atoi(raw)
+		if err != nil || val < 0 {
+			return nil, 0, 0, 0, fmt.Errorf("limit must be a non-negative integer")
+		}
+		limit = val
+	}
+	offset := 0
+	if raw := values.Get("offset"); raw != "" {
+		val, err := strconv.Atoi(raw)
+		if err != nil || val < 0 {
+			return nil, 0, 0, 0, fmt.Errorf("offset must be a non-negative integer")
+		}
+		offset = val
+	}
+
+	filtered := make([]js.ModuleSummary, 0, len(modules))
+	for _, module := range modules {
+		if strategyFilter != "" && !strings.EqualFold(module.Name, strategyFilter) {
+			continue
+		}
+		if filteredModule, include := applyModuleFilters(module, hashFilter, runningOnly); include {
+			filtered = append(filtered, filteredModule)
+		}
+	}
+
+	total := len(filtered)
+	if total == 0 {
+		return filtered, 0, offset, limit, nil
+	}
+
+	if offset > total {
+		offset = total
+	}
+	end := total
+	if limit >= 0 && offset+limit < end {
+		end = offset + limit
+	}
+	paged := filtered[offset:end]
+	return paged, total, offset, limit, nil
+}
+
+func applyModuleFilters(module js.ModuleSummary, hashFilter string, runningOnly bool) (js.ModuleSummary, bool) {
+	filtered := module
+	filtered.Revisions = filterModuleRevisions(module.Revisions, hashFilter)
+	filtered.Running = filterModuleRunning(module.Running, hashFilter)
+
+	if strings.TrimSpace(hashFilter) != "" {
+		if len(filtered.Revisions) == 0 && len(filtered.Running) == 0 {
+			return js.ModuleSummary{}, false
+		}
+	}
+	if runningOnly && len(filtered.Running) == 0 {
+		return js.ModuleSummary{}, false
+	}
+	return filtered, true
+}
+
+func filterModuleRevisions(revisions []js.ModuleRevision, hashFilter string) []js.ModuleRevision {
+	if len(revisions) == 0 {
+		return nil
+	}
+	normalized := strings.TrimSpace(hashFilter)
+	out := make([]js.ModuleRevision, 0, len(revisions))
+	for _, revision := range revisions {
+		if normalized != "" && !strings.EqualFold(revision.Hash, normalized) {
+			continue
+		}
+		copy := revision
+		out = append(out, copy)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func filterModuleRunning(running []js.ModuleUsage, hashFilter string) []js.ModuleUsage {
+	if len(running) == 0 {
+		return nil
+	}
+	normalized := strings.TrimSpace(hashFilter)
+	out := make([]js.ModuleUsage, 0, len(running))
+	for _, usage := range running {
+		if normalized != "" && !strings.EqualFold(usage.Hash, normalized) {
+			continue
+		}
+		copy := usage
+		copy.Instances = append([]string(nil), usage.Instances...)
+		out = append(out, copy)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (s *httpServer) buildInstanceLinksFromSummary(summary runtime.InstanceSummary) instanceLinks {
+	selector := buildUsageSelector(summary.StrategySelector, summary.StrategyIdentifier, summary.StrategyHash)
+	return instanceLinks{
+		Self:  instanceDetailPrefix + url.PathEscape(summary.ID),
+		Usage: buildModuleUsageURL(selector),
+	}
+}
+
+func (s *httpServer) buildInstanceLinksFromSnapshot(snapshot runtime.InstanceSnapshot) instanceLinks {
+	selector := buildUsageSelector(snapshot.Strategy.Selector, snapshot.Strategy.Identifier, snapshot.Strategy.Hash)
+	return instanceLinks{
+		Self:  instanceDetailPrefix + url.PathEscape(snapshot.ID),
+		Usage: buildModuleUsageURL(selector),
+	}
+}
+
+func buildUsageSelector(selector, identifier, hash string) string {
+	trimmed := strings.TrimSpace(selector)
+	if trimmed != "" {
+		return trimmed
+	}
+	name := strings.ToLower(strings.TrimSpace(identifier))
+	normalizedHash := strings.TrimSpace(hash)
+	if name == "" || normalizedHash == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s@%s", name, normalizedHash)
+}
+
+func buildModuleUsageURL(selector string) string {
+	trimmed := strings.TrimSpace(selector)
+	if trimmed == "" {
+		return ""
+	}
+	return strategyModulePrefix + url.PathEscape(trimmed) + strategyUsageSuffix
 }
 
 func (s *httpServer) createStrategyModule(w http.ResponseWriter, r *http.Request) {
@@ -253,14 +445,24 @@ func (s *httpServer) handleStrategyModule(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, "module identifier required")
 		return
 	}
-	if len(segments) == 2 && segments[1] == strings.TrimPrefix(strategySourceSuffix, "/") {
-		s.getStrategyModuleSource(w, r, name)
-		return
+	if len(segments) == 2 {
+		switch segments[1] {
+		case strings.TrimPrefix(strategySourceSuffix, "/"):
+			s.getStrategyModuleSource(w, r, name)
+			return
+		case strings.TrimPrefix(strategyUsageSuffix, "/"):
+			s.getStrategyModuleUsage(w, r, name)
+			return
+		default:
+			writeError(w, http.StatusNotFound, "invalid module path")
+			return
+		}
 	}
 	if len(segments) != 1 {
 		writeError(w, http.StatusNotFound, "invalid module path")
 		return
 	}
+
 	switch r.Method {
 	case http.MethodGet:
 		s.getStrategyModule(w, name)
@@ -284,6 +486,100 @@ func (s *httpServer) getStrategyModule(w http.ResponseWriter, name string) {
 		return
 	}
 	writeJSON(w, http.StatusOK, summary)
+}
+
+func (s *httpServer) getStrategyModuleUsage(w http.ResponseWriter, r *http.Request, selector string) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+
+	query := r.URL.Query()
+
+	includeStopped := false
+	if raw := query.Get("includeStopped"); raw != "" {
+		val, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "includeStopped must be a boolean")
+			return
+		}
+		includeStopped = val
+	}
+
+	limit := -1
+	if raw := query.Get("limit"); raw != "" {
+		val, err := strconv.Atoi(raw)
+		if err != nil || val < 0 {
+			writeError(w, http.StatusBadRequest, "limit must be a non-negative integer")
+			return
+		}
+		limit = val
+	}
+
+	offset := 0
+	if raw := query.Get("offset"); raw != "" {
+		val, err := strconv.Atoi(raw)
+		if err != nil || val < 0 {
+			writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+			return
+		}
+		offset = val
+	}
+
+	usage, canonical, instances, err := s.manager.RevisionUsageDetail(selector, includeStopped)
+	if err != nil {
+		s.writeStrategyModuleError(w, err)
+		return
+	}
+
+	total := len(instances)
+	if offset > total {
+		offset = total
+	}
+	end := total
+	if limit >= 0 && offset+limit < end {
+		end = offset + limit
+	}
+	sliced := instances[offset:end]
+	responseInstances := make([]instanceSummaryResponse, 0, len(sliced))
+	for _, summary := range sliced {
+		responseInstances = append(responseInstances, instanceSummaryResponse{
+			InstanceSummary: summary,
+			Links:           s.buildInstanceLinksFromSummary(summary),
+		})
+	}
+
+	var limitValue any
+	if limit >= 0 {
+		limitValue = limit
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"selector":  canonical,
+		"strategy":  usage.Strategy,
+		"hash":      usage.Hash,
+		"usage":     usage,
+		"instances": responseInstances,
+		"total":     total,
+		"offset":    offset,
+		"limit":     limitValue,
+	})
+}
+
+func (s *httpServer) exportStrategyRegistry(w http.ResponseWriter, _ *http.Request) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+	registry, usage, err := s.manager.RegistryExport()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"registry": registry,
+		"usage":    usage,
+	})
 }
 
 func (s *httpServer) updateStrategyModule(w http.ResponseWriter, r *http.Request) {
@@ -361,11 +657,40 @@ func (s *httpServer) refreshStrategies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
 		return
 	}
-	if err := s.manager.RefreshJavaScriptStrategies(r.Context()); err != nil {
+	limitRequestBody(w, r)
+	defer func() { _ = r.Body.Close() }()
+
+	var payload strategyRefreshPayload
+	if r.Body != nil {
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+			writeDecodeError(w, err)
+			return
+		}
+	}
+
+	if len(payload.Hashes) == 0 && len(payload.Strategies) == 0 {
+		if err := s.manager.RefreshJavaScriptStrategies(r.Context()); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "refreshed"})
+		return
+	}
+
+	results, err := s.manager.RefreshJavaScriptStrategiesWithTargets(r.Context(), runtime.RefreshTargets{
+		Hashes:     payload.Hashes,
+		Strategies: payload.Strategies,
+	})
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "refreshed"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "partial_refresh",
+		"results": results,
+	})
 }
 
 func sanitizeAliases(aliases []string) []string {
@@ -632,7 +957,14 @@ func (s *httpServer) getAdapter(w http.ResponseWriter, r *http.Request) {
 
 func (s *httpServer) listInstances(w http.ResponseWriter, _ *http.Request) {
 	instances := s.manager.Instances()
-	writeJSON(w, http.StatusOK, map[string]any{"instances": instances})
+	responses := make([]instanceSummaryResponse, 0, len(instances))
+	for _, summary := range instances {
+		responses = append(responses, instanceSummaryResponse{
+			InstanceSummary: summary,
+			Links:           s.buildInstanceLinksFromSummary(summary),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"instances": responses})
 }
 
 func (s *httpServer) createInstance(w http.ResponseWriter, r *http.Request) {
@@ -647,7 +979,11 @@ func (s *httpServer) createInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot, _ := s.manager.Instance(spec.ID)
-	writeJSON(w, http.StatusCreated, snapshot)
+	response := instanceSnapshotResponse{
+		InstanceSnapshot: snapshot,
+		Links:            s.buildInstanceLinksFromSnapshot(snapshot),
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (s *httpServer) getRiskLimits(w http.ResponseWriter, _ *http.Request) {
@@ -755,7 +1091,11 @@ func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusNotFound, "strategy instance not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, snapshot)
+		response := instanceSnapshotResponse{
+			InstanceSnapshot: snapshot,
+			Links:            s.buildInstanceLinksFromSnapshot(snapshot),
+		}
+		writeJSON(w, http.StatusOK, response)
 	case http.MethodPut:
 		limitRequestBody(w, r)
 		spec, err := decodeInstanceSpec(r)
@@ -773,7 +1113,11 @@ func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		snapshot, _ := s.manager.Instance(id)
-		writeJSON(w, http.StatusOK, snapshot)
+		response := instanceSnapshotResponse{
+			InstanceSnapshot: snapshot,
+			Links:            s.buildInstanceLinksFromSnapshot(snapshot),
+		}
+		writeJSON(w, http.StatusOK, response)
 	case http.MethodDelete:
 		if err := s.manager.Remove(id); err != nil {
 			s.writeManagerError(w, err)
@@ -808,7 +1152,11 @@ func (s *httpServer) handleInstanceAction(w http.ResponseWriter, r *http.Request
 	}
 
 	snapshot, _ := s.manager.Instance(id)
-	writeJSON(w, http.StatusOK, snapshot)
+	response := instanceSnapshotResponse{
+		InstanceSnapshot: snapshot,
+		Links:            s.buildInstanceLinksFromSnapshot(snapshot),
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *httpServer) writeManagerError(w http.ResponseWriter, err error) {
