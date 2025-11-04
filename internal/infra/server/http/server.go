@@ -223,15 +223,20 @@ func (s *httpServer) listStrategyModules(w http.ResponseWriter, r *http.Request)
 	if s.manager != nil {
 		modules = s.manager.StrategyModules()
 	}
+	strategyDirectory := ""
+	if s.manager != nil {
+		strategyDirectory = s.manager.StrategyDirectory()
+	}
 	filtered, total, offset, limit, err := filterModuleSummaries(modules, r.URL.Query())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	response := map[string]any{
-		"modules": filtered,
-		"total":   total,
-		"offset":  offset,
+		"modules":           filtered,
+		"total":             total,
+		"offset":            offset,
+		"strategyDirectory": strategyDirectory,
 	}
 	if limit >= 0 {
 		response["limit"] = limit
