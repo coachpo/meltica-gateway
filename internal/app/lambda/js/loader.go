@@ -356,6 +356,22 @@ func (l *Loader) ResolveReference(identifier string) (ModuleResolution, error) {
 		return empty, fmt.Errorf("strategy loader: identifier required")
 	}
 
+	if isHashIdentifier(raw) {
+		hash := normalizeHash(raw)
+		l.mu.RLock()
+		module := l.byHash[hash]
+		l.mu.RUnlock()
+		if module == nil {
+			return empty, fmt.Errorf("strategy loader: hash %q not found", hash)
+		}
+		return ModuleResolution{
+			Name:   module.Name,
+			Hash:   hash,
+			Tag:    pickDefaultTag(module),
+			Module: module,
+		}, nil
+	}
+
 	var (
 		namePart = raw
 		tagPart  string
@@ -430,6 +446,17 @@ func (l *Loader) ResolveReference(identifier string) (ModuleResolution, error) {
 func (l *Loader) Get(name string) (*Module, error) {
 	identifier := strings.TrimSpace(name)
 	if identifier == "" {
+		return nil, ErrModuleNotFound
+	}
+
+	if isHashIdentifier(identifier) {
+		normalized := normalizeHash(identifier)
+		l.mu.RLock()
+		module := l.byHash[normalized]
+		l.mu.RUnlock()
+		if module != nil {
+			return module, nil
+		}
 		return nil, ErrModuleNotFound
 	}
 
@@ -1161,6 +1188,18 @@ func normalizeHash(hash string) string {
 		return "sha256:" + trimmed
 	}
 	return trimmed
+}
+
+func isHashIdentifier(identifier string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(identifier))
+	if strings.HasPrefix(trimmed, "sha256:") {
+		digest := strings.TrimPrefix(trimmed, "sha256:")
+		return len(digest) == 64 && isHex(digest)
+	}
+	if len(trimmed) == 64 && isHex(trimmed) {
+		return true
+	}
+	return false
 }
 
 func isHex(text string) bool {

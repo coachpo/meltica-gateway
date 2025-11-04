@@ -26,6 +26,7 @@ func NewInstance(module *Module) (*Instance, error) {
 		return nil, fmt.Errorf("strategy instance: module required")
 	}
 	rt := goja.New()
+	rt.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	export, err := runModule(rt, module.Program)
 	if err != nil {
 		return nil, fmt.Errorf("strategy instance: execute %s: %w", module.Path, err)

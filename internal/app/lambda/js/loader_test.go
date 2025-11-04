@@ -264,6 +264,16 @@ func TestResolveReferenceVariants(t *testing.T) {
 		}
 	})
 
+	t.Run("canonical hash string resolves directly", func(t *testing.T) {
+		resolution, err := loader.ResolveReference(baseModule.Hash)
+		if err != nil {
+			t.Fatalf("ResolveReference hash: %v", err)
+		}
+		if resolution.Hash != baseModule.Hash {
+			t.Fatalf("expected hash %s, got %s", baseModule.Hash, resolution.Hash)
+		}
+	})
+
 	t.Run("unknown tag failure", func(t *testing.T) {
 		if _, err := loader.ResolveReference("noop:unknown"); err == nil {
 			t.Fatalf("expected error resolving unknown tag")
@@ -277,6 +287,19 @@ func TestResolveReferenceVariants(t *testing.T) {
 		}
 		if module.Hash != baseModule.Hash {
 			t.Fatalf("unexpected module hash %s", module.Hash)
+		}
+	})
+
+	t.Run("Get supports canonical hash", func(t *testing.T) {
+		module, err := loader.Get(baseModule.Hash)
+		if err != nil {
+			t.Fatalf("Get by hash: %v", err)
+		}
+		if module.Hash != baseModule.Hash {
+			t.Fatalf("hash mismatch on hash lookup")
+		}
+		if !strings.EqualFold(module.Name, baseModule.Name) {
+			t.Fatalf("expected module name %s, got %s", baseModule.Name, module.Name)
 		}
 	})
 
