@@ -77,3 +77,113 @@ test('refreshStrategies returns status payload', async () => {
 
   expect(response.status).toBe('refreshed');
 });
+
+test('getStrategyModules applies query parameters', async () => {
+  let requestedUrl = '';
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+    requestedUrl = String(input);
+    return {
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          modules: [],
+          total: 0,
+          offset: 20,
+          limit: 10,
+        }),
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  await apiClient.getStrategyModules({
+    strategy: 'grid',
+    hash: 'sha256:abc',
+    runningOnly: true,
+    limit: 10,
+    offset: 20,
+  });
+
+  expect(requestedUrl).toBe(
+    'http://localhost:8880/strategies/modules?strategy=grid&hash=sha256%3Aabc&runningOnly=true&limit=10&offset=20',
+  );
+});
+
+test('refreshStrategies sends payload when provided', async () => {
+  let capturedBody: string | undefined;
+  globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    capturedBody = typeof init?.body === 'string' ? (init.body as string) : undefined;
+    return {
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          status: 'partial_refresh',
+          results: [
+            { selector: 'grid:canary', reason: 'refreshed', hash: 'sha256:new', instances: ['grid-eu-1'] },
+          ],
+        }),
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const response = await apiClient.refreshStrategies({
+    strategies: ['grid:canary'],
+    hashes: ['sha256:new'],
+  });
+
+  expect(capturedBody).toBe(
+    JSON.stringify({ strategies: ['grid:canary'], hashes: ['sha256:new'] }),
+  );
+  expect(response.status).toBe('partial_refresh');
+  expect(response.results?.[0]?.reason).toBe('refreshed');
+});
+
+test('getStrategyModuleUsage fetches usage endpoint', async () => {
+  let requestedUrl = '';
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+    requestedUrl = String(input);
+    return {
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          selector: 'grid@sha256:abc',
+          strategy: 'grid',
+          hash: 'sha256:abc',
+          usage: { strategy: 'grid', hash: 'sha256:abc', count: 1, instances: ['grid-eu-1'] },
+          instances: [],
+          total: 1,
+          offset: 0,
+          limit: 25,
+        }),
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const result = await apiClient.getStrategyModuleUsage('grid@sha256:abc', {
+    limit: 25,
+    offset: 0,
+    includeStopped: true,
+  });
+
+  expect(requestedUrl).toBe(
+    'http://localhost:8880/strategies/modules/grid%40sha256%3Aabc/usage?limit=25&offset=0&includeStopped=true',
+  );
+  expect(result.selector).toBe('grid@sha256:abc');
+  expect(result.usage.count).toBe(1);
+});
+
+test('exportStrategyRegistry requests registry endpoint', async () => {
+  let requestedUrl = '';
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+    requestedUrl = String(input);
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ registry: {}, usage: [] }),
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const result = await apiClient.exportStrategyRegistry();
+
+  expect(requestedUrl).toBe('http://localhost:8880/strategies/registry');
+  expect(result).toEqual({ registry: {}, usage: [] });
+});

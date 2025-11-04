@@ -23,6 +23,15 @@ export interface StrategyModuleRevision {
   path: string;
   version?: string;
   size: number;
+  retired?: boolean;
+}
+
+export interface ModuleRunningSummary {
+  hash: string;
+  instances: string[];
+  count: number;
+  firstSeen?: string | null;
+  lastSeen?: string | null;
 }
 
 export interface StrategyModuleSummary {
@@ -34,8 +43,16 @@ export interface StrategyModuleSummary {
   tags: string[];
   tagAliases?: Record<string, string>;
   revisions?: StrategyModuleRevision[];
+  running?: ModuleRunningSummary[];
   size: number;
   metadata: Strategy;
+}
+
+export interface StrategyModulesResponse {
+  modules: StrategyModuleSummary[];
+  total?: number;
+  offset?: number;
+  limit?: number | null;
 }
 
 export interface StrategyModulePayload {
@@ -144,6 +161,8 @@ export interface InstanceSummary {
   providers: string[];
   aggregatedSymbols: string[];
   running: boolean;
+  usage?: ModuleRevisionUsage;
+  links?: InstanceLinks;
 }
 
 export interface ProviderSymbols {
@@ -306,6 +325,62 @@ export interface RestoreContextResponse {
   status: string;
 }
 
+export interface StrategyRefreshRequest {
+  hashes?: string[];
+  strategies?: string[];
+}
+
+export interface StrategyRefreshResult {
+  selector: string;
+  strategy?: string;
+  hash?: string;
+  previousHash?: string;
+  instances?: string[];
+  reason?: string;
+}
+
 export interface StrategyRefreshResponse {
   status: string;
+  results?: StrategyRefreshResult[];
+}
+
+export interface ModuleRevisionUsage {
+  strategy: string;
+  hash: string;
+  instances: string[];
+  count: number;
+  firstSeen?: string | null;
+  lastSeen?: string | null;
+  running?: boolean;
+}
+
+export interface InstanceLinks {
+  self?: string;
+  usage?: string;
+}
+
+export interface StrategyModuleUsageResponse {
+  selector: string;
+  strategy: string;
+  hash: string;
+  usage: ModuleRevisionUsage;
+  instances: InstanceSummary[];
+  total: number;
+  offset: number;
+  limit?: number | null;
+}
+
+export interface StrategyRegistryLocation {
+  tag: string;
+  path: string;
+}
+
+export interface StrategyRegistryEntry {
+  tags: Record<string, string>;
+  hashes: Record<string, StrategyRegistryLocation>;
+}
+
+export interface StrategyRegistryExport {
+  registry: Record<string, StrategyRegistryEntry>;
+  usage: ModuleRevisionUsage[];
 }

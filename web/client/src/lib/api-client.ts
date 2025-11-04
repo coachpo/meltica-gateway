@@ -19,6 +19,10 @@ import {
   ContextBackupPayload,
   RestoreContextResponse,
   StrategyRefreshResponse,
+  StrategyModulesResponse,
+  StrategyModuleUsageResponse,
+  StrategyRefreshRequest,
+  StrategyRegistryExport,
 } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8880';
@@ -348,12 +352,65 @@ class ApiClient {
   }
 
   // Strategy Modules
-  async getStrategyModules(): Promise<{ modules: StrategyModuleSummary[] }> {
-    return this.request('/strategies/modules');
+  async getStrategyModules(params?: {
+    strategy?: string;
+    hash?: string;
+    runningOnly?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<StrategyModulesResponse> {
+    let path = '/strategies/modules';
+    if (params) {
+      const searchParams = new URLSearchParams();
+      if (params.strategy) {
+        searchParams.set('strategy', params.strategy);
+      }
+      if (params.hash) {
+        searchParams.set('hash', params.hash);
+      }
+      if (params.runningOnly !== undefined) {
+        searchParams.set('runningOnly', String(params.runningOnly));
+      }
+      if (typeof params.limit === 'number' && params.limit >= 0) {
+        searchParams.set('limit', String(params.limit));
+      }
+      if (typeof params.offset === 'number' && params.offset >= 0) {
+        searchParams.set('offset', String(params.offset));
+      }
+      const query = searchParams.toString();
+      if (query) {
+        path = `${path}?${query}`;
+      }
+    }
+    return this.request(path);
   }
 
   async getStrategyModule(identifier: string): Promise<StrategyModuleSummary> {
     return this.request(`/strategies/modules/${encodeURIComponent(identifier)}`);
+  }
+
+  async getStrategyModuleUsage(
+    selector: string,
+    params?: { limit?: number; offset?: number; includeStopped?: boolean }
+  ): Promise<StrategyModuleUsageResponse> {
+    let path = `/strategies/modules/${encodeURIComponent(selector)}/usage`;
+    if (params) {
+      const searchParams = new URLSearchParams();
+      if (typeof params.limit === 'number' && params.limit >= 0) {
+        searchParams.set('limit', String(params.limit));
+      }
+      if (typeof params.offset === 'number' && params.offset >= 0) {
+        searchParams.set('offset', String(params.offset));
+      }
+      if (params.includeStopped !== undefined) {
+        searchParams.set('includeStopped', String(params.includeStopped));
+      }
+      const query = searchParams.toString();
+      if (query) {
+        path = `${path}?${query}`;
+      }
+    }
+    return this.request(path);
   }
 
   async getStrategyModuleSource(identifier: string): Promise<string> {
@@ -385,10 +442,15 @@ class ApiClient {
     });
   }
 
-  async refreshStrategies(): Promise<StrategyRefreshResponse> {
+  async refreshStrategies(payload?: StrategyRefreshRequest): Promise<StrategyRefreshResponse> {
     return this.request('/strategies/refresh', {
       method: 'POST',
+      body: payload ? JSON.stringify(payload) : undefined,
     });
+  }
+
+  async exportStrategyRegistry(): Promise<StrategyRegistryExport> {
+    return this.request('/strategies/registry');
   }
 
   // Providers

@@ -1,8 +1,14 @@
 'use client';
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
-import type { StrategyModuleRevision, StrategyModuleSummary } from '@/lib/types';
+import type {
+  StrategyModuleRevision,
+  StrategyModuleSummary,
+  StrategyModuleUsageResponse,
+  StrategyRefreshResult,
+} from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -28,11 +34,20 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/toast-provider';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   ArrowUpCircle,
   Copy,
+  Download,
   Eye,
   FileCode,
   Loader2,
@@ -41,6 +56,8 @@ import {
   Tag,
   Trash2,
   UploadCloud,
+  ListFilter,
+  Target,
 } from 'lucide-react';
 
 type ModuleFormMode = 'create' | 'edit';
@@ -102,10 +119,68 @@ const FILE_EXTENSION_HINT = '.js or .mjs';
 const PINNED_REVISION_MESSAGE =
   'Revision is pinned by running instances. Stop or redeploy them before deleting.';
 
+type UsageDialogState = {
+  selector: string;
+  moduleName: string;
+  hash?: string;
+};
+
+const DEFAULT_MODULE_LIMIT = 25;
+const DEFAULT_FILTERS = { strategy: '', hash: '', runningOnly: false };
+const MODULE_LIMIT_OPTIONS = [10, 25, 50, 100];
+const DEFAULT_USAGE_LIMIT = 25;
+
+function formatDateTime(value?: string | null): string {
+  if (!value) {
+    return '—';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '—';
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date);
+}
+
+function parseListInput(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function canonicalUsageSelector(moduleName: string, hash?: string | null, tag?: string | null): string {
+  const trimmedName = moduleName.trim();
+  if (hash && hash.trim()) {
+    return `${trimmedName}@${hash.trim()}`;
+  }
+  if (tag && tag.trim()) {
+    return `${trimmedName}:${tag.trim()}`;
+  }
+  return trimmedName;
+}
+
 function friendlyDeletionMessage(message: string): string {
   const lower = message.toLowerCase();
   if (lower.includes('in use') || lower.includes('pinned')) {
     return PINNED_REVISION_MESSAGE;
+  }
+  return message;
+}
+
+function friendlySaveError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes('metadata version required')) {
+    return 'Version tag is required. Provide a tag (for example v1.2.0) or include metadata.version in the module source.';
+  }
+  if (lower.includes('tag') && lower.includes('already exists')) {
+    return 'Tag already exists for this strategy. Choose a new version tag or retire the conflicting revision first.';
   }
   return message;
 }
@@ -120,11 +195,53 @@ function buildRevisionSelector(module: StrategyModuleSummary, revision: Strategy
   return module.name;
 }
 
+function moduleIdentifier(module?: StrategyModuleSummary | null): string {
+  if (!module) {
+    return '';
+  }
+  const name = module.name?.trim();
+  if (name) {
+    return name;
+  }
+  const file = module.file?.trim();
+  if (!file) {
+    return '';
+  }
+  if (file.toLowerCase().endsWith('.mjs')) {
+    return file.slice(0, -4);
+  }
+  if (file.toLowerCase().endsWith('.js')) {
+    return file.slice(0, -3);
+  }
+  return file;
+}
+
 export default function StrategyModulesPage() {
   const [modules, setModules] = useState<StrategyModuleSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const searchParams = useSearchParams();
+  const [filterDraft, setFilterDraft] = useState(() => ({ ...DEFAULT_FILTERS }));
+  const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS }));
+  const [limit, setLimit] = useState(DEFAULT_MODULE_LIMIT);
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [exportingRegistry, setExportingRegistry] = useState(false);
+  const [usageDialog, setUsageDialog] = useState<UsageDialogState | null>(null);
+  const [usageResponse, setUsageResponse] = useState<StrategyModuleUsageResponse | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [usageLimit, setUsageLimit] = useState(DEFAULT_USAGE_LIMIT);
+  const [usageOffset, setUsageOffset] = useState(0);
+  const [usageIncludeStopped, setUsageIncludeStopped] = useState(false);
+  const [appliedUsageSelector, setAppliedUsageSelector] = useState<string | null>(null);
+  const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
+  const [refreshSelectorInput, setRefreshSelectorInput] = useState('');
+  const [refreshHashInput, setRefreshHashInput] = useState('');
+  const [refreshProcessing, setRefreshProcessing] = useState(false);
+  const [refreshResults, setRefreshResults] = useState<StrategyRefreshResult[]>([]);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<ModuleFormMode>('create');
   const [formData, setFormData] = useState(defaultFormState);
@@ -158,6 +275,34 @@ export default function StrategyModulesPage() {
     revision: StrategyModuleRevision;
   } | null>(null);
 
+  const detailMetadata = detailModule?.metadata;
+  const detailDescription =
+    typeof detailMetadata?.description === 'string' && detailMetadata.description.trim().length > 0
+      ? detailMetadata.description
+      : null;
+  const detailEvents = Array.isArray(detailMetadata?.events) ? detailMetadata.events : [];
+  const detailConfig = Array.isArray(detailMetadata?.config) ? detailMetadata.config : [];
+
+  const resetUsageState = useCallback(() => {
+    setUsageResponse(null);
+    setUsageError(null);
+    setUsageOffset(0);
+    setUsageLimit(DEFAULT_USAGE_LIMIT);
+    setUsageIncludeStopped(false);
+  }, []);
+
+  const openUsageDialog = useCallback(
+    (selector: string, moduleName: string, hash?: string | null) => {
+      resetUsageState();
+      setUsageDialog({
+        selector,
+        moduleName,
+        hash: hash ?? undefined,
+      });
+    },
+    [resetUsageState],
+  );
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { show: showToast } = useToast();
@@ -179,9 +324,16 @@ export default function StrategyModulesPage() {
         setError(null);
       }
       try {
-        const response = await apiClient.getStrategyModules();
+        const response = await apiClient.getStrategyModules({
+          strategy: filters.strategy.trim() || undefined,
+          hash: filters.hash.trim() || undefined,
+          runningOnly: filters.runningOnly,
+          limit,
+          offset,
+        });
         const entries = Array.isArray(response.modules) ? response.modules : [];
         setModules(entries);
+        setTotal(typeof response.total === 'number' ? response.total : entries.length);
         if (!silent) {
           setError(null);
         }
@@ -203,12 +355,60 @@ export default function StrategyModulesPage() {
         }
       }
     },
-    [showToast],
+    [filters, limit, offset, showToast],
   );
+
+  const applyFilters = useCallback(() => {
+    setFilters({ ...filterDraft });
+    setOffset(0);
+  }, [filterDraft]);
+
+  const resetFilters = useCallback(() => {
+    const next = { ...DEFAULT_FILTERS };
+    setFilterDraft(next);
+    setFilters(next);
+    setOffset(0);
+  }, []);
+
+  const handleLimitChange = useCallback((value: string) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return;
+    }
+    setLimit(numeric);
+    setOffset(0);
+  }, []);
+
+  const goToPreviousPage = useCallback(() => {
+    setOffset((current) => Math.max(current - limit, 0));
+  }, [limit]);
+
+  const goToNextPage = useCallback(() => {
+    setOffset((current) => {
+      const next = current + limit;
+      if (next >= total) {
+        return current;
+      }
+      return next;
+    });
+  }, [limit, total]);
 
   useEffect(() => {
     void loadModules();
   }, [loadModules]);
+
+  useEffect(() => {
+    const selectorParam = searchParams?.get('usage');
+    if (!selectorParam) {
+      return;
+    }
+    if (appliedUsageSelector === selectorParam) {
+      return;
+    }
+    const moduleName = selectorParam.split(/[@:]/)[0] || selectorParam;
+    openUsageDialog(selectorParam, moduleName);
+    setAppliedUsageSelector(selectorParam);
+  }, [appliedUsageSelector, openUsageDialog, searchParams]);
 
   useEffect(() => {
     setDetailModule((current) => {
@@ -225,6 +425,45 @@ export default function StrategyModulesPage() {
       return next;
     });
   }, [modules]);
+
+  useEffect(() => {
+    if (!usageDialog) {
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setUsageLoading(true);
+      setUsageError(null);
+      try {
+        const response = await apiClient.getStrategyModuleUsage(usageDialog.selector, {
+          limit: usageLimit,
+          offset: usageOffset,
+          includeStopped: usageIncludeStopped,
+        });
+        if (cancelled) {
+          return;
+        }
+        setUsageResponse(response);
+        setUsageError(null);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        const message = err instanceof Error ? err.message : 'Failed to load usage data';
+        setUsageError(message);
+        setUsageResponse(null);
+      } finally {
+        if (!cancelled) {
+          setUsageLoading(false);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [usageDialog, usageIncludeStopped, usageLimit, usageOffset]);
 
   const refreshCatalog = useCallback(
     async ({ silent = false, notifySuccess = !silent }: RefreshOptions = {}) => {
@@ -265,6 +504,125 @@ export default function StrategyModulesPage() {
     [loadModules, showToast],
   );
 
+  const handleExportRegistry = useCallback(async () => {
+    setExportingRegistry(true);
+    try {
+      const snapshot = await apiClient.exportStrategyRegistry();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `strategy-registry-${timestamp}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      showToast({
+        title: 'Registry downloaded',
+        description: 'Exported registry metadata with current usage counters.',
+        variant: 'success',
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to download registry export';
+      showToast({
+        title: 'Export failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setExportingRegistry(false);
+    }
+  }, [showToast]);
+
+  const closeUsageDialog = useCallback(() => {
+    setUsageDialog(null);
+    setUsageResponse(null);
+    setUsageError(null);
+  }, []);
+
+  const handleUsageLimitChange = useCallback((value: string) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return;
+    }
+    setUsageLimit(numeric);
+    setUsageOffset(0);
+  }, []);
+
+  const goToNextUsagePage = useCallback(() => {
+    setUsageOffset((current) => {
+      const next = current + usageLimit;
+      if (usageResponse && next >= usageResponse.total) {
+        return current;
+      }
+      return next;
+    });
+  }, [usageLimit, usageResponse]);
+
+  const goToPreviousUsagePage = useCallback(() => {
+    setUsageOffset((current) => Math.max(current - usageLimit, 0));
+  }, [usageLimit]);
+
+  const toggleUsageIncludeStopped = useCallback((checked: boolean | 'indeterminate') => {
+    setUsageIncludeStopped(Boolean(checked));
+    setUsageOffset(0);
+  }, []);
+
+  const resetRefreshDialogState = useCallback(() => {
+    setRefreshSelectorInput('');
+    setRefreshHashInput('');
+    setRefreshResults([]);
+    setRefreshError(null);
+    setRefreshProcessing(false);
+  }, []);
+
+  const closeRefreshDialog = useCallback(() => {
+    setRefreshDialogOpen(false);
+    resetRefreshDialogState();
+  }, [resetRefreshDialogState]);
+
+  const submitTargetedRefresh = useCallback(async () => {
+    const selectors = parseListInput(refreshSelectorInput);
+    const hashes = parseListInput(refreshHashInput);
+    const payload: StrategyRefreshRequest | undefined =
+      selectors.length === 0 && hashes.length === 0
+        ? undefined
+        : {
+            ...(selectors.length ? { strategies: selectors } : {}),
+            ...(hashes.length ? { hashes } : {}),
+          };
+
+    setRefreshProcessing(true);
+    setRefreshError(null);
+    try {
+      const response = await apiClient.refreshStrategies(payload);
+      setRefreshResults(response.results ?? []);
+      await loadModules({ silent: true });
+      showToast({
+        title: 'Refresh dispatched',
+        description:
+          response.status?.toLowerCase() === 'refreshed'
+            ? 'Runtime reloaded all strategies.'
+            : 'Targeted refresh command accepted by runtime.',
+        variant: 'success',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to refresh strategies';
+      setRefreshError(message);
+      showToast({
+        title: 'Refresh failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setRefreshProcessing(false);
+    }
+  }, [loadModules, refreshHashInput, refreshSelectorInput, showToast]);
+
   const openCreateDialog = () => {
     setFormMode('create');
     setFormTarget(null);
@@ -301,7 +659,10 @@ export default function StrategyModulesPage() {
     });
     setFormOpen(true);
     try {
-      const identifier = module.file || module.name;
+      const identifier = moduleIdentifier(module);
+      if (!identifier) {
+        throw new Error('Strategy identifier unavailable for this module.');
+      }
       const source = await apiClient.getStrategyModuleSource(identifier);
       setFormData((prev) => ({
         ...prev,
@@ -354,6 +715,11 @@ export default function StrategyModulesPage() {
       setFormError('Strategy name is required.');
       return false;
     }
+    const trimmedTag = formData.tag.trim();
+    if (!trimmedTag) {
+      setFormError('Version tag is required. Provide a semantic version such as v1.2.0.');
+      return false;
+    }
     const trimmedFilename = formData.filename.trim();
     if (trimmedFilename) {
       const lower = trimmedFilename.toLowerCase();
@@ -400,7 +766,10 @@ export default function StrategyModulesPage() {
           variant: 'success',
         });
       } else if (formTarget) {
-        const targetIdentifier = formTarget.file || formTarget.name;
+        const targetIdentifier = moduleIdentifier(formTarget);
+        if (!targetIdentifier) {
+          throw new Error('Strategy identifier unavailable for this module.');
+        }
         const response = await apiClient.updateStrategyModule(targetIdentifier, payload);
         const identifier = response.module?.name ?? trimmedName ?? response.filename ?? targetIdentifier;
         showToast({
@@ -419,8 +788,9 @@ export default function StrategyModulesPage() {
       setFormTarget(null);
       setFormData(defaultFormState);
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to save strategy module';
+      const message = friendlySaveError(
+        err instanceof Error ? err.message : 'Failed to save strategy module',
+      );
       setFormError(message);
       showToast({
         title: 'Save failed',
@@ -437,7 +807,11 @@ export default function StrategyModulesPage() {
       return;
     }
     const moduleName = deleteTarget.name;
-    const identifier = deleteTarget.file || deleteTarget.name;
+    const identifier = moduleIdentifier(deleteTarget);
+    if (!identifier) {
+      setDeleteError('Strategy identifier unavailable for this module.');
+      return;
+    }
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -472,7 +846,11 @@ export default function StrategyModulesPage() {
     setSourceError(null);
     setSourceLoading(true);
     try {
-      const source = await apiClient.getStrategyModuleSource(module.file || module.name);
+      const identifier = moduleIdentifier(module);
+      if (!identifier) {
+        throw new Error('Strategy identifier unavailable for this module.');
+      }
+      const source = await apiClient.getStrategyModuleSource(identifier);
       setSourceContent(source);
     } catch (err) {
       const message =
@@ -488,15 +866,15 @@ export default function StrategyModulesPage() {
     }
   };
 
-  const copyHash = async (hash: string) => {
+  const copyHash = async (hash: string, label = 'Hash') => {
     try {
       if (typeof navigator === 'undefined' || !navigator.clipboard) {
         throw new Error('Clipboard API unavailable in this environment');
       }
       await navigator.clipboard.writeText(hash);
       showToast({
-        title: 'Hash copied',
-        description: 'SHA-256 hash copied to clipboard.',
+        title: `${label} copied`,
+        description: `${label} copied to clipboard.`,
         variant: 'success',
       });
     } catch (err) {
@@ -665,6 +1043,13 @@ export default function StrategyModulesPage() {
   };
 
   const moduleCount = modules.length;
+  const usageSummary = usageResponse?.usage ?? null;
+  const usageInstances = usageResponse?.instances ?? [];
+  const usageTotal = usageResponse?.total ?? 0;
+  const usageOffsetResolved = usageResponse?.offset ?? usageOffset;
+  const usageLimitResolved = usageResponse?.limit ?? usageLimit;
+  const usagePageCount = usageLimitResolved > 0 ? Math.max(1, Math.ceil(usageTotal / usageLimitResolved)) : 1;
+  const usageCurrentPage = usageLimitResolved > 0 ? Math.floor(usageOffsetResolved / usageLimitResolved) + 1 : 1;
 
   return (
     <div className="space-y-6">
@@ -710,8 +1095,150 @@ export default function StrategyModulesPage() {
             )}
             Refresh catalog
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setRefreshDialogOpen(true)}
+            disabled={refreshProcessing}
+          >
+            {refreshProcessing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Target className="mr-2 h-4 w-4" />
+            )}
+            Targeted refresh
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleExportRegistry()}
+            disabled={exportingRegistry}
+          >
+            {exportingRegistry ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            Download registry
+          </Button>
         </div>
       </div>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                <ListFilter className="h-4 w-4" />
+                Filters
+              </CardTitle>
+              <CardDescription className="text-sm">
+                Narrow the module catalogue by strategy name, exact hash, or active usage state.
+              </CardDescription>
+            </div>
+            <div className="text-xs text-muted-foreground lg:text-sm">
+              Showing{' '}
+              <span className="font-medium">
+                {total === 0 ? 0 : Math.min(total, offset + modules.length)}
+              </span>{' '}
+              of <span className="font-medium">{total}</span>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="filter-strategy">Strategy name</Label>
+              <Input
+                id="filter-strategy"
+                value={filterDraft.strategy}
+                onChange={(event) =>
+                  setFilterDraft((prev) => ({ ...prev, strategy: event.target.value }))
+                }
+                placeholder="grid"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="filter-hash">Hash</Label>
+              <Input
+                id="filter-hash"
+                value={filterDraft.hash}
+                onChange={(event) =>
+                  setFilterDraft((prev) => ({ ...prev, hash: event.target.value }))
+                }
+                placeholder="sha256:..."
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="module-page-size">Page size</Label>
+              <Select value={String(limit)} onValueChange={handleLimitChange}>
+                <SelectTrigger id="module-page-size">
+                  <SelectValue placeholder={`${DEFAULT_MODULE_LIMIT}`} />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODULE_LIMIT_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={String(option)}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="filter-running-only"
+                checked={filterDraft.runningOnly}
+                onChange={(event) =>
+                  setFilterDraft((prev) => ({
+                    ...prev,
+                    runningOnly: event.target.checked,
+                  }))
+                }
+              />
+              <Label htmlFor="filter-running-only" className="text-sm">
+                Running hashes only
+              </Label>
+            </div>
+            <div className="flex flex-1 justify-end gap-2">
+              <Button variant="ghost" onClick={resetFilters} disabled={loading && modules.length === 0}>
+                Reset
+              </Button>
+              <Button onClick={applyFilters} disabled={loading && modules.length === 0}>
+                Apply filters
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-4 border-t pt-4 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              Page{' '}
+              <span className="font-medium">
+                {total === 0 ? 0 : Math.floor(offset / limit) + 1}
+              </span>{' '}
+              / <span className="font-medium">{total === 0 ? 1 : Math.ceil(total / limit)}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={goToPreviousPage}
+                disabled={offset === 0 || loading}
+              >
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={goToNextPage}
+                disabled={offset + limit >= total || loading || modules.length === 0}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {strategyDirectory ? (
         <Alert>
@@ -739,16 +1266,27 @@ export default function StrategyModulesPage() {
       ) : moduleCount === 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>No JavaScript strategies detected</CardTitle>
+            <CardTitle>
+              {total === 0
+                ? 'No JavaScript strategies detected'
+                : 'No modules matched your filters'}
+            </CardTitle>
             <CardDescription>
-              Upload a JavaScript module to bootstrap the runtime catalog.
+              {total === 0
+                ? 'Upload a JavaScript module to bootstrap the runtime catalog.'
+                : 'Adjust your filters to view available modules or clear them to see the entire catalogue.'}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-wrap items-center gap-2">
             <Button onClick={openCreateDialog}>
               <UploadCloud className="mr-2 h-4 w-4" />
-              Upload your first module
+              Upload module
             </Button>
+            {total !== 0 ? (
+              <Button variant="ghost" onClick={resetFilters}>
+                Reset filters
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
       ) : (
@@ -768,6 +1306,7 @@ export default function StrategyModulesPage() {
                   <TableHead>Version</TableHead>
                   <TableHead>Aliases</TableHead>
                   <TableHead>Latest hash</TableHead>
+                  <TableHead>Active usage</TableHead>
                   <TableHead>Size</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -840,6 +1379,76 @@ export default function StrategyModulesPage() {
                           </p>
                         </div>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {Array.isArray(module.running) && module.running.length > 0 ? (
+                        <div className="space-y-2">
+                          {module.running.map((entry) => {
+                            const entryInstances = Array.isArray(entry.instances)
+                              ? entry.instances
+                              : [];
+                            return (
+                              <div
+                                key={`${module.name}-${entry.hash}`}
+                                className="rounded-md border px-3 py-2 text-xs shadow-sm"
+                              >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                  onClick={() => copyHash(entry.hash)}
+                                >
+                                  <span className="font-mono">{entry.hash.slice(0, 12)}…</span>
+                                  <Copy className="h-3 w-3" />
+                                </button>
+                                <Badge variant="secondary" className="font-normal">
+                                  {entry.count} active
+                                </Badge>
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                                <span>
+                                  First seen: <span className="font-medium">{formatDateTime(entry.firstSeen)}</span>
+                                </span>
+                                <span>
+                                  Last seen: <span className="font-medium">{formatDateTime(entry.lastSeen)}</span>
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="link"
+                                  size="sm"
+                                  className="h-auto px-0 text-[11px]"
+                                  onClick={() =>
+                                    openUsageDialog(
+                                      canonicalUsageSelector(module.name, entry.hash),
+                                      module.name,
+                                      entry.hash,
+                                    )
+                                  }
+                                >
+                                  View usage
+                                </Button>
+                              </div>
+                              {entryInstances.length > 0 ? (
+                                <div className="mt-2 flex flex-wrap gap-1 text-[11px]">
+                                  {entryInstances.slice(0, 4).map((instanceId) => (
+                                    <Badge key={instanceId} variant="outline" className="font-mono">
+                                      {instanceId}
+                                    </Badge>
+                                  ))}
+                                  {entryInstances.length > 4 ? (
+                                    <span className="text-muted-foreground">
+                                      +{entryInstances.length - 4} more
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">No running instances</span>
+                      )}
                     </TableCell>
                     <TableCell>{formatBytes(module.size)}</TableCell>
                     <TableCell>
@@ -929,7 +1538,7 @@ export default function StrategyModulesPage() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label htmlFor="strategy-tag">Tag (optional)</Label>
+                  <Label htmlFor="strategy-tag">Tag</Label>
                   <Input
                     id="strategy-tag"
                     placeholder="v1.2.0"
@@ -940,7 +1549,8 @@ export default function StrategyModulesPage() {
                     disabled={formProcessing}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Supply a semantic version or release tag for this revision.
+                    Supply a semantic version or release tag for this revision. This is required to store the module in
+                    the registry.
                   </p>
                 </div>
                 <div className="grid gap-2">
@@ -1071,6 +1681,341 @@ export default function StrategyModulesPage() {
                 'Update & refresh'
               )}
             </Button>
+          </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+      <Dialog
+        open={Boolean(usageDialog)}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeUsageDialog();
+          }
+        }}
+      >
+        <DialogContent className="flex max-h-[90vh] w-full flex-col gap-4 overflow-hidden sm:max-w-4xl">
+          <DialogHeader className="space-y-1">
+            <DialogTitle>
+              Revision usage{usageDialog ? ` · ${usageDialog.moduleName}` : ''}
+            </DialogTitle>
+            <DialogDescription>
+              Inspect running instances referencing{' '}
+              <code className="mx-1 font-mono text-xs">
+                {usageDialog?.selector ?? ''}
+              </code>
+              and review first/last activity timestamps.
+            </DialogDescription>
+          </DialogHeader>
+          {usageError ? (
+            <Alert variant="destructive">
+              <AlertTitle>Error loading usage data</AlertTitle>
+              <AlertDescription>{usageError}</AlertDescription>
+            </Alert>
+          ) : null}
+          {usageLoading ? (
+            <div className="flex flex-1 items-center justify-center text-muted-foreground">
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              Loading revision usage…
+            </div>
+          ) : usageResponse ? (
+            <div className="flex flex-1 flex-col gap-4 overflow-hidden">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs uppercase text-muted-foreground">Active instances</p>
+                  <p className="text-2xl font-semibold">{usageSummary?.count ?? 0}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs uppercase text-muted-foreground">First seen</p>
+                  <p className="text-sm font-medium">{formatDateTime(usageSummary?.firstSeen)}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs uppercase text-muted-foreground">Last seen</p>
+                  <p className="text-sm font-medium">{formatDateTime(usageSummary?.lastSeen)}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                  <span>
+                    Hash:{' '}
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-foreground hover:underline"
+                      onClick={() => usageSummary?.hash && copyHash(usageSummary.hash, 'Revision hash')}
+                    >
+                      <span className="font-mono">
+                        {usageSummary?.hash ? usageSummary.hash.slice(0, 18) : '—'}
+                      </span>
+                      <Copy className="h-3 w-3" />
+                    </button>
+                  </span>
+                  <span>Selector: <span className="font-mono">{usageResponse.selector}</span></span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="usage-include-stopped"
+                      checked={usageIncludeStopped}
+                      onChange={(event) => toggleUsageIncludeStopped(event.target.checked)}
+                    />
+                    <Label htmlFor="usage-include-stopped" className="text-xs">
+                      Include stopped instances
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span>Page size</span>
+                    <Select value={String(usageLimit)} onValueChange={handleUsageLimitChange}>
+                      <SelectTrigger className="h-8 w-[5rem]">
+                        <SelectValue placeholder={`${DEFAULT_USAGE_LIMIT}`} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MODULE_LIMIT_OPTIONS.map((option) => (
+                          <SelectItem key={option} value={String(option)}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+              <div className="flex-1 overflow-hidden rounded-md border">
+                <ScrollArea className="h-full">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Instance</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Hash</TableHead>
+                        <TableHead>Providers</TableHead>
+                        <TableHead>Last seen</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {usageInstances.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                            No instances matched this selector.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        usageInstances.map((instance) => (
+                          <TableRow key={instance.id}>
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-xs sm:text-sm">{instance.id}</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    onClick={() => copyHash(instance.id, 'Instance id')}
+                                    title="Copy instance id"
+                                  >
+                                    <Copy className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                                {instance.links?.self ? (
+                                  <span className="text-[11px] text-muted-foreground">
+                                    API: {instance.links.self}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={instance.running ? 'default' : 'secondary'}
+                                className={instance.running ? 'bg-green-600 hover:bg-green-700' : ''}
+                              >
+                                {instance.running ? 'Running' : 'Stopped'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {instance.strategyHash ? (
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                  onClick={() => copyHash(instance.strategyHash ?? '', 'Instance hash')}
+                                >
+                                  <span className="font-mono">
+                                    {instance.strategyHash.slice(0, 12)}…
+                                  </span>
+                                  <Copy className="h-3 w-3" />
+                                </button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {instance.providers.map((provider) => (
+                                  <Badge key={provider} variant="outline">
+                                    {provider}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {formatDateTime(instance.usage?.lastSeen)}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>
+                  Page <span className="font-medium">{usageCurrentPage}</span> /{' '}
+                  <span className="font-medium">{usagePageCount}</span>
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={goToPreviousUsagePage}
+                    disabled={usageCurrentPage <= 1 || usageLoading}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={goToNextUsagePage}
+                    disabled={usageCurrentPage >= usagePageCount || usageLoading}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-muted-foreground">
+              No usage data available.
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={refreshDialogOpen}
+        onOpenChange={(open) => {
+          setRefreshDialogOpen(open);
+          if (!open) {
+            resetRefreshDialogState();
+          }
+        }}
+      >
+        <DialogContent className="w-full max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Targeted refresh</DialogTitle>
+            <DialogDescription>
+              Refresh specific strategy selectors or exact hashes without reloading the entire catalogue.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="refresh-strategies">Selectors</Label>
+                <Textarea
+                  id="refresh-strategies"
+                  value={refreshSelectorInput}
+                  onChange={(event) => setRefreshSelectorInput(event.target.value)}
+                  placeholder="grid:canary\ndelay@sha256:def..."
+                  className="min-h-[120px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  One selector per line (or comma separated). Examples: <code>grid</code>, <code>grid:v2.1.0</code>, <code>grid@sha256:abc...</code>
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="refresh-hashes">Hashes</Label>
+                <Textarea
+                  id="refresh-hashes"
+                  value={refreshHashInput}
+                  onChange={(event) => setRefreshHashInput(event.target.value)}
+                  placeholder="sha256:abc...\nsha256:def..."
+                  className="min-h-[120px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Provide raw digests to refresh everything pinned to those hashes.
+                </p>
+              </div>
+            </div>
+            {refreshError ? (
+              <Alert variant="destructive">
+                <AlertTitle>Refresh failed</AlertTitle>
+                <AlertDescription>{refreshError}</AlertDescription>
+              </Alert>
+            ) : null}
+            {refreshResults.length > 0 ? (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Selector</TableHead>
+                      <TableHead>Hash</TableHead>
+                      <TableHead>Instances</TableHead>
+                      <TableHead>Reason</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {refreshResults.map((result) => {
+                      const instances = Array.isArray(result.instances) ? result.instances : [];
+                      return (
+                        <TableRow key={`${result.selector}-${result.hash ?? 'unknown'}`}>
+                          <TableCell className="font-mono text-xs sm:text-sm">{result.selector}</TableCell>
+                          <TableCell>
+                            {result.hash ? (
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                onClick={() => copyHash(result.hash ?? '', 'Revision hash')}
+                              >
+                                <span className="font-mono">{result.hash.slice(0, 12)}…</span>
+                                <Copy className="h-3 w-3" />
+                              </button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {instances.length > 0 ? (
+                              <span>{instances.length} ({instances.slice(0, 3).join(', ')}{instances.length > 3 ? '…' : ''})</span>
+                            ) : (
+                              <span>—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={result.reason === 'refreshed' ? 'default' : result.reason === 'alreadyPinned' ? 'secondary' : 'outline'}>
+                              {result.reason ?? 'unknown'}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <Button variant="ghost" onClick={closeRefreshDialog} disabled={refreshProcessing}>
+              Close
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={resetRefreshDialogState}
+                disabled={refreshProcessing}
+              >
+                Clear inputs
+              </Button>
+              <Button onClick={() => void submitTargetedRefresh()} disabled={refreshProcessing}>
+                {refreshProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                {refreshProcessing ? 'Refreshing…' : 'Execute refresh'}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1204,6 +2149,11 @@ export default function StrategyModulesPage() {
                                     {revision.version && revision.version !== revision.tag ? (
                                       <Badge variant="outline">{revision.version}</Badge>
                                     ) : null}
+                                    {revision.retired ? (
+                                      <Badge variant="destructive" className="bg-amber-500 text-black hover:bg-amber-600">
+                                        Retired
+                                      </Badge>
+                                    ) : null}
                                   </div>
                                   <p className="text-xs text-muted-foreground">
                                     {revision.path || '—'}
@@ -1284,34 +2234,33 @@ export default function StrategyModulesPage() {
                   </p>
                 )}
               </div>
-              {detailModule.metadata.description ? (
+              {detailDescription ? (
                 <div>
                   <h4 className="text-sm font-semibold">Description</h4>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {detailModule.metadata.description}
-                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">{detailDescription}</p>
                 </div>
               ) : null}
               <div>
                 <h4 className="text-sm font-semibold">Events</h4>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {detailModule.metadata.events.map((event) => (
-                    <Badge key={event} variant="secondary">
-                      {event}
-                    </Badge>
-                  ))}
-                  {detailModule.metadata.events.length === 0 ? (
+                  {detailEvents.length > 0 ? (
+                    detailEvents.map((event) => (
+                      <Badge key={event} variant="secondary">
+                        {event}
+                      </Badge>
+                    ))
+                  ) : (
                     <span className="text-sm text-muted-foreground">None declared</span>
-                  ) : null}
+                  )}
                 </div>
               </div>
               <div>
                 <h4 className="text-sm font-semibold">Configuration fields</h4>
                 <div className="mt-2 space-y-3">
-                  {detailModule.metadata.config.length === 0 ? (
+                  {detailConfig.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No configurable fields exported.</p>
                   ) : (
-                    detailModule.metadata.config.map((field) => (
+                    detailConfig.map((field) => (
                       <div key={field.name} className="rounded-md border p-3">
                         <div className="flex items-center justify-between">
                           <span className="font-mono text-sm">{field.name}</span>

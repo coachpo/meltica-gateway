@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { InstanceSummary, Strategy, Provider, StrategyModuleSummary } from '@/lib/types';
@@ -58,6 +59,35 @@ function formatHash(hash: string | undefined | null, length = 12): string {
     return hash;
   }
   return `${hash.slice(0, length)}…`;
+}
+
+function canonicalUsageSelector(name: string, hash?: string | null, tag?: string | null): string {
+  const trimmed = name.trim();
+  if (hash && hash.trim()) {
+    return `${trimmed}@${hash.trim()}`;
+  }
+  if (tag && tag.trim()) {
+    return `${trimmed}:${tag.trim()}`;
+  }
+  return trimmed;
+}
+
+function formatDateTime(value?: string | null): string {
+  if (!value) {
+    return '—';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '—';
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date);
 }
 
 export default function InstancesPage() {
@@ -283,7 +313,7 @@ export default function InstancesPage() {
         apiClient.getInstances(),
         apiClient.getStrategies(),
         apiClient.getProviders(),
-        apiClient.getStrategyModules(),
+        apiClient.getStrategyModules({ limit: 500, offset: 0 }),
       ]);
       setInstances(instancesRes.instances);
       setStrategies(strategiesRes.strategies);
@@ -1083,6 +1113,13 @@ export default function InstancesPage() {
               instance.strategyHash &&
               latestHash.toLowerCase() !== instance.strategyHash.toLowerCase(),
           );
+          const usageSummary = instance.usage ?? null;
+          const usageSelector = canonicalUsageSelector(
+            instance.strategyIdentifier,
+            usageSummary?.hash ?? instance.strategyHash ?? null,
+            instance.strategyTag ?? null,
+          );
+          const usageLink = `/strategies/modules?usage=${encodeURIComponent(usageSelector)}`;
           return (
             <Card key={instance.id}>
               <CardHeader>
@@ -1179,6 +1216,24 @@ export default function InstancesPage() {
                       )}
                     </div>
                   </div>
+                  {usageSummary ? (
+                    <div className="rounded-md border px-3 py-2 text-xs shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="text-muted-foreground">
+                            <span className="font-medium text-foreground">{usageSummary.count}</span>{' '}
+                            running instance{usageSummary.count === 1 ? '' : 's'} pinned to this hash.
+                          </p>
+                          <p className="text-muted-foreground">
+                            First seen {formatDateTime(usageSummary.firstSeen)} · Last seen {formatDateTime(usageSummary.lastSeen)}
+                          </p>
+                        </div>
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={usageLink}>View usage</Link>
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 {drift ? (
                   <Alert>
