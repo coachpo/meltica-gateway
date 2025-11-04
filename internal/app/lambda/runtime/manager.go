@@ -276,6 +276,7 @@ type Manager struct {
 	revisionUsage           map[string]*revisionUsage
 	revisionGauge           metric.Int64ObservableGauge
 	revisionLifecycleMetric metric.Int64Counter
+	uploadValidationFailures metric.Int64Counter
 }
 
 type lambdaInstance struct {
@@ -366,6 +367,15 @@ func (m *Manager) setupMetrics() {
 	} else if m.logger != nil {
 		m.logger.Printf("lambda manager: register revision counter: %v", err)
 	}
+	failures, err := meter.Int64Counter("strategy.upload.validation_failure_total",
+		metric.WithDescription("Strategy upload validation failures by stage"),
+		metric.WithUnit("{event}"),
+	)
+	if err == nil {
+		m.uploadValidationFailures = failures
+	} else if m.logger != nil {
+		m.logger.Printf("lambda manager: register validation failure counter: %v", err)
+	}
 }
 
 func (m *Manager) observeRevisionUsage(_ context.Context, observer metric.Int64Observer) error {
@@ -384,6 +394,49 @@ func (m *Manager) observeRevisionUsage(_ context.Context, observer metric.Int64O
 		))
 	}
 	return nil
+}
+
+func (m *Manager) recordStrategyValidationFailure(err error) {
+	if m == nil {
+		return
+	}
+	diagErr, ok := js.AsDiagnosticError(err)
+	if !ok {
+		return
+	}
+	diagnostics := diagErr.Diagnostics()
+	if m.logger != nil {
+		if len(diagnostics) == 0 {
+			m.logger.Printf("strategy validation failed: %v", diagErr)
+		} else {
+			for _, diag := range diagnostics {
+				m.logger.Printf("strategy validation failed: stage=%s message=%s line=%d column=%d hint=%s",
+					diag.Stage, diag.Message, diag.Line, diag.Column, diag.Hint)
+			}
+		}
+	}
+	if m.uploadValidationFailures == nil {
+		return
+	}
+	env := telemetry.Environment()
+	ctx := context.Background()
+	if len(diagnostics) == 0 {
+		m.uploadValidationFailures.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("environment", env),
+			attribute.String("stage", "unknown"),
+		))
+		return
+	}
+	for _, diag := range diagnostics {
+		stage := string(diag.Stage)
+		if stage == "" {
+			stage = "unknown"
+		}
+		m.uploadValidationFailures.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("environment", env),
+			attribute.String("stage", stage),
+		))
+	}
 }
 
 func (m *Manager) now() time.Time {
@@ -1753,6 +1806,7 @@ func (m *Manager) UpsertStrategy(source []byte, opts js.ModuleWriteOptions) (js.
 	if err == nil {
 		return resolution, nil
 	}
+	m.recordStrategyValidationFailure(err)
 	if !errors.Is(err, js.ErrRegistryUnavailable) {
 		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, fmt.Errorf("strategy upsert: %w", err)
 	}
@@ -1761,6 +1815,7 @@ func (m *Manager) UpsertStrategy(source []byte, opts js.ModuleWriteOptions) (js.
 		filename = "strategy.js"
 	}
 	if err := m.jsLoader.Write(filename, source); err != nil {
+		m.recordStrategyValidationFailure(err)
 		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, fmt.Errorf("strategy upsert %q: %w", filename, err)
 	}
 	return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, nil

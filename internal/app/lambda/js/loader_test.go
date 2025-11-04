@@ -202,6 +202,146 @@ func TestDeleteLegacyFallback(t *testing.T) {
 	}
 }
 
+func TestCompileModuleSyntaxErrorProducesDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	source := `
+module.exports = {
+  metadata: {
+    name: "broken",
+    displayName: "Broken Strategy",
+    config: [],
+    events: ["` + string(schema.EventTypeTrade) + `"]
+  },
+  create: function () {
+    return {};
+  // missing closing braces
+`
+	path := filepath.Join(dir, "broken.js")
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatalf("write module: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat module: %v", err)
+	}
+	if _, err := compileModule(path, info); err == nil {
+		t.Fatalf("expected compile error")
+	} else {
+		diagErr, ok := AsDiagnosticError(err)
+		if !ok {
+			t.Fatalf("expected diagnostic error, got %v", err)
+		}
+		diagnostics := diagErr.Diagnostics()
+		if len(diagnostics) == 0 {
+			t.Fatalf("expected diagnostics for syntax error")
+		}
+		first := diagnostics[0]
+		if first.Stage != DiagnosticStageCompile {
+			t.Fatalf("expected compile diagnostic stage, got %s", first.Stage)
+		}
+		if first.Line == 0 {
+			t.Fatalf("expected diagnostic line number, got 0")
+		}
+		if strings.TrimSpace(first.Message) == "" {
+			t.Fatalf("expected diagnostic message")
+		}
+	}
+}
+
+func TestCompileModuleMetadataValidationDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	source := `
+module.exports = {
+  metadata: {
+    name: "validator",
+    displayName: "",
+    config: [],
+    events: ["UnknownEvent"]
+  },
+  create: function () {
+    return {};
+  }
+};
+`
+	path := filepath.Join(dir, "validator.js")
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatalf("write module: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat module: %v", err)
+	}
+	if _, err := compileModule(path, info); err == nil {
+		t.Fatalf("expected metadata validation error")
+	} else {
+		diagErr, ok := AsDiagnosticError(err)
+		if !ok {
+			t.Fatalf("expected diagnostic error, got %v", err)
+		}
+		if diagErr.Error() == "" {
+			t.Fatalf("expected diagnostic error message")
+		}
+		diagnostics := diagErr.Diagnostics()
+		if len(diagnostics) < 1 {
+			t.Fatalf("expected validation diagnostics")
+		}
+		for _, diag := range diagnostics {
+			if diag.Stage != DiagnosticStageValidation {
+				t.Fatalf("expected validation stage, got %s", diag.Stage)
+			}
+			if strings.TrimSpace(diag.Message) == "" {
+				t.Fatalf("expected diagnostic message")
+			}
+		}
+	}
+}
+
+func TestCompileModuleInjectsDryRunField(t *testing.T) {
+	dir := t.TempDir()
+	source := `
+module.exports = {
+  metadata: {
+    name: "threshold",
+    displayName: "Threshold Strategy",
+    config: [
+      { name: "limit", type: "number", description: "Limit threshold", required: true }
+    ],
+    events: ["` + string(schema.EventTypeTrade) + `"]
+  },
+  create: function () {
+    return {};
+  }
+};
+`
+	path := filepath.Join(dir, "threshold.js")
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatalf("write module: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat module: %v", err)
+	}
+	module, err := compileModule(path, info)
+	if err != nil {
+		t.Fatalf("compileModule: %v", err)
+	}
+	foundDryRun := false
+	for _, field := range module.Metadata.Config {
+		if field.Name == "dry_run" {
+			foundDryRun = true
+			if field.Type != "bool" {
+				t.Fatalf("expected dry_run type bool, got %s", field.Type)
+			}
+		}
+		if strings.TrimSpace(field.Name) == "" {
+			t.Fatalf("config field name should be trimmed")
+		}
+	}
+	if !foundDryRun {
+		t.Fatalf("expected dry_run field injected")
+	}
+}
+
 func TestResolveReferenceVariants(t *testing.T) {
 	dir := t.TempDir()
 	modulePath := writeVersionedModule(t, dir, "noop", "v1.0.0", []byte(sampleModule))

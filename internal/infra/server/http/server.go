@@ -1199,6 +1199,22 @@ func (s *httpServer) writeProviderError(w http.ResponseWriter, err error) {
 }
 
 func (s *httpServer) writeStrategyModuleError(w http.ResponseWriter, err error) {
+	if diagErr, ok := js.AsDiagnosticError(err); ok {
+		diagnostics := diagErr.Diagnostics()
+		payload := map[string]any{
+			"status":  "error",
+			"error":   "strategy_validation_failed",
+			"message": diagErr.Error(),
+		}
+		if len(diagnostics) > 0 {
+			payload["diagnostics"] = diagnostics
+		}
+		if payload["message"] == "" {
+			payload["message"] = "strategy validation failed"
+		}
+		writeJSON(w, http.StatusUnprocessableEntity, payload)
+		return
+	}
 	switch {
 	case errors.Is(err, js.ErrModuleNotFound):
 		writeError(w, http.StatusNotFound, err.Error())

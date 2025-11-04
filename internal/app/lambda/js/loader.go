@@ -19,6 +19,7 @@ import (
 	json "github.com/goccy/go-json"
 
 	"github.com/coachpo/meltica/internal/app/lambda/strategies"
+	"github.com/coachpo/meltica/internal/domain/schema"
 )
 
 // ErrModuleNotFound reports missing strategy modules.
@@ -896,7 +897,12 @@ func compileModule(fullPath string, info fs.FileInfo) (*Module, error) {
 	}
 	program, err := goja.Compile(fullPath, string(source), true)
 	if err != nil {
-		return nil, fmt.Errorf("strategy loader: compile %q: %w", fullPath, err)
+		diagErr := NewDiagnosticError(
+			fmt.Sprintf("compile module %q failed", filepath.Base(fullPath)),
+			err,
+			compileDiagnostic(err),
+		)
+		return nil, fmt.Errorf("strategy loader: compile %q: %w", fullPath, diagErr)
 	}
 
 	meta, err := extractMetadata(program)
@@ -933,18 +939,77 @@ func extractMetadata(program *goja.Program) (strategies.Metadata, error) {
 	}
 	raw := exports.Get("metadata")
 	if goja.IsUndefined(raw) || goja.IsNull(raw) {
-		return strategies.Metadata{}, fmt.Errorf("metadata export missing")
+		diagErr := NewDiagnosticError(
+			"metadata export missing",
+			errors.New("metadata export missing"),
+			Diagnostic{
+				Stage:   DiagnosticStageValidation,
+				Message: "metadata export missing",
+				Hint:    "Expose module.exports.metadata with required fields.",
+			},
+		)
+		return strategies.Metadata{}, diagErr
 	}
 
 	var meta strategies.Metadata
 	if err := rt.ExportTo(raw, &meta); err != nil {
-		return strategies.Metadata{}, fmt.Errorf("metadata export invalid: %w", err)
+		diagErr := NewDiagnosticError(
+			"metadata export invalid",
+			err,
+			Diagnostic{
+				Stage:   DiagnosticStageValidation,
+				Message: diagnosticMessage(err),
+				Hint:    "Ensure metadata export matches the strategies.Metadata schema.",
+			},
+		)
+		return strategies.Metadata{}, diagErr
+	}
+
+	normalizeMetadata(&meta)
+
+	issues := strategies.ValidateMetadata(meta)
+	if len(issues) > 0 {
+		diagnostics := validationDiagnosticsFromIssues(issues)
+		diagErr := NewDiagnosticError("metadata validation failed", nil, diagnostics...)
+		return strategies.Metadata{}, diagErr
+	}
+
+	meta.Config = strategies.WithDryRunField(meta.Config)
+
+	return strategies.CloneMetadata(meta), nil
+}
+
+func normalizeMetadata(meta *strategies.Metadata) {
+	if meta == nil {
+		return
 	}
 	meta.Name = strings.ToLower(strings.TrimSpace(meta.Name))
-	if meta.Name == "" {
-		return strategies.Metadata{}, fmt.Errorf("metadata name required")
+	meta.Version = strings.TrimSpace(meta.Version)
+	meta.DisplayName = strings.TrimSpace(meta.DisplayName)
+	meta.Description = strings.TrimSpace(meta.Description)
+
+	for idx := range meta.Config {
+		field := meta.Config[idx]
+		field.Name = strings.TrimSpace(field.Name)
+		field.Type = strings.TrimSpace(field.Type)
+		field.Description = strings.TrimSpace(field.Description)
+		meta.Config[idx] = field
 	}
-	return strategies.CloneMetadata(meta), nil
+
+	writeIdx := 0
+	for _, evt := range meta.Events {
+		trimmed := schema.EventType(strings.TrimSpace(string(evt)))
+		if trimmed == "" {
+			continue
+		}
+		meta.Events[writeIdx] = trimmed
+		writeIdx++
+	}
+	if writeIdx == 0 {
+		meta.Events = nil
+	} else {
+		meta.Events = meta.Events[:writeIdx]
+	}
 }
 
 func runModule(rt *goja.Runtime, program *goja.Program) (*goja.Object, error) {
@@ -966,7 +1031,12 @@ func runModule(rt *goja.Runtime, program *goja.Program) (*goja.Object, error) {
 	}
 
 	if _, err := rt.RunProgram(program); err != nil {
-		return nil, fmt.Errorf("strategy loader: execute module: %w", err)
+		diagErr := NewDiagnosticError(
+			"execute module failed",
+			err,
+			executeDiagnostic(err),
+		)
+		return nil, fmt.Errorf("strategy loader: execute module: %w", diagErr)
 	}
 
 	value := module.Get("exports")

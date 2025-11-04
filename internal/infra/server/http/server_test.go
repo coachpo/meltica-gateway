@@ -211,6 +211,48 @@ func TestBuildContextBackup(t *testing.T) {
 	}
 }
 
+func TestWriteStrategyModuleErrorReturnsDiagnostics(t *testing.T) {
+	server := &httpServer{}
+	recorder := httptest.NewRecorder()
+	diag := js.Diagnostic{
+		Stage:   js.DiagnosticStageValidation,
+		Message: "displayName required",
+	}
+	diagErr := js.NewDiagnosticError("metadata validation failed", nil, diag)
+
+	server.writeStrategyModuleError(recorder, diagErr)
+
+	result := recorder.Result()
+	t.Cleanup(func() { _ = result.Body.Close() })
+	if result.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status 422, got %d", result.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(result.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["error"] != "strategy_validation_failed" {
+		t.Fatalf("expected error strategy_validation_failed, got %v", payload["error"])
+	}
+	if payload["message"] != "metadata validation failed" {
+		t.Fatalf("expected message preserved, got %v", payload["message"])
+	}
+	diagnostics, ok := payload["diagnostics"].([]any)
+	if !ok || len(diagnostics) == 0 {
+		t.Fatalf("expected diagnostics in payload")
+	}
+	first, ok := diagnostics[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected diagnostic payload type %T", diagnostics[0])
+	}
+	if first["stage"] != string(js.DiagnosticStageValidation) {
+		t.Fatalf("expected validation stage, got %v", first["stage"])
+	}
+	if first["message"] != diag.Message {
+		t.Fatalf("expected diagnostic message %q, got %v", diag.Message, first["message"])
+	}
+}
+
 func TestApplyContextBackupRestoresState(t *testing.T) {
 	appCfg := config.AppConfig{
 		Strategies: config.StrategiesConfig{

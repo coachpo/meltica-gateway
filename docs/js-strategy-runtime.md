@@ -158,6 +158,8 @@ All errors surface as standard HTTP codes (400, 404, 409, etc.). Module CRUD end
 
 2. **Upload the module** via `POST /strategies/modules` or drop it into the directory and call `POST /strategies/refresh`.
 
+   Upload requests now return HTTP `422 Unprocessable Entity` when compilation, execution, or metadata validation fails. The JSON payload includes a `diagnostics` array detailing the failing stage, message, and optional `line`/`column` and `hint` so authors can iterate quickly without digging through gateway logs.
+
 3. **Reference it** in a lambda manifest or runtime API calls using `metadata.name`.
 
 4. **Validate** with `go test ./...` or by running the backtest CLI (see below).
