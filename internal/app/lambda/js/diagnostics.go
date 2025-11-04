@@ -105,6 +105,8 @@ func compileDiagnostic(err error) Diagnostic {
 	diag := Diagnostic{
 		Stage:   DiagnosticStageCompile,
 		Message: msg,
+		Line:    0,
+		Column:  0,
 		Hint:    "Fix the JavaScript syntax near the reported location.",
 	}
 	var syntaxErr *goja.CompilerSyntaxError
@@ -130,6 +132,8 @@ func executeDiagnostic(err error) Diagnostic {
 	diag := Diagnostic{
 		Stage:   DiagnosticStageExecute,
 		Message: diagnosticMessage(err),
+		Line:    0,
+		Column:  0,
 		Hint:    "Check module initialization and ensure metadata export executes without throwing.",
 	}
 	var jsErr *goja.Exception
@@ -192,12 +196,13 @@ func validationDiagnosticsFromIssues(issues []strategies.MetadataIssue) []Diagno
 		if message == "" {
 			continue
 		}
+		hint := strings.TrimSpace(issue.Path)
 		diag := Diagnostic{
 			Stage:   DiagnosticStageValidation,
 			Message: message,
-		}
-		if hint := strings.TrimSpace(issue.Path); hint != "" {
-			diag.Hint = hint
+			Line:    0,
+			Column:  0,
+			Hint:    hint,
 		}
 		out = append(out, diag)
 	}

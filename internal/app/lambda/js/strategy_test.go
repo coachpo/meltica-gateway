@@ -23,7 +23,7 @@ module.exports = {
         required: false
       }
     ],
-    events: []
+    events: ["Trade"]
   },
   create: function(env) {
     if (!env || !env.config) {

@@ -217,6 +217,9 @@ func TestWriteStrategyModuleErrorReturnsDiagnostics(t *testing.T) {
 	diag := js.Diagnostic{
 		Stage:   js.DiagnosticStageValidation,
 		Message: "displayName required",
+		Line:    0,
+		Column:  0,
+		Hint:    "metadata.displayName",
 	}
 	diagErr := js.NewDiagnosticError("metadata validation failed", nil, diag)
 

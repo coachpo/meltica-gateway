@@ -945,6 +945,8 @@ func extractMetadata(program *goja.Program) (strategies.Metadata, error) {
 			Diagnostic{
 				Stage:   DiagnosticStageValidation,
 				Message: "metadata export missing",
+				Line:    0,
+				Column:  0,
 				Hint:    "Expose module.exports.metadata with required fields.",
 			},
 		)
@@ -959,6 +961,8 @@ func extractMetadata(program *goja.Program) (strategies.Metadata, error) {
 			Diagnostic{
 				Stage:   DiagnosticStageValidation,
 				Message: diagnosticMessage(err),
+				Line:    0,
+				Column:  0,
 				Hint:    "Ensure metadata export matches the strategies.Metadata schema.",
 			},
 		)

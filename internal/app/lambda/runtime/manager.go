@@ -273,9 +273,9 @@ type Manager struct {
 	specs      map[string]config.LambdaSpec
 	instances  map[string]*lambdaInstance
 
-	revisionUsage           map[string]*revisionUsage
-	revisionGauge           metric.Int64ObservableGauge
-	revisionLifecycleMetric metric.Int64Counter
+	revisionUsage            map[string]*revisionUsage
+	revisionGauge            metric.Int64ObservableGauge
+	revisionLifecycleMetric  metric.Int64Counter
 	uploadValidationFailures metric.Int64Counter
 }
 
@@ -315,26 +315,27 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 	}
 
 	mgr := &Manager{
-		mu:                      sync.RWMutex{},
-		lifecycleMu:             sync.RWMutex{},
-		lifecycleCtx:            context.Background(),
-		bus:                     bus,
-		pools:                   pools,
-		providers:               providers,
-		logger:                  logger,
-		registrar:               registrar,
-		riskManager:             rm,
-		jsLoader:                loader,
-		dynamic:                 make(map[string]struct{}),
-		clock:                   time.Now,
-		strategyDir:             loader.Root(),
-		base:                    make(map[string]StrategyDefinition),
-		strategies:              make(map[string]StrategyDefinition),
-		specs:                   make(map[string]config.LambdaSpec),
-		instances:               make(map[string]*lambdaInstance),
-		revisionUsage:           make(map[string]*revisionUsage),
-		revisionGauge:           nil,
-		revisionLifecycleMetric: nil,
+		mu:                       sync.RWMutex{},
+		lifecycleMu:              sync.RWMutex{},
+		lifecycleCtx:             context.Background(),
+		bus:                      bus,
+		pools:                    pools,
+		providers:                providers,
+		logger:                   logger,
+		registrar:                registrar,
+		riskManager:              rm,
+		jsLoader:                 loader,
+		dynamic:                  make(map[string]struct{}),
+		clock:                    time.Now,
+		strategyDir:              loader.Root(),
+		base:                     make(map[string]StrategyDefinition),
+		strategies:               make(map[string]StrategyDefinition),
+		specs:                    make(map[string]config.LambdaSpec),
+		instances:                make(map[string]*lambdaInstance),
+		revisionUsage:            make(map[string]*revisionUsage),
+		revisionGauge:            nil,
+		revisionLifecycleMetric:  nil,
+		uploadValidationFailures: nil,
 	}
 	mgr.setupMetrics()
 	if _, err := mgr.installJavaScriptStrategies(context.Background()); err != nil {

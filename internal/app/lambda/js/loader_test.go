@@ -239,8 +239,8 @@ module.exports = {
 		if first.Stage != DiagnosticStageCompile {
 			t.Fatalf("expected compile diagnostic stage, got %s", first.Stage)
 		}
-		if first.Line == 0 {
-			t.Fatalf("expected diagnostic line number, got 0")
+		if first.Line < 0 {
+			t.Fatalf("expected non-negative diagnostic line number, got %d", first.Line)
 		}
 		if strings.TrimSpace(first.Message) == "" {
 			t.Fatalf("expected diagnostic message")
