@@ -94,6 +94,8 @@ const defaultFormState: ModuleFormState = {
   promoteLatest: true,
 };
 
+const VALIDATION_UI_ENABLED = process.env.NEXT_PUBLIC_STRATEGY_VALIDATION_UI === 'true';
+
 const STRATEGY_DOCS_URL =
   'https://github.com/coachpo/meltica/blob/dev/docs/js-strategy-runtime.md';
 
@@ -326,7 +328,7 @@ export default function StrategyModulesPage() {
   const [uploadedFileInfo, setUploadedFileInfo] = useState<{ name: string; size: number } | null>(
     null,
   );
-  const validationUIEnabled = true;
+  const validationUIEnabled = VALIDATION_UI_ENABLED;
   const [detailModule, setDetailModule] = useState<StrategyModuleSummary | null>(null);
   const [sourceModule, setSourceModule] = useState<StrategyModuleSummary | null>(null);
   const [sourceContent, setSourceContent] = useState('');
@@ -761,12 +763,9 @@ export default function StrategyModulesPage() {
   }, [loadModules, refreshHashInput, refreshSelectorInput, showToast]);
 
   const openCreateDialog = () => {
-    const initialState = validationUIEnabled
-      ? { ...defaultFormState, source: STRATEGY_MODULE_TEMPLATE }
-      : defaultFormState;
     setFormMode('create');
     setFormTarget(null);
-    setFormData(initialState);
+    setFormData(defaultFormState);
     clearValidationFeedback();
     setUploadedFileInfo(null);
     setFormPrefillLoading(false);
