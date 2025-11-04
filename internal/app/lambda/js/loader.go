@@ -803,6 +803,7 @@ func extractMetadata(program *goja.Program) (strategies.Metadata, error) {
 }
 
 func runModule(rt *goja.Runtime, program *goja.Program) (*goja.Object, error) {
+	rt.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	module := rt.NewObject()
 	exports := rt.NewObject()
 	if err := module.Set("exports", exports); err != nil {
