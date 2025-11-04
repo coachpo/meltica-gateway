@@ -138,6 +138,7 @@ export default function StrategyModulesPage() {
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<StrategyModuleSummary | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [revisionToDelete, setRevisionToDelete] = useState<{
     module: StrategyModuleSummary;
@@ -421,6 +422,7 @@ export default function StrategyModulesPage() {
     }
     const identifier = deleteTarget.file || deleteTarget.name;
     setDeleting(true);
+    setDeleteError(null);
     try {
       await apiClient.deleteStrategyModule(identifier);
       showToast({
@@ -430,10 +432,12 @@ export default function StrategyModulesPage() {
       });
       await refreshCatalog({ silent: true, notifySuccess: false });
       setDeleteTarget(null);
+      setDeleteError(null);
     } catch (err) {
       const messageRaw =
         err instanceof Error ? err.message : 'Failed to delete strategy module';
       const message = friendlyDeletionMessage(messageRaw);
+      setDeleteError(message);
       showToast({
         title: 'Delete failed',
         description: message,
@@ -647,11 +651,29 @@ export default function StrategyModulesPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Strategy Modules</h1>
-          <p className="text-muted-foreground">
-            Upload, edit, and refresh JavaScript trading strategies available to the runtime.
-          </p>
+        <div className="space-y-2">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Strategy Modules</h1>
+            <p className="text-muted-foreground">
+              Upload, edit, and refresh JavaScript trading strategies available to the runtime.
+            </p>
+          </div>
+          <Alert variant="secondary" className="max-w-4xl">
+            <AlertTitle className="flex items-center gap-2 text-sm font-semibold">
+              Revision pointers
+            </AlertTitle>
+            <AlertDescription className="space-y-2 text-xs sm:text-sm">
+              <p>
+                <span className="font-medium">Latest hash</span> is the revision operators reach when they
+                reference only the strategy name. Promote tags to change what{' '}
+                <code>name</code> resolves to.
+              </p>
+              <p>
+                <span className="font-medium">Pinned hash</span> is the digest currently recorded for running
+                instances. Instances stay on their pinned hash until they are refreshed or redeployed.
+              </p>
+            </AlertDescription>
+          </Alert>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={openCreateDialog} variant="default">
@@ -762,30 +784,42 @@ export default function StrategyModulesPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="space-y-1 text-xs">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">latest</Badge>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                            onClick={() => copyHash(module.tagAliases?.latest ?? module.hash)}
-                          >
-                            <span className="font-mono">
-                              {(module.tagAliases?.latest ?? module.hash).slice(0, 12)}…
-                            </span>
-                            <Copy className="h-3 w-3" />
-                          </button>
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">Latest selector</Badge>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                              onClick={() => copyHash(module.tagAliases?.latest ?? module.hash)}
+                            >
+                              <span className="font-mono">
+                                {(module.tagAliases?.latest ?? module.hash).slice(0, 12)}…
+                              </span>
+                              <Copy className="h-3 w-3" />
+                            </button>
+                          </div>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Latest updates whenever you promote a revision. New instances using just
+                            <code className="mx-1">{module.name}</code> resolve to this hash.
+                          </p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">pinned</Badge>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                            onClick={() => copyHash(module.hash)}
-                          >
-                            <span className="font-mono">{module.hash.slice(0, 12)}…</span>
-                            <Copy className="h-3 w-3" />
-                          </button>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">Pinned by runtime</Badge>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                              onClick={() => copyHash(module.hash)}
+                            >
+                              <span className="font-mono">{module.hash.slice(0, 12)}…</span>
+                              <Copy className="h-3 w-3" />
+                            </button>
+                          </div>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Running instances keep this hash until you refresh them. Use it to audit what
+                            is live.
+                          </p>
                         </div>
                       </div>
                     </TableCell>
@@ -847,7 +881,7 @@ export default function StrategyModulesPage() {
           }
         }}
       >
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-full max-h-[90vh] overflow-y-auto sm:max-w-4xl lg:max-w-5xl">
           <DialogHeader>
             <DialogTitle>
               {formMode === 'create' ? 'Upload strategy module' : `Edit ${formTarget?.name ?? ''}`}
@@ -858,95 +892,102 @@ export default function StrategyModulesPage() {
                 : 'Update the JavaScript source for this strategy module.'}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid gap-2">
-              <Label htmlFor="strategy-name">Strategy name</Label>
-              <Input
-                id="strategy-name"
-                placeholder="grid"
-                value={formData.name}
-                disabled={formMode === 'edit'}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, name: event.target.value }))
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                Provide the canonical strategy identifier. This cannot be changed after creation.
-              </p>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-6 py-2 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+            <div className="space-y-4">
               <div className="grid gap-2">
-                <Label htmlFor="strategy-tag">Tag (optional)</Label>
+                <Label htmlFor="strategy-name">Strategy name</Label>
                 <Input
-                  id="strategy-tag"
-                  placeholder="v1.2.0"
-                  value={formData.tag}
+                  id="strategy-name"
+                  placeholder="grid"
+                  value={formData.name}
+                  disabled={formMode === 'edit' || formProcessing}
                   onChange={(event) =>
-                    setFormData((prev) => ({ ...prev, tag: event.target.value }))
+                    setFormData((prev) => ({ ...prev, name: event.target.value }))
                   }
-                  disabled={formProcessing}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Supply a semantic version or release tag for this revision.
+                  Provide the canonical strategy identifier. This cannot be changed after creation.
                 </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="strategy-tag">Tag (optional)</Label>
+                  <Input
+                    id="strategy-tag"
+                    placeholder="v1.2.0"
+                    value={formData.tag}
+                    onChange={(event) =>
+                      setFormData((prev) => ({ ...prev, tag: event.target.value }))
+                    }
+                    disabled={formProcessing}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Supply a semantic version or release tag for this revision.
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="strategy-aliases">Aliases</Label>
+                  <Input
+                    id="strategy-aliases"
+                    placeholder="stable, canary"
+                    value={formData.aliases}
+                    onChange={(event) =>
+                      setFormData((prev) => ({ ...prev, aliases: event.target.value }))
+                    }
+                    disabled={formProcessing}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Comma-separated alias tags that should resolve to this revision.
+                  </p>
+                </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="strategy-aliases">Aliases</Label>
+                <Label htmlFor="strategy-filename">Filename (optional)</Label>
                 <Input
-                  id="strategy-aliases"
-                  placeholder="stable, canary"
-                  value={formData.aliases}
+                  id="strategy-filename"
+                  placeholder={`example${FILE_EXTENSION_HINT}`}
+                  value={formData.filename}
+                  disabled={formMode === 'edit' || formProcessing}
                   onChange={(event) =>
-                    setFormData((prev) => ({ ...prev, aliases: event.target.value }))
+                    setFormData((prev) => ({ ...prev, filename: event.target.value }))
                   }
-                  disabled={formProcessing}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Comma-separated alias tags that should resolve to this revision.
+                  Leave blank to derive a versioned filename from the strategy name and tag. Manual filenames must end
+                  with {FILE_EXTENSION_HINT}.
                 </p>
               </div>
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="promote-latest"
+                  checked={formData.promoteLatest}
+                  disabled={formProcessing}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, promoteLatest: event.target.checked }))
+                  }
+                />
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="promote-latest"
+                    className="block text-sm font-medium leading-snug"
+                  >
+                    Promote this revision to the{' '}
+                    <span className="font-semibold">latest</span> tag after save
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Leave enabled for new releases. Disable to keep the existing latest pointer.
+                  </p>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="promote-latest"
-                checked={formData.promoteLatest}
-                disabled={formProcessing}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, promoteLatest: event.target.checked }))
-                }
-              />
-              <Label htmlFor="promote-latest" className="text-sm font-normal">
-                Promote this revision to the <span className="font-semibold">latest</span> tag after save
-              </Label>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="strategy-filename">Filename (optional)</Label>
-              <Input
-                id="strategy-filename"
-                placeholder={`example${FILE_EXTENSION_HINT}`}
-                value={formData.filename}
-                disabled={formMode === 'edit'}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, filename: event.target.value }))
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                Leave blank to derive a versioned filename from the strategy name and tag. Manual filenames must end with {FILE_EXTENSION_HINT}.
-              </p>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="strategy-source">Source</Label>
-              <Textarea
-                id="strategy-source"
-                className="font-mono text-sm h-[50vh] min-h-[280px]"
-                value={formData.source}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, source: event.target.value }))
-                }
-                spellCheck={false}
-                disabled={formPrefillLoading || formProcessing}
-              />
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <Label htmlFor="strategy-source">Source</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Paste or load the JavaScript module to compile.
+                  </p>
+                </div>
                 <Button
                   type="button"
                   variant="outline"
@@ -956,27 +997,37 @@ export default function StrategyModulesPage() {
                   <UploadCloud className="mr-2 h-4 w-4" />
                   Load from file
                 </Button>
-                <input
-                  type="file"
-                  accept=".js,.mjs,application/javascript"
-                  ref={fileInputRef}
-                  className="hidden"
-                  onChange={handleFileSelected}
-                />
-                {formPrefillLoading ? (
-                  <span className="flex items-center text-xs text-muted-foreground">
-                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                    Loading current source…
-                  </span>
-                ) : null}
               </div>
+              <Textarea
+                id="strategy-source"
+                className="font-mono text-sm min-h-[320px] lg:min-h-[440px]"
+                value={formData.source}
+                onChange={(event) =>
+                  setFormData((prev) => ({ ...prev, source: event.target.value }))
+                }
+                spellCheck={false}
+                disabled={formPrefillLoading || formProcessing}
+              />
+              <input
+                type="file"
+                accept=".js,.mjs,application/javascript"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileSelected}
+              />
+              {formPrefillLoading ? (
+                <span className="flex items-center text-xs text-muted-foreground">
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  Loading current source…
+                </span>
+              ) : null}
             </div>
-            {formError ? (
-              <Alert variant="destructive">
-                <AlertDescription>{formError}</AlertDescription>
-              </Alert>
-            ) : null}
           </div>
+          {formError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          ) : null}
           <DialogFooter className="gap-2 sm:gap-2">
             <Button
               type="button"
@@ -991,7 +1042,16 @@ export default function StrategyModulesPage() {
               onClick={() => void handleFormSubmit()}
               disabled={formProcessing || formPrefillLoading}
             >
-              {formProcessing ? 'Saving…' : formMode === 'create' ? 'Save & refresh' : 'Update & refresh'}
+              {formProcessing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving…
+                </>
+              ) : formMode === 'create' ? (
+                'Save & refresh'
+              ) : (
+                'Update & refresh'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1055,32 +1115,43 @@ export default function StrategyModulesPage() {
                 </div>
               </div>
               <div>
-                <h4 className="text-sm font-semibold">Tag aliases</h4>
-                <div className="mt-2 space-y-2">
-                  {Object.entries(detailModule.tagAliases ?? {}).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No tag aliases defined.</p>
-                  ) : (
-                    Object.entries(detailModule.tagAliases ?? {}).map(([tag, hash]) => (
-                      <div
-                        key={tag}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-xs"
+                <h4 className="text-sm font-semibold">Pointer summary</h4>
+                <div className="mt-2 space-y-3 rounded-md border p-3 text-xs">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">Latest selector</Badge>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                        onClick={() => copyHash(detailModule.tagAliases?.latest ?? detailModule.hash)}
                       >
-                        <div className="flex items-center gap-2">
-                          <Badge variant={tag === 'latest' ? 'default' : 'secondary'}>{tag}</Badge>
-                          <span className="font-mono">{hash}</span>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2"
-                          onClick={() => copyHash(hash)}
-                        >
-                          <Copy className="mr-1 h-3 w-3" /> Copy
-                        </Button>
-                      </div>
-                    ))
-                  )}
+                        <span className="font-mono">
+                          {(detailModule.tagAliases?.latest ?? detailModule.hash).slice(0, 18)}…
+                        </span>
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      This is what a bare selector like <code className="mx-1">{detailModule.name}</code>{' '}
+                      resolves to today. Promote a revision to move the <code className="mx-1">latest</code> tag.
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">Pinned by runtime</Badge>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                        onClick={() => copyHash(detailModule.hash)}
+                      >
+                        <span className="font-mono">{detailModule.hash}</span>
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Instances currently running this module are pinned to this hash until they are refreshed.
+                    </p>
+                  </div>
                 </div>
               </div>
               <div>
@@ -1310,6 +1381,7 @@ export default function StrategyModulesPage() {
         onOpenChange={(open) => {
           if (!open) {
             setDeleteTarget(null);
+            setDeleteError(null);
           }
         }}
         title="Delete strategy module"
@@ -1322,6 +1394,7 @@ export default function StrategyModulesPage() {
         confirmLabel="Delete"
         confirmVariant="destructive"
         loading={deleting}
+        errorMessage={deleteError}
         onConfirm={() => void handleDelete()}
       />
       <ConfirmDialog
@@ -1415,6 +1488,12 @@ export default function StrategyModulesPage() {
                   setAliasValue(event.target.value);
                   setAliasError(null);
                 }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !aliasProcessing) {
+                    event.preventDefault();
+                    void handleAliasSubmit();
+                  }
+                }}
                 placeholder="stable"
                 disabled={aliasProcessing}
               />
@@ -1453,7 +1532,14 @@ export default function StrategyModulesPage() {
               onClick={() => void handleAliasSubmit()}
               disabled={aliasProcessing}
             >
-              {aliasProcessing ? 'Saving…' : 'Save alias'}
+              {aliasProcessing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                'Save alias'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
