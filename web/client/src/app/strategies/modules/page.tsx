@@ -210,6 +210,22 @@ export default function StrategyModulesPage() {
     void loadModules();
   }, [loadModules]);
 
+  useEffect(() => {
+    setDetailModule((current) => {
+      if (!current) {
+        return current;
+      }
+      const next = modules.find((entry) => entry.name === current.name);
+      if (!next) {
+        return null;
+      }
+      if (next === current) {
+        return current;
+      }
+      return next;
+    });
+  }, [modules]);
+
   const refreshCatalog = useCallback(
     async ({ silent = false, notifySuccess = !silent }: RefreshOptions = {}) => {
       if (!silent) {
@@ -420,6 +436,7 @@ export default function StrategyModulesPage() {
     if (!deleteTarget) {
       return;
     }
+    const moduleName = deleteTarget.name;
     const identifier = deleteTarget.file || deleteTarget.name;
     setDeleting(true);
     setDeleteError(null);
@@ -431,6 +448,7 @@ export default function StrategyModulesPage() {
         variant: 'success',
       });
       await refreshCatalog({ silent: true, notifySuccess: false });
+      setDetailModule((current) => (current?.name === moduleName ? null : current));
       setDeleteTarget(null);
       setDeleteError(null);
     } catch (err) {
