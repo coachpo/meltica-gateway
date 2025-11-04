@@ -20,30 +20,39 @@ If user input is not empty, you **must** take it into account before proceeding.
 
 ## Planning and Execution
 
-- **Ignore backward compatibility** — do not write shim code.
-- If a modification is too large or complex, **stop immediately** and notify the user instead of attempting a partial workaround.
-- MUST Always **retry** the command using **zsh** if it **fails** when run with **bash**.
-- Use Capabilities MCP servers in these cases:
+- **Ignore backward compatibility** — must always avoid writing shim code.
+- If a modification is too large or complex, **must always stop immediately** and notify the user instead of attempting a partial workaround.
+- **Must always retry** the command using **zsh** if it **fails** when run with **bash**.
+
+- Must always use Capabilities MCP servers in the following cases:
 
   - `context7 MCP`:
-    - When you need up-to-date library/framework docs, API references, code samples, or migration notes relevant to the requested change.
-    - When resolving ambiguous library names or selecting between multiple packages.
-    - When external documentation is required to implement or verify behavior that is not obvious from the repository code.
-  - `sequential-thinking MCP`:
-    - When requirements are ambiguous, multi-step, or have trade-offs; to produce and verify a plan before acting.
-    - Before large refactors, risky changes, or whenever branching alternatives need evaluation.
-    - When hypothesis generation/verification will reduce rework.
-  - `playwright MCP`:
-    - When the user input includes a concrete, accessible target URL and you must reproduce a frontend bug, validate a flow, or capture evidence.
-    - When automating interactions in a browser for public URLs; do not use for localhost or private networks.
-  - `shadcn MCP`:
-    - When searching for shadcn/ui components, usage examples, or add commands to scaffold UI parts requested by the user.
-    - When you need canonical usage patterns for components already used by the project.
-  - `figma MCP`:
-    - When the user explicitly provides a Figma file URL and requests reading specs, extracting assets, or syncing design tokens.
-    - When design details (spacing, typography, colors) are required to implement a UI change.
 
-- Prefer MCP servers whenever off-repo knowledge or external verification is needed; prefer local repo search tools for code that already exists in this repository.
+    - Must always be used when up-to-date library/framework docs, API references, code samples, or migration notes are needed for the requested change.
+    - Must always be used when resolving ambiguous library names or selecting between multiple packages.
+    - Must always be used when external documentation is required to implement or verify behavior that is not obvious from the repository code.
+
+  - `sequential-thinking MCP`:
+
+    - Must always be used when requirements are ambiguous, multi-step, or involve trade-offs, to produce and verify a plan before acting.
+    - Must always be used before large refactors, risky changes, or whenever branching alternatives need evaluation.
+    - Must always be used when hypothesis generation or verification can reduce rework.
+
+  - `playwright MCP`:
+
+    - Must always be used when the user input includes a concrete, accessible target URL and you must reproduce a frontend bug, validate a flow, or capture evidence.
+    - Must always be used when automating interactions in a browser for public URLs; never use it for localhost or private networks.
+
+  - `shadcn MCP`:
+
+    - Must always be used when searching for shadcn/ui components, usage examples, or when adding commands to scaffold UI parts requested by the user.
+    - Must always be used when canonical usage patterns for components already in the project are required.
+
+  - `figma MCP`:
+    - Must always be used when the user explicitly provides a Figma file URL and requests reading specs, extracting assets, or syncing design tokens.
+    - Must always be used when design details (spacing, typography, colors) are needed to implement a UI change.
+
+- Must always prefer MCP servers whenever off-repo knowledge or external verification is needed; must always prefer local repo search tools for code that already exists in this repository.
 
 ## Validation
 
