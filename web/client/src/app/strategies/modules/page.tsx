@@ -1072,7 +1072,7 @@ export default function StrategyModulesPage() {
           }
         }}
       >
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl sm:max-w-4xl lg:max-w-5xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{detailModule?.metadata.displayName ?? detailModule?.name ?? 'Strategy'}</DialogTitle>
             <DialogDescription>
