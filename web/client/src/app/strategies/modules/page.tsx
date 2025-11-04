@@ -1,15 +1,18 @@
 'use client';
 
+import Link from 'next/link';
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, StrategyValidationError } from '@/lib/api-client';
 import type {
+  StrategyDiagnostic,
   StrategyModuleRevision,
   StrategyModuleSummary,
   StrategyModuleUsageResponse,
   StrategyRefreshRequest,
   StrategyRefreshResult,
 } from '@/lib/types';
+import { StrategyModuleEditor } from '@/components/strategy-module-editor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -51,6 +54,7 @@ import {
   Download,
   Eye,
   FileCode,
+  FilePlus,
   Loader2,
   Pencil,
   RefreshCw,
@@ -89,6 +93,75 @@ const defaultFormState: ModuleFormState = {
   source: '',
   promoteLatest: true,
 };
+
+const VALIDATION_UI_ENABLED = process.env.NEXT_PUBLIC_STRATEGY_VALIDATION_UI === 'true';
+
+const STRATEGY_DOCS_URL =
+  'https://github.com/coachpo/meltica/blob/dev/docs/js-strategy-runtime.md';
+
+export const STRATEGY_MODULE_TEMPLATE = `module.exports = {
+  metadata: {
+    name: "strategy-name",
+    displayName: "Strategy Display Name",
+    description: "Describe the strategy's behaviour and requirements.",
+    config: [
+      {
+        name: "threshold",
+        type: "number",
+        description: "Example configuration field.",
+        default: 0.5,
+        required: false
+      }
+    ],
+    events: ["Trade"]
+  },
+  create: function (env) {
+    return {
+      onTrade: function (ctx, event) {
+        env.helpers.log("Received trade", event.payload);
+      }
+    };
+  }
+};
+`;
+
+const STAGE_LABELS: Record<string, string> = {
+  compile: 'Compile error',
+  execute: 'Runtime init error',
+  validation: 'Metadata validation',
+};
+
+const STAGE_ACTIONS: Record<string, string> = {
+  compile: 'Fix the JavaScript syntax at the highlighted locations.',
+  execute: 'Ensure module initialisation runs without throwing errors.',
+  validation: 'Provide the required metadata fields before saving again.',
+};
+
+export const stageLabel = (rawStage: string | undefined): string => {
+  if (!rawStage) {
+    return 'Validation error';
+  }
+  const normalised = rawStage.toLowerCase();
+  return STAGE_LABELS[normalised] ?? 'Validation error';
+};
+
+export const stageAction = (rawStage: string | undefined): string => {
+  if (!rawStage) {
+    return 'Review the highlighted issues before saving again.';
+  }
+  const normalised = rawStage.toLowerCase();
+  return STAGE_ACTIONS[normalised] ?? 'Review the highlighted issues before saving again.';
+};
+
+export function nextValidationFeedbackAfterEdit(
+  diagnostics: StrategyDiagnostic[],
+  error: string | null,
+): { diagnostics: StrategyDiagnostic[]; error: string | null } {
+  if (diagnostics.length === 0 && error === null) {
+    return { diagnostics, error };
+  }
+  return { diagnostics: [], error: null };
+}
 
 function formatBytes(size: number): string {
   if (!Number.isFinite(size) || size <= 0) {
@@ -251,6 +324,11 @@ export default function StrategyModulesPage() {
   const [formProcessing, setFormProcessing] = useState(false);
   const [formPrefillLoading, setFormPrefillLoading] = useState(false);
   const [formTarget, setFormTarget] = useState<StrategyModuleSummary | null>(null);
+  const [formDiagnostics, setFormDiagnostics] = useState<StrategyDiagnostic[]>([]);
+  const [uploadedFileInfo, setUploadedFileInfo] = useState<{ name: string; size: number } | null>(
+    null,
+  );
+  const validationUIEnabled = VALIDATION_UI_ENABLED;
   const [detailModule, setDetailModule] = useState<StrategyModuleSummary | null>(null);
   const [sourceModule, setSourceModule] = useState<StrategyModuleSummary | null>(null);
   const [sourceContent, setSourceContent] = useState('');
@@ -308,6 +386,55 @@ export default function StrategyModulesPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { show: showToast } = useToast();
+
+  const clearValidationFeedback = useCallback(() => {
+    const next = nextValidationFeedbackAfterEdit(formDiagnostics, formError);
+    if (next.diagnostics !== formDiagnostics) {
+      setFormDiagnostics(next.diagnostics);
+    }
+    if (next.error !== formError) {
+      setFormError(next.error);
+    }
+  }, [formDiagnostics, formError]);
+
+  const emitValidationTelemetry = useCallback((diagnostics: StrategyDiagnostic[]) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const primaryStage = diagnostics.find((entry) => entry.stage)?.stage ?? 'unknown';
+    window.dispatchEvent(
+      new CustomEvent('strategy_module.validation_failure', {
+        detail: {
+          stage: primaryStage,
+          diagnostics: diagnostics.length,
+        },
+      }),
+    );
+  }, []);
+
+  const handleSourceChange = useCallback(
+    (nextSource: string) => {
+      setFormData((prev) => ({ ...prev, source: nextSource }));
+      clearValidationFeedback();
+      setUploadedFileInfo(null);
+    },
+    [clearValidationFeedback],
+  );
+
+  const handleTemplateInsert = useCallback(() => {
+    const trimmed = formData.source.trim();
+    if (trimmed.length > 0 && typeof window !== 'undefined') {
+      const confirmed = window.confirm(
+        'Replace the existing source with a starter template?',
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    setFormData((prev) => ({ ...prev, source: STRATEGY_MODULE_TEMPLATE }));
+    clearValidationFeedback();
+    setUploadedFileInfo(null);
+  }, [clearValidationFeedback, formData.source]);
 
   const sortedModules = useMemo(
     () => [...modules].sort((a, b) => a.name.localeCompare(b.name)),
@@ -639,7 +766,8 @@ export default function StrategyModulesPage() {
     setFormMode('create');
     setFormTarget(null);
     setFormData(defaultFormState);
-    setFormError(null);
+    clearValidationFeedback();
+    setUploadedFileInfo(null);
     setFormPrefillLoading(false);
     setFormProcessing(false);
     setFormOpen(true);
@@ -648,7 +776,8 @@ export default function StrategyModulesPage() {
   const openEditDialog = async (module: StrategyModuleSummary) => {
     setFormMode('edit');
     setFormTarget(module);
-    setFormError(null);
+    clearValidationFeedback();
+    setUploadedFileInfo(null);
     setFormProcessing(false);
     setFormPrefillLoading(true);
     const aliasKeys = Object.keys(module.tagAliases ?? {}).filter((tag) => {
@@ -710,11 +839,13 @@ export default function StrategyModulesPage() {
         filename: prev.filename || file.name,
         source: text,
       }));
-      setFormError(null);
+      clearValidationFeedback();
+      setUploadedFileInfo({ name: file.name, size: file.size });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to read selected file';
       setFormError(message);
+      setUploadedFileInfo(null);
     } finally {
       // reset input so same file can be reselected
       event.target.value = '';
@@ -799,16 +930,29 @@ export default function StrategyModulesPage() {
       setFormOpen(false);
       setFormTarget(null);
       setFormData(defaultFormState);
+      setFormDiagnostics([]);
+      setUploadedFileInfo(null);
+      setFormError(null);
     } catch (err) {
-      const message = friendlySaveError(
-        err instanceof Error ? err.message : 'Failed to save strategy module',
-      );
-      setFormError(message);
-      showToast({
-        title: 'Save failed',
-        description: message,
-        variant: 'destructive',
-      });
+      if (err instanceof StrategyValidationError) {
+        const diagnostics = Array.isArray(err.diagnostics) ? err.diagnostics : [];
+        setFormDiagnostics(diagnostics);
+        setFormError(err.message || 'Strategy module validation failed');
+        if (diagnostics.length > 0) {
+          emitValidationTelemetry(diagnostics);
+        }
+      } else {
+        const message = friendlySaveError(
+          err instanceof Error ? err.message : 'Failed to save strategy module',
+        );
+        setFormDiagnostics([]);
+        setFormError(message);
+        showToast({
+          title: 'Save failed',
+          description: message,
+          variant: 'destructive',
+        });
+      }
     } finally {
       setFormProcessing(false);
     }
@@ -1514,10 +1658,11 @@ export default function StrategyModulesPage() {
           setFormOpen(open);
           if (!open) {
             setFormTarget(null);
-            setFormError(null);
+            clearValidationFeedback();
             setFormProcessing(false);
             setFormPrefillLoading(false);
             setFormData(defaultFormState);
+            setUploadedFileInfo(null);
           }
         }}
       >
@@ -1541,9 +1686,10 @@ export default function StrategyModulesPage() {
                   placeholder="grid"
                   value={formData.name}
                   disabled={formMode === 'edit' || formProcessing}
-                  onChange={(event) =>
-                    setFormData((prev) => ({ ...prev, name: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    setFormData((prev) => ({ ...prev, name: event.target.value }));
+                    clearValidationFeedback();
+                  }}
                 />
                 <p className="text-xs text-muted-foreground">
                   Provide the canonical strategy identifier. This cannot be changed after creation.
@@ -1556,9 +1702,10 @@ export default function StrategyModulesPage() {
                     id="strategy-tag"
                     placeholder="v1.2.0"
                     value={formData.tag}
-                    onChange={(event) =>
-                      setFormData((prev) => ({ ...prev, tag: event.target.value }))
-                    }
+                    onChange={(event) => {
+                      setFormData((prev) => ({ ...prev, tag: event.target.value }));
+                      clearValidationFeedback();
+                    }}
                     disabled={formProcessing}
                   />
                   <p className="text-xs text-muted-foreground">
@@ -1572,9 +1719,10 @@ export default function StrategyModulesPage() {
                     id="strategy-aliases"
                     placeholder="stable, canary"
                     value={formData.aliases}
-                    onChange={(event) =>
-                      setFormData((prev) => ({ ...prev, aliases: event.target.value }))
-                    }
+                    onChange={(event) => {
+                      setFormData((prev) => ({ ...prev, aliases: event.target.value }));
+                      clearValidationFeedback();
+                    }}
                     disabled={formProcessing}
                   />
                   <p className="text-xs text-muted-foreground">
@@ -1589,9 +1737,10 @@ export default function StrategyModulesPage() {
                   placeholder={`example${FILE_EXTENSION_HINT}`}
                   value={formData.filename}
                   disabled={formMode === 'edit' || formProcessing}
-                  onChange={(event) =>
-                    setFormData((prev) => ({ ...prev, filename: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    setFormData((prev) => ({ ...prev, filename: event.target.value }));
+                    clearValidationFeedback();
+                  }}
                 />
                 <p className="text-xs text-muted-foreground">
                   Leave blank to derive a versioned filename from the strategy name and tag. Manual filenames must end
@@ -1603,9 +1752,10 @@ export default function StrategyModulesPage() {
                   id="promote-latest"
                   checked={formData.promoteLatest}
                   disabled={formProcessing}
-                  onChange={(event) =>
-                    setFormData((prev) => ({ ...prev, promoteLatest: event.target.checked }))
-                  }
+                  onChange={(event) => {
+                    setFormData((prev) => ({ ...prev, promoteLatest: event.target.checked }));
+                    clearValidationFeedback();
+                  }}
                 />
                 <div className="space-y-1">
                   <Label
@@ -1626,28 +1776,65 @@ export default function StrategyModulesPage() {
                 <div>
                   <Label htmlFor="strategy-source">Source</Label>
                   <p className="text-xs text-muted-foreground">
-                    Paste or load the JavaScript module to compile.
+                    Paste or load the JavaScript module to compile. Ensure <code>metadata</code> includes{' '}
+                    <span className="font-medium">displayName</span>, at least one <code>events</code> entry, and any required configuration fields.
+                    {validationUIEnabled ? (
+                      <>
+                        {' '}
+                        <Link
+                          href={STRATEGY_DOCS_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline-offset-4 hover:underline"
+                        >
+                          View docs
+                        </Link>
+                        .
+                      </>
+                    ) : null}
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleFilePickerClick}
-                  disabled={formProcessing}
-                >
-                  <UploadCloud className="mr-2 h-4 w-4" />
-                  Load from file
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  {validationUIEnabled ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleTemplateInsert}
+                      disabled={formProcessing || formPrefillLoading}
+                    >
+                      <FilePlus className="mr-2 h-4 w-4" />
+                      Insert template
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleFilePickerClick}
+                    disabled={formProcessing || formPrefillLoading}
+                  >
+                    <UploadCloud className="mr-2 h-4 w-4" />
+                    Load from file
+                  </Button>
+                </div>
               </div>
-              <Textarea
-                id="strategy-source"
-                className="font-mono text-sm min-h-[320px] lg:min-h-[440px]"
+              {uploadedFileInfo ? (
+                <p className="text-xs text-muted-foreground">
+                  Loaded file:{' '}
+                  <span className="font-medium">{uploadedFileInfo.name}</span> ·{' '}
+                  {formatBytes(uploadedFileInfo.size)}
+                </p>
+              ) : null}
+              <StrategyModuleEditor
                 value={formData.source}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, source: event.target.value }))
-                }
-                spellCheck={false}
+                onChange={handleSourceChange}
+                diagnostics={validationUIEnabled ? formDiagnostics : []}
                 disabled={formPrefillLoading || formProcessing}
+                readOnly={false}
+                useEnhancedEditor={validationUIEnabled}
+                onSubmit={() => void handleFormSubmit()}
+                placeholder="module.exports = { metadata: { ... }, create: function (env) { return {}; } };"
+                aria-label="Strategy JavaScript source"
+                className="min-h-[320px] lg:min-h-[440px]"
               />
               <input
                 type="file"
@@ -1664,7 +1851,37 @@ export default function StrategyModulesPage() {
               ) : null}
             </div>
           </div>
-          {formError ? (
+          {validationUIEnabled && formDiagnostics.length > 0 ? (
+            <Alert variant="destructive">
+              <AlertTitle>Resolve validation issues</AlertTitle>
+              <AlertDescription className="space-y-2 text-sm">
+                {formError ? <p>{formError}</p> : null}
+                <ul className="space-y-1">
+                  {formDiagnostics.map((diagnostic, index) => {
+                    const location =
+                      typeof diagnostic.line === 'number' && diagnostic.line > 0
+                        ? ` (line ${diagnostic.line}${
+                            typeof diagnostic.column === 'number' && diagnostic.column > 0
+                              ? `, column ${diagnostic.column}`
+                              : ''
+                          })`
+                        : '';
+                    const hint = diagnostic.hint ? ` — ${diagnostic.hint}` : '';
+                    return (
+                      <li key={`${diagnostic.stage}-${diagnostic.message}-${index}`}>
+                        <span className="font-medium">{stageLabel(diagnostic.stage)}</span>: {diagnostic.message}
+                        {location}
+                        {hint}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="text-xs text-muted-foreground">
+                  {stageAction(formDiagnostics[0]?.stage)}
+                </p>
+              </AlertDescription>
+            </Alert>
+          ) : formError ? (
             <Alert variant="destructive">
               <AlertDescription>{formError}</AlertDescription>
             </Alert>

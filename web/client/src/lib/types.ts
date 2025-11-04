@@ -81,6 +81,24 @@ export interface StrategyModuleOperationResponse {
   module?: StrategyModuleResolution | null;
 }
 
+export interface StrategyDiagnostic {
+  stage: string;
+  message: string;
+  line?: number;
+  column?: number;
+  hint?: string;
+}
+
+export interface StrategyErrorResponse extends ApiError {
+  message?: string;
+  diagnostics?: StrategyDiagnostic[];
+}
+
+export interface StrategyValidationErrorResponse extends StrategyErrorResponse {
+  error: 'strategy_validation_failed';
+  message: string;
+}
+
 export type ProviderSettings = Record<string, unknown>;
 
 export type ProviderStatus = 'pending' | 'starting' | 'running' | 'stopped' | 'failed';
@@ -207,8 +225,10 @@ export interface RiskConfig {
 }
 
 export interface ApiError {
-  status: string;
+  status?: string;
   error: string;
+  message?: string;
+  diagnostics?: StrategyDiagnostic[];
 }
 
 export type FanoutWorkersSetting = number | 'auto' | 'default' | string;

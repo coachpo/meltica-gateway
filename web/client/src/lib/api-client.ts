@@ -13,7 +13,9 @@ import {
   RuntimeConfig,
   RuntimeConfigSnapshot,
   RuntimeConfigSource,
-  ApiError,
+  StrategyDiagnostic,
+  StrategyErrorResponse,
+  StrategyValidationErrorResponse,
   ConfigBackup,
   RestoreConfigResponse,
   ContextBackupPayload,
@@ -271,7 +273,130 @@ const serialiseRiskLimitsPayload = (config: RiskConfig): Record<string, unknown>
   },
 });
 
+export class StrategyValidationError extends Error {
+  readonly diagnostics: StrategyDiagnostic[];
+  readonly response: StrategyValidationErrorResponse | StrategyErrorResponse | null;
+  readonly status: number;
+
+  constructor(
+    message: string,
+    diagnostics: StrategyDiagnostic[] = [],
+    response: StrategyValidationErrorResponse | StrategyErrorResponse | null,
+    status: number,
+  ) {
+    super(message);
+    this.name = 'StrategyValidationError';
+    this.diagnostics = diagnostics;
+    this.response = response;
+    this.status = status;
+  }
+}
+
 class ApiClient {
+  private parseErrorPayload(payload: unknown): StrategyErrorResponse | null {
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+    const record = payload as Record<string, unknown>;
+    const diagnostics = Array.isArray(record.diagnostics)
+      ? record.diagnostics
+          .map((entry) => {
+            if (!entry || typeof entry !== 'object') {
+              return null;
+            }
+            const diagRecord = entry as Record<string, unknown>;
+            const stage = typeof diagRecord.stage === 'string' ? diagRecord.stage : '';
+            const message =
+              typeof diagRecord.message === 'string' ? diagRecord.message : '';
+            if (!stage && !message) {
+              return null;
+            }
+            const line =
+              typeof diagRecord.line === 'number'
+                ? diagRecord.line
+                : Number.isFinite(diagRecord.line)
+                  ? Number(diagRecord.line)
+                  : undefined;
+            const column =
+              typeof diagRecord.column === 'number'
+                ? diagRecord.column
+                : Number.isFinite(diagRecord.column)
+                  ? Number(diagRecord.column)
+                  : undefined;
+            const hint =
+              typeof diagRecord.hint === 'string' ? diagRecord.hint : undefined;
+            return {
+              stage,
+              message,
+              ...(line !== undefined ? { line } : {}),
+              ...(column !== undefined ? { column } : {}),
+              ...(hint ? { hint } : {}),
+            };
+          })
+          .filter((entry): entry is StrategyDiagnostic => Boolean(entry))
+      : [];
+    const message =
+      typeof record.message === 'string' && record.message.trim().length > 0
+        ? record.message
+        : undefined;
+    const error =
+      typeof record.error === 'string' && record.error.trim().length > 0
+        ? record.error
+        : undefined;
+    return {
+      status:
+        typeof record.status === 'string' && record.status.trim().length > 0
+          ? record.status
+          : undefined,
+      error: error ?? 'request_failed',
+      message,
+      diagnostics,
+    };
+  }
+
+  private raiseError(
+    response: Response,
+    responseText: string,
+  ): never {
+    if (response.status === 204) {
+      throw new Error('Request failed');
+    }
+    if (!responseText) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+    try {
+      const payload = JSON.parse(responseText) as unknown;
+      const parsed = this.parseErrorPayload(payload);
+      if (response.status === 422 && parsed?.error === 'strategy_validation_failed') {
+        const message =
+          parsed.message && parsed.message.trim().length > 0
+            ? parsed.message
+            : 'Strategy module validation failed';
+        throw new StrategyValidationError(
+          message,
+          parsed.diagnostics ?? [],
+          parsed as StrategyValidationErrorResponse,
+          response.status,
+        );
+      }
+      if (parsed) {
+        const message =
+          parsed.message && parsed.message.trim().length > 0
+            ? parsed.message
+            : parsed.error && parsed.error.trim().length > 0
+              ? parsed.error
+              : `Request failed with status ${response.status}`;
+        throw new Error(message);
+      }
+    } catch (err) {
+      if (err instanceof StrategyValidationError) {
+        throw err;
+      }
+      // fall back to raw text if JSON parsing failed
+    }
+    throw new Error(responseText);
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -288,16 +413,7 @@ class ApiClient {
     const responseText = await response.text();
 
     if (!response.ok) {
-      let message = 'Request failed';
-      if (responseText) {
-        try {
-          const error: ApiError = JSON.parse(responseText);
-          message = error.error || message;
-        } catch {
-          message = responseText;
-        }
-      }
-      throw new Error(message);
+      this.raiseError(response, responseText);
     }
 
     if (!responseText) {
@@ -327,16 +443,7 @@ class ApiClient {
     const responseText = await response.text();
 
     if (!response.ok) {
-      let message = 'Request failed';
-      if (responseText) {
-        try {
-          const error: ApiError = JSON.parse(responseText);
-          message = error.error || message;
-        } catch {
-          message = responseText;
-        }
-      }
-      throw new Error(message);
+      this.raiseError(response, responseText);
     }
 
     return responseText;
@@ -624,3 +731,4 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+export { StrategyValidationError };

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { apiClient } from '../src/lib/api-client';
+import { apiClient, StrategyValidationError } from '../src/lib/api-client';
 
 const originalFetch = globalThis.fetch;
 
@@ -171,6 +171,46 @@ test('getStrategyModuleUsage fetches usage endpoint', async () => {
   );
   expect(result.selector).toBe('grid@sha256:abc');
   expect(result.usage.count).toBe(1);
+});
+
+test('createStrategyModule surfaces structured validation diagnostics', async () => {
+  globalThis.fetch = (async () => {
+    return {
+      ok: false,
+      status: 422,
+      text: async () =>
+        JSON.stringify({
+          error: 'strategy_validation_failed',
+          message: 'Metadata validation failed',
+          diagnostics: [
+            { stage: 'compile', message: 'Unexpected token', line: 7, column: 2 },
+            { stage: 'validation', message: 'displayName required' },
+          ],
+        }),
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  await expect(
+    apiClient.createStrategyModule({
+      filename: 'alpha.js',
+      source: 'module.exports = {}',
+    }),
+  ).rejects.toThrowError(StrategyValidationError);
+
+  try {
+    await apiClient.createStrategyModule({
+      filename: 'alpha.js',
+      source: 'module.exports = {}',
+    });
+  } catch (err) {
+    expect(err instanceof StrategyValidationError).toBe(true);
+    if (err instanceof StrategyValidationError) {
+      expect(err.message).toBe('Metadata validation failed');
+      expect(err.diagnostics).toHaveLength(2);
+      expect(err.diagnostics?.[0]?.stage).toBe('compile');
+      expect(err.diagnostics?.[0]?.line).toBe(7);
+    }
+  }
 });
 
 test('exportStrategyRegistry requests registry endpoint', async () => {
