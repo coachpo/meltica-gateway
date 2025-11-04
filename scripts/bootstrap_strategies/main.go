@@ -275,6 +275,7 @@ func writeRegistry(root string, reg map[string]registryEntry) error {
 }
 
 func reportUsage(path string, reg map[string]registryEntry) {
+	// #nosec G304 -- path is supplied by operator and resolved before invocation
 	data, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bootstrap: read usage export %s: %v\n", path, err)

@@ -110,6 +110,8 @@ func newRevisionUsage(strategy, hash string) *revisionUsage {
 		strategy:  strategy,
 		hash:      hash,
 		instances: make(map[string]struct{}, 4),
+		firstSeen: time.Time{},
+		lastSeen:  time.Time{},
 	}
 }
 
@@ -146,11 +148,13 @@ func (u *revisionUsage) removeInstance(id string, now time.Time) bool {
 
 func (u *revisionUsage) snapshot() RevisionUsageSummary {
 	if u == nil {
-		return RevisionUsageSummary{}
+		var empty RevisionUsageSummary
+		return empty
 	}
 	out := RevisionUsageSummary{
 		Strategy:  u.strategy,
 		Hash:      u.hash,
+		Instances: nil,
 		Count:     len(u.instances),
 		FirstSeen: u.firstSeen,
 		LastSeen:  u.lastSeen,
@@ -310,24 +314,26 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 	}
 
 	mgr := &Manager{
-		mu:            sync.RWMutex{},
-		lifecycleMu:   sync.RWMutex{},
-		lifecycleCtx:  context.Background(),
-		bus:           bus,
-		pools:         pools,
-		providers:     providers,
-		logger:        logger,
-		registrar:     registrar,
-		riskManager:   rm,
-		jsLoader:      loader,
-		dynamic:       make(map[string]struct{}),
-		clock:         time.Now,
-		strategyDir:   loader.Root(),
-		base:          make(map[string]StrategyDefinition),
-		strategies:    make(map[string]StrategyDefinition),
-		specs:         make(map[string]config.LambdaSpec),
-		instances:     make(map[string]*lambdaInstance),
-		revisionUsage: make(map[string]*revisionUsage),
+		mu:                      sync.RWMutex{},
+		lifecycleMu:             sync.RWMutex{},
+		lifecycleCtx:            context.Background(),
+		bus:                     bus,
+		pools:                   pools,
+		providers:               providers,
+		logger:                  logger,
+		registrar:               registrar,
+		riskManager:             rm,
+		jsLoader:                loader,
+		dynamic:                 make(map[string]struct{}),
+		clock:                   time.Now,
+		strategyDir:             loader.Root(),
+		base:                    make(map[string]StrategyDefinition),
+		strategies:              make(map[string]StrategyDefinition),
+		specs:                   make(map[string]config.LambdaSpec),
+		instances:               make(map[string]*lambdaInstance),
+		revisionUsage:           make(map[string]*revisionUsage),
+		revisionGauge:           nil,
+		revisionLifecycleMetric: nil,
 	}
 	mgr.setupMetrics()
 	if _, err := mgr.installJavaScriptStrategies(context.Background()); err != nil {
@@ -432,8 +438,13 @@ func (m *Manager) revisionUsageSummaryLocked(spec config.LambdaSpec) *RevisionUs
 		return &snapshot
 	}
 	summary := RevisionUsageSummary{
-		Strategy: strategy,
-		Hash:     hash,
+		Strategy:  strategy,
+		Hash:      hash,
+		Instances: nil,
+		Count:     0,
+		FirstSeen: time.Time{},
+		LastSeen:  time.Time{},
+		IsRunning: false,
 	}
 	return &summary
 }
@@ -506,11 +517,14 @@ func normalizeSelector(selector string) string {
 
 func newRefreshTargetFilter(targets RefreshTargets) refreshTargetFilter {
 	filter := refreshTargetFilter{
+		all:                false,
 		selectors:          make(map[string]struct{}),
 		identifiers:        make(map[string]struct{}),
 		hashes:             make(map[string]struct{}),
 		requestedSelectors: make([]string, 0, len(targets.Strategies)),
 		requestedHashes:    make([]string, 0, len(targets.Hashes)),
+		matchedSelectors:   make(map[string]bool),
+		matchedHashes:      make(map[string]bool),
 	}
 
 	for _, raw := range targets.Strategies {
@@ -540,13 +554,16 @@ func newRefreshTargetFilter(targets RefreshTargets) refreshTargetFilter {
 
 func (f *refreshTargetFilter) matchSpec(spec config.LambdaSpec) refreshMatch {
 	if f == nil {
-		return refreshMatch{}
+		var empty refreshMatch
+		return empty
 	}
 	if f.all {
-		return refreshMatch{matched: true}
+		var match refreshMatch
+		match.matched = true
+		return match
 	}
 
-	match := refreshMatch{}
+	var match refreshMatch
 
 	hash := normalizeRevisionHash(spec.Strategy.Hash)
 	if hash != "" {
@@ -654,6 +671,7 @@ func ensureRefreshResult(results map[string]*RefreshResult, id string, spec conf
 		Hash:         spec.Strategy.Hash,
 		PreviousHash: spec.Strategy.Hash,
 		Instances:    []string{id},
+		Reason:       "",
 	}
 	results[id] = result
 	return result
@@ -691,15 +709,21 @@ func buildUnmatchedRefreshResults(filter refreshTargetFilter) []RefreshResult {
 	for _, hash := range filter.unmatchedHashTargets() {
 		out = append(out, RefreshResult{
 			Selector:     hash,
+			Strategy:     "",
 			Hash:         hash,
 			PreviousHash: hash,
+			Instances:    nil,
 			Reason:       "retired",
 		})
 	}
 	for _, selector := range filter.unmatchedSelectors() {
 		out = append(out, RefreshResult{
-			Selector: selector,
-			Reason:   "retired",
+			Selector:     selector,
+			Strategy:     "",
+			Hash:         "",
+			PreviousHash: "",
+			Instances:    nil,
+			Reason:       "retired",
 		})
 	}
 	return out
@@ -738,21 +762,27 @@ func convertModuleUsageSnapshots(usages []RevisionUsageSummary) []js.ModuleUsage
 // RevisionUsageFor returns usage metadata for the specified strategy revision.
 func (m *Manager) RevisionUsageFor(strategy, hash string) RevisionUsageSummary {
 	spec := config.LambdaSpec{
-		Strategy: config.LambdaStrategySpec{
-			Identifier: strategy,
-			Hash:       hash,
-		},
+		ID:              "",
+		Strategy:        config.LambdaStrategySpec{Identifier: strategy, Config: nil, Selector: "", Tag: "", Hash: hash, Version: ""},
+		ProviderSymbols: nil,
+		Providers:       nil,
 	}
 	summary := m.revisionUsageSummary(spec)
 	if summary == nil {
 		return RevisionUsageSummary{
-			Strategy: normalizeStrategyName(strategy),
-			Hash:     normalizeRevisionHash(hash),
+			Strategy:  normalizeStrategyName(strategy),
+			Hash:      normalizeRevisionHash(hash),
+			Instances: nil,
+			Count:     0,
+			FirstSeen: time.Time{},
+			LastSeen:  time.Time{},
+			IsRunning: false,
 		}
 	}
 	cloned := cloneRevisionUsage(summary)
 	if cloned == nil {
-		return RevisionUsageSummary{}
+		var empty RevisionUsageSummary
+		return empty
 	}
 	return *cloned
 }
@@ -851,7 +881,8 @@ func (m *Manager) ApplyRiskConfig(cfg config.RiskConfig) risk.Limits {
 
 // RefreshJavaScriptStrategies reloads JavaScript modules and restarts affected instances.
 func (m *Manager) RefreshJavaScriptStrategies(ctx context.Context) error {
-	_, err := m.refreshJavaScriptStrategies(ctx, RefreshTargets{})
+	var targets RefreshTargets
+	_, err := m.refreshJavaScriptStrategies(ctx, targets)
 	return err
 }
 
@@ -1253,13 +1284,15 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 func (m *Manager) specForID(id string) (config.LambdaSpec, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return config.LambdaSpec{}, ErrInstanceNotFound
+		var empty config.LambdaSpec
+		return empty, ErrInstanceNotFound
 	}
 	m.mu.RLock()
 	spec, ok := m.specs[id]
 	m.mu.RUnlock()
 	if !ok {
-		return config.LambdaSpec{}, ErrInstanceNotFound
+		var empty config.LambdaSpec
+		return empty, ErrInstanceNotFound
 	}
 	return cloneSpec(spec), nil
 }
@@ -1659,16 +1692,23 @@ func (m *Manager) StrategyModule(name string) (js.ModuleSummary, error) {
 // ResolveStrategySelector resolves a module selector into the corresponding revision.
 func (m *Manager) ResolveStrategySelector(selector string) (js.ModuleResolution, error) {
 	if m == nil || m.jsLoader == nil {
-		return js.ModuleResolution{}, fmt.Errorf("strategy loader unavailable")
+		var empty js.ModuleResolution
+		return empty, fmt.Errorf("strategy loader unavailable")
 	}
-	return m.jsLoader.ResolveReference(selector)
+	resolution, err := m.jsLoader.ResolveReference(selector)
+	if err != nil {
+		var empty js.ModuleResolution
+		return empty, fmt.Errorf("resolve selector %q: %w", selector, err)
+	}
+	return resolution, nil
 }
 
 // RevisionUsageDetail resolves a selector and returns usage metadata with matching instances.
 func (m *Manager) RevisionUsageDetail(selector string, includeStopped bool) (RevisionUsageSummary, string, []InstanceSummary, error) {
 	resolution, err := m.ResolveStrategySelector(selector)
 	if err != nil {
-		return RevisionUsageSummary{}, "", nil, err
+		var empty RevisionUsageSummary
+		return empty, "", nil, err
 	}
 	summary := m.RevisionUsageFor(resolution.Name, resolution.Hash)
 	canonical := canonicalSelector(selector, resolution)
@@ -1686,7 +1726,7 @@ func (m *Manager) RegistryExport() (js.RegistrySnapshot, []RevisionUsageSummary,
 	}
 	snapshot, err := m.jsLoader.RegistrySnapshot()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("registry snapshot: %w", err)
 	}
 	usage := m.RevisionUsageSnapshot()
 	return snapshot, usage, nil

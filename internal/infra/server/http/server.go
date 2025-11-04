@@ -305,11 +305,13 @@ func applyModuleFilters(module js.ModuleSummary, hashFilter string, runningOnly 
 
 	if strings.TrimSpace(hashFilter) != "" {
 		if len(filtered.Revisions) == 0 && len(filtered.Running) == 0 {
-			return js.ModuleSummary{}, false
+			var empty js.ModuleSummary
+			return empty, false
 		}
 	}
 	if runningOnly && len(filtered.Running) == 0 {
-		return js.ModuleSummary{}, false
+		var empty js.ModuleSummary
+		return empty, false
 	}
 	return filtered, true
 }
@@ -324,8 +326,8 @@ func filterModuleRevisions(revisions []js.ModuleRevision, hashFilter string) []j
 		if normalized != "" && !strings.EqualFold(revision.Hash, normalized) {
 			continue
 		}
-		copy := revision
-		out = append(out, copy)
+		revCopy := revision
+		out = append(out, revCopy)
 	}
 	if len(out) == 0 {
 		return nil
@@ -343,9 +345,9 @@ func filterModuleRunning(running []js.ModuleUsage, hashFilter string) []js.Modul
 		if normalized != "" && !strings.EqualFold(usage.Hash, normalized) {
 			continue
 		}
-		copy := usage
-		copy.Instances = append([]string(nil), usage.Instances...)
-		out = append(out, copy)
+		usageCopy := usage
+		usageCopy.Instances = append([]string(nil), usage.Instances...)
+		out = append(out, usageCopy)
 	}
 	if len(out) == 0 {
 		return nil

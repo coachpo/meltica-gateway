@@ -371,6 +371,7 @@ func (l *Loader) ListWithUsage(usages []ModuleUsageSnapshot) []ModuleSummary {
 					Path:    revModule.Path,
 					Version: revModule.Version,
 					Size:    revModule.Size,
+					Retired: false,
 				}
 				if usage, ok := usageIndex.lookup(name, hash); ok {
 					revision.Retired = usage.Count == 0
@@ -428,6 +429,7 @@ func (l *Loader) ModuleWithUsage(name string, usages []ModuleUsageSnapshot) (Mod
 				Path:    revModule.Path,
 				Version: revModule.Version,
 				Size:    revModule.Size,
+				Retired: false,
 			}
 			if usage, ok := usageIndex.lookup(normalized, hash); ok {
 				revision.Retired = usage.Count == 0
@@ -464,7 +466,7 @@ func (l *Loader) RegistrySnapshot() (RegistrySnapshot, error) {
 			Hashes: make(map[string]RegistryLocation, len(entry.Hashes)),
 		}
 		for hash, loc := range entry.Hashes {
-			cloned.Hashes[hash] = RegistryLocation{Tag: loc.Tag, Path: loc.Path}
+			cloned.Hashes[hash] = RegistryLocation(loc)
 		}
 		snapshot[name] = cloned
 	}
@@ -768,19 +770,20 @@ func (l *Loader) Write(filename string, source []byte) error {
 
 // Store persists a module revision using registry semantics and returns the resulting resolution.
 func (l *Loader) Store(source []byte, opts ModuleWriteOptions) (ModuleResolution, error) {
+	var empty ModuleResolution
 	if l == nil {
-		return ModuleResolution{}, fmt.Errorf("strategy loader: nil receiver")
+		return empty, fmt.Errorf("strategy loader: nil receiver")
 	}
 	reg, err := loadRegistry(l.root)
 	if err != nil {
-		return ModuleResolution{}, fmt.Errorf("strategy loader: load registry: %w", err)
+		return empty, fmt.Errorf("strategy loader: load registry: %w", err)
 	}
 	if reg == nil {
-		return ModuleResolution{}, ErrRegistryUnavailable
+		return empty, ErrRegistryUnavailable
 	}
 	resolution, err := l.writeModuleWithRegistry(source, opts, reg)
 	if err != nil {
-		return ModuleResolution{}, err
+		return empty, err
 	}
 	return resolution, nil
 }
@@ -876,6 +879,7 @@ func (m *Module) toSummary(name string) ModuleSummary {
 		Revisions:  nil,
 		Size:       m.Size,
 		Metadata:   clone,
+		Running:    nil,
 	}
 }
 
@@ -1345,19 +1349,22 @@ func indexModuleUsage(usages []ModuleUsageSnapshot) moduleUsageIndex {
 
 func (idx moduleUsageIndex) lookup(name, hash string) (ModuleUsageSnapshot, bool) {
 	if len(idx) == 0 {
-		return ModuleUsageSnapshot{}, false
+		var empty ModuleUsageSnapshot
+		return empty, false
 	}
 	normalizedName := strings.ToLower(strings.TrimSpace(name))
 	normalizedHash := normalizeHash(hash)
 	if normalizedName == "" || normalizedHash == "" {
-		return ModuleUsageSnapshot{}, false
+		var empty ModuleUsageSnapshot
+		return empty, false
 	}
 	if revisions, ok := idx[normalizedName]; ok {
 		if snapshot, ok := revisions[normalizedHash]; ok {
 			return snapshot, true
 		}
 	}
-	return ModuleUsageSnapshot{}, false
+	var empty ModuleUsageSnapshot
+	return empty, false
 }
 
 func (idx moduleUsageIndex) forName(name string) map[string]ModuleUsageSnapshot {
@@ -1404,7 +1411,8 @@ func normalizeResolutionKey(identifier string) string {
 
 func (l *Loader) cachedResolutionLocked(key string) (ModuleResolution, bool) {
 	if l == nil || key == "" {
-		return ModuleResolution{}, false
+		var empty ModuleResolution
+		return empty, false
 	}
 	if elem, ok := l.resolutionCache[key]; ok {
 		if l.resolutionOrder != nil {
@@ -1414,7 +1422,8 @@ func (l *Loader) cachedResolutionLocked(key string) (ModuleResolution, bool) {
 			return entry.value, true
 		}
 	}
-	return ModuleResolution{}, false
+	var empty ModuleResolution
+	return empty, false
 }
 
 func (l *Loader) storeResolutionLocked(key string, value ModuleResolution) {
