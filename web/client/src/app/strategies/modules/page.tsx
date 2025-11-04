@@ -7,6 +7,7 @@ import type {
   StrategyModuleRevision,
   StrategyModuleSummary,
   StrategyModuleUsageResponse,
+  StrategyRefreshRequest,
   StrategyRefreshResult,
 } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -218,6 +219,7 @@ function moduleIdentifier(module?: StrategyModuleSummary | null): string {
 
 export default function StrategyModulesPage() {
   const [modules, setModules] = useState<StrategyModuleSummary[]>([]);
+  const [apiStrategyDirectory, setApiStrategyDirectory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -313,9 +315,14 @@ export default function StrategyModulesPage() {
   );
 
   const strategyDirectory = useMemo(() => {
+    const fromApi =
+      typeof apiStrategyDirectory === 'string' ? apiStrategyDirectory.trim() : '';
+    if (fromApi) {
+      return fromApi;
+    }
     const candidate = modules.find((module) => module.path);
     return directoryFromPath(candidate?.path ?? undefined);
-  }, [modules]);
+  }, [apiStrategyDirectory, modules]);
 
   const loadModules = useCallback(
     async ({ silent = false }: LoadOptions = {}) => {
@@ -333,6 +340,11 @@ export default function StrategyModulesPage() {
         });
         const entries = Array.isArray(response.modules) ? response.modules : [];
         setModules(entries);
+        const configuredDirectory =
+          typeof response.strategyDirectory === 'string'
+            ? response.strategyDirectory.trim()
+            : '';
+        setApiStrategyDirectory(configuredDirectory ? configuredDirectory : null);
         setTotal(typeof response.total === 'number' ? response.total : entries.length);
         if (!silent) {
           setError(null);
@@ -1061,7 +1073,7 @@ export default function StrategyModulesPage() {
               Upload, edit, and refresh JavaScript trading strategies available to the runtime.
             </p>
           </div>
-          <Alert variant="secondary" className="max-w-4xl">
+          <Alert className="max-w-4xl">
             <AlertTitle className="flex items-center gap-2 text-sm font-semibold">
               Revision pointers
             </AlertTitle>
@@ -1244,8 +1256,9 @@ export default function StrategyModulesPage() {
         <Alert>
           <AlertTitle>Strategy directory</AlertTitle>
           <AlertDescription className="mt-1 text-xs sm:text-sm">
-            Sources are persisted under <span className="font-mono">{strategyDirectory}</span>. Uploading or editing
-            modules will write to this location before triggering a runtime refresh.
+            Sources are persisted under the configured strategy directory at{' '}
+            <span className="inline-flex items-center whitespace-nowrap font-mono">{strategyDirectory}</span>{' '}
+            Uploading or editing modules will write to this location before triggering a runtime refresh.
           </AlertDescription>
         </Alert>
       ) : null}

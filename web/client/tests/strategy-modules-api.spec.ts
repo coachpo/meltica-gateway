@@ -91,11 +91,12 @@ test('getStrategyModules applies query parameters', async () => {
           total: 0,
           offset: 20,
           limit: 10,
+          strategyDirectory: '/srv/strategies',
         }),
     } as unknown as Response;
   }) as typeof fetch;
 
-  await apiClient.getStrategyModules({
+  const response = await apiClient.getStrategyModules({
     strategy: 'grid',
     hash: 'sha256:abc',
     runningOnly: true,
@@ -106,6 +107,7 @@ test('getStrategyModules applies query parameters', async () => {
   expect(requestedUrl).toBe(
     'http://localhost:8880/strategies/modules?strategy=grid&hash=sha256%3Aabc&runningOnly=true&limit=10&offset=20',
   );
+  expect(response.strategyDirectory).toBe('/srv/strategies');
 });
 
 test('refreshStrategies sends payload when provided', async () => {

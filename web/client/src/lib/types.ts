@@ -53,6 +53,7 @@ export interface StrategyModulesResponse {
   total?: number;
   offset?: number;
   limit?: number | null;
+  strategyDirectory?: string;
 }
 
 export interface StrategyModulePayload {
