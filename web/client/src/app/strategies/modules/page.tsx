@@ -85,15 +85,6 @@ type ModuleFormState = {
   promoteLatest: boolean;
 };
 
-const defaultFormState: ModuleFormState = {
-  name: '',
-  filename: '',
-  tag: '',
-  aliases: '',
-  source: '',
-  promoteLatest: true,
-};
-
 const VALIDATION_UI_ENABLED = process.env.NEXT_PUBLIC_STRATEGY_VALIDATION_UI === 'true';
 
 const STRATEGY_DOCS_URL =
@@ -124,6 +115,15 @@ export const STRATEGY_MODULE_TEMPLATE = `module.exports = {
   }
 };
 `;
+
+const defaultFormState: ModuleFormState = {
+  name: '',
+  filename: '',
+  tag: '',
+  aliases: '',
+  source: STRATEGY_MODULE_TEMPLATE,
+  promoteLatest: true,
+};
 
 const STAGE_LABELS: Record<string, string> = {
   compile: 'Compile error',
