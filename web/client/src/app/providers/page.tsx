@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api-client';
 import type {
   AdapterMetadata,
   Instrument,
+  InstanceSummary,
   Provider,
   ProviderDetail,
   ProviderRequest,
@@ -56,6 +57,30 @@ function formatInstrumentMetric(value: unknown): string {
     return trimmed === '' ? '—' : trimmed;
   }
   return String(value);
+}
+
+function buildInstanceIndex(instances: InstanceSummary[] = []): Record<string, InstanceSummary> {
+  return instances.reduce<Record<string, InstanceSummary>>((acc, instance) => {
+    acc[instance.id] = instance;
+    return acc;
+  }, {});
+}
+
+function partitionDependents(
+  ids: string[],
+  index: Record<string, InstanceSummary>,
+): { visible: string[]; hidden: string[] } {
+  const visible: string[] = [];
+  const hidden: string[] = [];
+  ids.forEach((id) => {
+    const summary = index[id];
+    if (summary && summary.baseline && !summary.dynamic) {
+      hidden.push(id);
+    } else {
+      visible.push(id);
+    }
+  });
+  return { visible, hidden };
 }
 
 type FormMode = 'create' | 'edit';
@@ -275,6 +300,7 @@ function maskProviderDetail(detail: ProviderDetail): ProviderDetail {
 export default function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [adapters, setAdapters] = useState<AdapterMetadata[]>([]);
+  const [instanceIndex, setInstanceIndex] = useState<Record<string, InstanceSummary>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pollingEnabled, setPollingEnabled] = useState(false);
@@ -328,40 +354,48 @@ export default function ProvidersPage() {
     return map;
   }, [adapters]);
 
-  const refreshProviders = useCallback(async (silent = false) => {
-    try {
-      const response = await apiClient.getProviders();
-      setProviders(response.providers);
-      
-      // Check if any provider is in 'starting' state to enable polling
-      const hasStarting = response.providers.some(p => p.status === 'starting');
-      setPollingEnabled(hasStarting);
-    } catch (err) {
-      if (!silent) {
-        const message = err instanceof Error ? err.message : 'Failed to refresh providers';
-        showToast({
-          title: 'Provider refresh failed',
-          description: message,
-          variant: 'destructive',
-        });
+  const refreshProviders = useCallback(
+    async (silent = false) => {
+      try {
+        const [providersResponse, instancesResponse] = await Promise.all([
+          apiClient.getProviders(),
+          apiClient.getInstances(),
+        ]);
+        setProviders(providersResponse.providers);
+        setInstanceIndex(buildInstanceIndex(instancesResponse.instances ?? []));
+
+        const hasStarting = providersResponse.providers.some((p) => p.status === 'starting');
+        setPollingEnabled(hasStarting);
+      } catch (err) {
+        if (!silent) {
+          const message = err instanceof Error ? err.message : 'Failed to refresh providers';
+          showToast({
+            title: 'Provider refresh failed',
+            description: message,
+            variant: 'destructive',
+          });
+        }
       }
-    }
-  }, [showToast]);
+    },
+    [showToast],
+  );
 
   useEffect(() => {
     const fetchInitial = async () => {
       setLoading(true);
       setError(null);
       try {
-        const [providersResponse, adaptersResponse] = await Promise.all([
+        const [providersResponse, adaptersResponse, instancesResponse] = await Promise.all([
           apiClient.getProviders(),
           apiClient.getAdapters(),
+          apiClient.getInstances(),
         ]);
         setProviders(providersResponse.providers);
         setAdapters(adaptersResponse.adapters);
+        setInstanceIndex(buildInstanceIndex(instancesResponse.instances ?? []));
         
         // Check if any provider is in 'starting' state
-        const hasStarting = providersResponse.providers.some(p => p.status === 'starting');
+        const hasStarting = providersResponse.providers.some((p) => p.status === 'starting');
         setPollingEnabled(hasStarting);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load providers');
@@ -735,6 +769,12 @@ export default function ProvidersPage() {
           const disableActions = isStartPending || isStopPending || isDeletePending || isStarting;
           const dependentInstances = provider.dependentInstances ?? [];
           const dependentCount = provider.dependentInstanceCount ?? dependentInstances.length;
+          const { visible: dynamicDependents, hidden: baselineDependents } = partitionDependents(
+            dependentInstances,
+            instanceIndex,
+          );
+          const dynamicCount = dynamicDependents.length;
+          const baselineCount = baselineDependents.length;
           const deleteDisabled =
             dependentCount > 0 || isDeletePending || isStartPending || isStopPending || isStarting;
           const adapterMeta = adapterByIdentifier.get(provider.adapter);
@@ -791,20 +831,29 @@ export default function ProvidersPage() {
                   </div>
                   <div>
                     <span className="font-medium text-foreground">In use by:</span>{' '}
-                    {dependentCount === 0 ? (
-                      <span className="text-muted-foreground">No instances</span>
-                    ) : (
+                    {dynamicCount > 0 ? (
                       <span className="text-muted-foreground">
-                        {dependentCount}{' '}
-                        {dependentCount === 1 ? 'instance' : 'instances'}
+                        {dynamicCount} dynamic instance{dynamicCount === 1 ? '' : 's'}
                       </span>
+                    ) : baselineCount > 0 ? (
+                      <span className="text-muted-foreground">
+                        {baselineCount} baseline instance{baselineCount === 1 ? '' : 's'}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">No dynamic instances</span>
                     )}
                   </div>
                 </div>
-                {dependentInstances.length > 0 && (
+                {dynamicDependents.length > 0 && (
                   <div className="text-xs text-muted-foreground">
-                    {dependentCount === 1 ? 'Instance:' : 'Instances:'}{' '}
-                    {dependentInstances.join(', ')}
+                    Dynamic instances: {dynamicDependents.join(', ')}
+                  </div>
+                )}
+                {baselineCount > 0 && (
+                  <div className="text-[11px] text-muted-foreground">
+                    {baselineCount}{' '}
+                    {baselineCount === 1 ? 'baseline instance' : 'baseline instances'} hidden (managed outside
+                    this UI)
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2">
@@ -1008,7 +1057,12 @@ export default function ProvidersPage() {
             <div className="space-y-4 text-sm">
               {(() => {
                 const dependentInstances = detail.dependentInstances ?? [];
-                const dependentCount = detail.dependentInstanceCount ?? dependentInstances.length;
+                const { visible: dynamicDependents, hidden: baselineDependents } = partitionDependents(
+                  dependentInstances,
+                  instanceIndex,
+                );
+                const dynamicCount = dynamicDependents.length;
+                const baselineCount = baselineDependents.length;
                 return (
                   <>
                     <div>
@@ -1027,19 +1081,28 @@ export default function ProvidersPage() {
 
                     <div>
                       <p className="font-medium text-foreground">Dependent instances</p>
-                      {dependentCount === 0 ? (
+                      {dynamicCount === 0 && baselineCount === 0 ? (
                         <p className="text-muted-foreground">No instances depend on this provider.</p>
                       ) : (
-                        <div className="space-y-1 text-muted-foreground">
-                          <p>
-                            {dependentCount}{' '}
-                            {dependentCount === 1 ? 'instance' : 'instances'} requiring this provider
-                          </p>
-                          <ul className="list-disc space-y-1 pl-5">
-                            {dependentInstances.map((instance) => (
-                              <li key={instance}>{instance}</li>
-                            ))}
-                          </ul>
+                        <div className="space-y-2 text-muted-foreground">
+                          {dynamicCount > 0 && (
+                            <>
+                              <p>
+                                {dynamicCount} dynamic instance{dynamicCount === 1 ? '' : 's'} requiring this provider
+                              </p>
+                              <ul className="list-disc space-y-1 pl-5">
+                                {dynamicDependents.map((instance) => (
+                                  <li key={instance}>{instance}</li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
+                          {baselineCount > 0 && (
+                            <p className="text-xs">
+                              {baselineCount}{' '}
+                              {baselineCount === 1 ? 'baseline instance' : 'baseline instances'} hidden (managed outside this UI)
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>

@@ -3,7 +3,15 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
-import { InstanceSummary, Strategy, Provider, StrategyModuleSummary } from '@/lib/types';
+import {
+  BalanceRecord,
+  ExecutionRecord,
+  InstanceSummary,
+  OrderRecord,
+  Provider,
+  Strategy,
+  StrategyModuleSummary,
+} from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,9 +20,23 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CircleStopIcon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon, Copy } from 'lucide-react';
+import { CircleStopIcon, Clock3Icon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon, Copy, RotateCcwIcon } from 'lucide-react';
 import { useToast } from '@/components/ui/toast-provider';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 
 type ProviderInstrumentStatus = {
@@ -27,6 +49,21 @@ type ParsedSelector = {
   identifier: string;
   tag?: string;
   hash?: string;
+};
+
+type HistoryTab = 'orders' | 'executions' | 'balances';
+
+type HistorySectionState<T> = {
+  data: T[];
+  loading: boolean;
+  error: string | null;
+  initialized: boolean;
+};
+
+type HistoryEntry = {
+  orders: HistorySectionState<OrderRecord>;
+  executions: HistorySectionState<ExecutionRecord>;
+  balances: HistorySectionState<BalanceRecord>;
 };
 
 function parseStrategySelector(raw: string): ParsedSelector {
@@ -72,11 +109,11 @@ function canonicalUsageSelector(name: string, hash?: string | null, tag?: string
   return trimmed;
 }
 
-function formatDateTime(value?: string | null): string {
-  if (!value) {
+function formatDateTime(value?: string | number | null): string {
+  if (value === undefined || value === null || value === '') {
     return '—';
   }
-  const date = new Date(value);
+  const date = typeof value === 'number' ? new Date(value) : new Date(value);
   if (Number.isNaN(date.getTime())) {
     return '—';
   }
@@ -89,6 +126,32 @@ function formatDateTime(value?: string | null): string {
     second: '2-digit',
   }).format(date);
 }
+
+function createHistoryEntry(): HistoryEntry {
+  return {
+    orders: { data: [], loading: false, error: null, initialized: false },
+    executions: { data: [], loading: false, error: null, initialized: false },
+    balances: { data: [], loading: false, error: null, initialized: false },
+  };
+}
+
+function formatMetadata(metadata?: Record<string, unknown> | null): string {
+  if (!metadata || Object.keys(metadata).length === 0) {
+    return '—';
+  }
+  try {
+    const serialized = JSON.stringify(metadata);
+    return serialized.length > 120 ? `${serialized.slice(0, 117)}…` : serialized;
+  } catch {
+    return '[unserializable]';
+  }
+}
+
+const HISTORY_LIMITS: Record<HistoryTab, number> = {
+  orders: 100,
+  executions: 100,
+  balances: 50,
+};
 
 export default function InstancesPage() {
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
@@ -122,6 +185,198 @@ export default function InstancesPage() {
     null,
   );
   const { show: showToast } = useToast();
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [historyDialogInstance, setHistoryDialogInstance] = useState<InstanceSummary | null>(null);
+  const [historyTab, setHistoryTab] = useState<HistoryTab>('orders');
+  const [historyState, setHistoryState] = useState<Record<string, HistoryEntry>>({});
+
+  const ensureHistoryEntry = useCallback((id: string) => {
+    if (!id) {
+      return;
+    }
+    setHistoryState((prev) => {
+      if (prev[id]) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [id]: createHistoryEntry(),
+      };
+    });
+  }, []);
+
+  const fetchHistory = useCallback(
+    async (instance: InstanceSummary, tab: HistoryTab) => {
+      if (!instance?.id) {
+        return;
+      }
+      setHistoryState((prev) => {
+        const entry = prev[instance.id] ?? createHistoryEntry();
+        if (tab === 'orders') {
+          return {
+            ...prev,
+            [instance.id]: {
+              ...entry,
+              orders: { ...entry.orders, loading: true, error: null },
+            },
+          };
+        }
+        if (tab === 'executions') {
+          return {
+            ...prev,
+            [instance.id]: {
+              ...entry,
+              executions: { ...entry.executions, loading: true, error: null },
+            },
+          };
+        }
+        return {
+          ...prev,
+          [instance.id]: {
+            ...entry,
+            balances: { ...entry.balances, loading: true, error: null },
+          },
+        };
+      });
+      try {
+        if (tab === 'orders') {
+          const response = await apiClient.getInstanceOrders(instance.id, {
+            limit: HISTORY_LIMITS.orders,
+          });
+          setHistoryState((prev) => {
+            const entry = prev[instance.id] ?? createHistoryEntry();
+            return {
+              ...prev,
+              [instance.id]: {
+                ...entry,
+                orders: {
+                  data: response.orders ?? [],
+                  loading: false,
+                  error: null,
+                  initialized: true,
+                },
+              },
+            };
+          });
+          return;
+        }
+        if (tab === 'executions') {
+          const response = await apiClient.getInstanceExecutions(instance.id, {
+            limit: HISTORY_LIMITS.executions,
+          });
+          setHistoryState((prev) => {
+            const entry = prev[instance.id] ?? createHistoryEntry();
+            return {
+              ...prev,
+              [instance.id]: {
+                ...entry,
+                executions: {
+                  data: response.executions ?? [],
+                  loading: false,
+                  error: null,
+                  initialized: true,
+                },
+              },
+            };
+          });
+          return;
+        }
+        if (instance.providers.length === 0) {
+          setHistoryState((prev) => {
+            const entry = prev[instance.id] ?? createHistoryEntry();
+            return {
+              ...prev,
+              [instance.id]: {
+                ...entry,
+                balances: {
+                  data: [],
+                  loading: false,
+                  error: null,
+                  initialized: true,
+                },
+              },
+            };
+          });
+          return;
+        }
+        const responses = await Promise.all(
+          instance.providers.map(async (provider) => {
+            try {
+              return await apiClient.getProviderBalances(provider, {
+                limit: HISTORY_LIMITS.balances,
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : 'failed to load balances';
+              throw new Error(`Provider ${provider}: ${message}`);
+            }
+          })
+        );
+        const balances = responses.flatMap((res) => res.balances ?? []);
+        setHistoryState((prev) => {
+          const entry = prev[instance.id] ?? createHistoryEntry();
+          return {
+            ...prev,
+            [instance.id]: {
+              ...entry,
+              balances: {
+                data: balances,
+                loading: false,
+                error: null,
+                initialized: true,
+              },
+            },
+          };
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to load history';
+        setHistoryState((prev) => {
+          const entry = prev[instance.id] ?? createHistoryEntry();
+          if (tab === 'orders') {
+            return {
+              ...prev,
+              [instance.id]: {
+                ...entry,
+                orders: {
+                  ...entry.orders,
+                  loading: false,
+                  error: message,
+                  initialized: true,
+                },
+              },
+            };
+          }
+          if (tab === 'executions') {
+            return {
+              ...prev,
+              [instance.id]: {
+                ...entry,
+                executions: {
+                  ...entry.executions,
+                  loading: false,
+                  error: message,
+                  initialized: true,
+                },
+              },
+            };
+          }
+          return {
+            ...prev,
+            [instance.id]: {
+              ...entry,
+              balances: {
+                ...entry.balances,
+                loading: false,
+                error: message,
+                initialized: true,
+              },
+            },
+          };
+        });
+      }
+    },
+    []
+  );
+
 
   const selectedStrategy = useMemo(
     () => strategies.find((strategy) => strategy.name === newInstance.strategyIdentifier),
@@ -306,6 +561,33 @@ export default function InstancesPage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (!historyDialogOpen || !historyDialogInstance) {
+      return;
+    }
+    const entry = historyState[historyDialogInstance.id];
+    if (!entry) {
+      ensureHistoryEntry(historyDialogInstance.id);
+      return;
+    }
+    const section =
+      historyTab === 'orders'
+        ? entry.orders
+        : historyTab === 'executions'
+          ? entry.executions
+          : entry.balances;
+    if (!section.initialized && !section.loading) {
+      void fetchHistory(historyDialogInstance, historyTab);
+    }
+  }, [
+    historyDialogOpen,
+    historyDialogInstance,
+    historyTab,
+    historyState,
+    fetchHistory,
+    ensureHistoryEntry,
+  ]);
 
   const fetchData = async () => {
     try {
@@ -590,6 +872,23 @@ export default function InstancesPage() {
     }
   };
 
+
+  const handleHistoryOpen = (instance: InstanceSummary) => {
+    if (!instance?.id) {
+      return;
+    }
+    setHistoryDialogInstance(instance);
+    setHistoryDialogOpen(true);
+    setHistoryTab('orders');
+    ensureHistoryEntry(instance.id);
+  };
+
+  const handleHistoryRefresh = () => {
+    if (historyDialogInstance) {
+      void fetchHistory(historyDialogInstance, historyTab);
+    }
+  };
+
   const handleEdit = async (id: string) => {
     setDialogMode('edit');
     setEditingInstanceId(id);
@@ -674,6 +973,206 @@ export default function InstancesPage() {
       </Alert>
     );
   }
+
+  const renderHistorySection = (tab: HistoryTab) => {
+    if (!historyDialogInstance) {
+      return (
+        <div className="py-6 text-sm text-muted-foreground">
+          Select an instance to view activity.
+        </div>
+      );
+    }
+    const entry = historyState[historyDialogInstance.id];
+    if (!entry) {
+      return (
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2Icon className="h-4 w-4 animate-spin" />
+          Preparing history snapshot…
+        </div>
+      );
+    }
+    const section =
+      tab === 'orders'
+        ? entry.orders
+        : tab === 'executions'
+          ? entry.executions
+          : entry.balances;
+    if (section.error) {
+      return (
+        <Alert variant="destructive">
+          <AlertTitle>Failed to load {tab}</AlertTitle>
+          <AlertDescription>{section.error}</AlertDescription>
+        </Alert>
+      );
+    }
+    if (section.loading && !section.initialized) {
+      return (
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2Icon className="h-4 w-4 animate-spin" />
+          Loading {tab}…
+        </div>
+      );
+    }
+    if (!section.loading && section.initialized && section.data.length === 0) {
+      return (
+        <p className="py-6 text-sm text-muted-foreground">
+          No {tab === 'balances' ? 'balance' : tab} records yet.
+        </p>
+      );
+    }
+    const loadingOverlay = section.loading ? (
+      <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2Icon className="h-3 w-3 animate-spin" />
+        Refreshing {tab}…
+      </div>
+    ) : null;
+    if (tab === 'orders') {
+      const records = section.data as OrderRecord[];
+      return (
+        <>
+          {loadingOverlay}
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order</TableHead>
+                  <TableHead>Client ID</TableHead>
+                  <TableHead>Provider</TableHead>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Side</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>Placed</TableHead>
+                  <TableHead>Acknowledged</TableHead>
+                  <TableHead>Completed</TableHead>
+                  <TableHead>Metadata</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {records.map((record) => (
+                  <TableRow
+                    key={`${record.id}-${record.provider}-${record.createdAt}`}
+                  >
+                    <TableCell className="font-mono text-xs">{record.id}</TableCell>
+                    <TableCell className="font-mono text-xs">{record.clientOrderId}</TableCell>
+                    <TableCell>{record.provider}</TableCell>
+                    <TableCell>{record.symbol}</TableCell>
+                    <TableCell className="capitalize">{record.side}</TableCell>
+                    <TableCell className="uppercase">{record.type}</TableCell>
+                    <TableCell>{record.quantity}</TableCell>
+                    <TableCell>{record.price ?? '—'}</TableCell>
+                    <TableCell className="capitalize">{record.state}</TableCell>
+                    <TableCell>{formatDateTime(record.placedAt)}</TableCell>
+                    <TableCell>{formatDateTime(record.acknowledgedAt ?? null)}</TableCell>
+                    <TableCell>{formatDateTime(record.completedAt ?? null)}</TableCell>
+                    <TableCell className="max-w-[220px] truncate font-mono text-[11px]">
+                      {formatMetadata(record.metadata)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      );
+    }
+    if (tab === 'executions') {
+      const records = section.data as ExecutionRecord[];
+      return (
+        <>
+          {loadingOverlay}
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Execution</TableHead>
+                  <TableHead>Order</TableHead>
+                  <TableHead>Provider</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Fee</TableHead>
+                  <TableHead>Liquidity</TableHead>
+                  <TableHead>Traded</TableHead>
+                  <TableHead>Metadata</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {records.map((record) => (
+                  <TableRow
+                    key={`${record.executionId}-${record.orderId}-${record.createdAt}`}
+                  >
+                    <TableCell className="font-mono text-xs">{record.executionId}</TableCell>
+                    <TableCell className="font-mono text-xs">{record.orderId}</TableCell>
+                    <TableCell>{record.provider}</TableCell>
+                    <TableCell>{record.quantity}</TableCell>
+                    <TableCell>{record.price}</TableCell>
+                    <TableCell>
+                      {record.fee ? `${record.fee}${record.feeAsset ? ` ${record.feeAsset}` : ''}` : '—'}
+                    </TableCell>
+                    <TableCell>{record.liquidity || '—'}</TableCell>
+                    <TableCell>{formatDateTime(record.tradedAt)}</TableCell>
+                    <TableCell className="max-w-[220px] truncate font-mono text-[11px]">
+                      {formatMetadata(record.metadata)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      );
+    }
+    const records = section.data as BalanceRecord[];
+    return (
+      <>
+        {loadingOverlay}
+        <div className="overflow-x-auto rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Provider</TableHead>
+                <TableHead>Asset</TableHead>
+                <TableHead>Total</TableHead>
+                <TableHead>Available</TableHead>
+                <TableHead>Snapshot</TableHead>
+                <TableHead>Updated</TableHead>
+                <TableHead>Metadata</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {records.map((record, index) => (
+                <TableRow
+                  key={`${record.provider}-${record.asset}-${record.snapshotAt}-${index}`}
+                >
+                  <TableCell>{record.provider}</TableCell>
+                  <TableCell>{record.asset}</TableCell>
+                  <TableCell>{record.total}</TableCell>
+                  <TableCell>{record.available}</TableCell>
+                  <TableCell>{formatDateTime(record.snapshotAt)}</TableCell>
+                  <TableCell>{formatDateTime(record.updatedAt)}</TableCell>
+                  <TableCell className="max-w-[220px] truncate font-mono text-[11px]">
+                    {formatMetadata(record.metadata)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </>
+    );
+  };
+
+  const activeHistoryEntry = historyDialogInstance
+    ? historyState[historyDialogInstance.id]
+    : undefined;
+  const activeHistorySection =
+    historyTab === 'orders'
+      ? activeHistoryEntry?.orders
+      : historyTab === 'executions'
+        ? activeHistoryEntry?.executions
+        : activeHistoryEntry?.balances;
 
   const confirmOpen = Boolean(confirmState);
   const confirmLoading =
@@ -1120,31 +1619,57 @@ export default function InstancesPage() {
             instance.strategyTag ?? null,
           );
           const usageLink = `/strategies/modules?usage=${encodeURIComponent(usageSelector)}`;
+          const isBaseline = Boolean(instance.baseline);
+          const isDynamic = Boolean(instance.dynamic);
           return (
             <Card key={instance.id}>
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>{instance.id}</CardTitle>
-                  <div className="flex items-center gap-2">
-                    {drift ? (
-                      <Badge variant="destructive" className="bg-amber-500 text-black hover:bg-amber-600">
-                        Out of date
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <CardTitle>{instance.id}</CardTitle>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {isBaseline ? (
+                        <Badge className="border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100">
+                          Baseline
+                        </Badge>
+                      ) : null}
+                      {isDynamic && !isBaseline ? (
+                        <Badge className="border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">
+                          Dynamic
+                        </Badge>
+                      ) : null}
+                      {drift ? (
+                        <Badge variant="destructive" className="bg-amber-500 text-black hover:bg-amber-600">
+                          Out of date
+                        </Badge>
+                      ) : null}
+                      <Badge
+                        variant={instance.running ? 'default' : 'secondary'}
+                        className={
+                          instance.running
+                            ? 'bg-green-600 hover:bg-green-700'
+                            : 'bg-gray-500 hover:bg-gray-600'
+                        }
+                      >
+                        {instance.running ? 'Running' : 'Stopped'}
                       </Badge>
-                    ) : null}
-                    <Badge
-                      variant={instance.running ? 'default' : 'secondary'}
-                      className={
-                        instance.running
-                          ? 'bg-green-600 hover:bg-green-700'
-                          : 'bg-gray-500 hover:bg-gray-600'
-                      }
-                    >
-                      {instance.running ? 'Running' : 'Stopped'}
-                    </Badge>
+                    </div>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    {instance.providers.length} provider{instance.providers.length === 1 ? '' : 's'} ·{' '}
+                    {instance.aggregatedSymbols.length} instrument
+                    {instance.aggregatedSymbols.length === 1 ? '' : 's'}
+                  </p>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                {isBaseline ? (
+                  <Alert>
+                    <AlertDescription className="text-xs">
+                      Baseline instances come from persisted specifications. Editing and deletion are disabled here.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
                 <div className="text-sm space-y-2">
                   <div>
                     <span className="font-medium">Strategy:</span>{' '}
@@ -1248,9 +1773,19 @@ export default function InstancesPage() {
                 <div className="flex flex-wrap gap-2">
                   <Button
                     size="sm"
+                    variant="ghost"
+                    onClick={() => handleHistoryOpen(instance)}
+                    disabled={anyActionInFlight}
+                  >
+                    <Clock3Icon className="mr-1 h-3 w-3" />
+                    History
+                  </Button>
+                  <Button
+                    size="sm"
                     variant="outline"
                     onClick={() => handleEdit(instance.id)}
-                    disabled={anyActionInFlight}
+                    disabled={anyActionInFlight || isBaseline}
+                    title={isBaseline ? 'Baseline instances cannot be edited here' : undefined}
                   >
                     <PencilIcon className="mr-1 h-3 w-3" />
                     Edit
@@ -1288,7 +1823,8 @@ export default function InstancesPage() {
                     size="sm"
                     variant="destructive"
                     onClick={() => handleDelete(instance.id)}
-                    disabled={actionInProgress[`delete-${instance.id}`] || anyActionInFlight}
+                    disabled={isBaseline || actionInProgress[`delete-${instance.id}`] || anyActionInFlight}
+                    title={isBaseline ? 'Baseline instances cannot be deleted' : undefined}
                   >
                     {actionInProgress[`delete-${instance.id}`] ? (
                       <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
@@ -1311,6 +1847,81 @@ export default function InstancesPage() {
           </CardContent>
         </Card>
       )}
+      <Dialog
+        open={historyDialogOpen}
+        onOpenChange={(open) => {
+          setHistoryDialogOpen(open);
+          if (!open) {
+            setHistoryDialogInstance(null);
+            setHistoryTab('orders');
+          }
+        }}
+      >
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>
+              Instance history{historyDialogInstance ? ` · ${historyDialogInstance.id}` : ''}
+            </DialogTitle>
+            <DialogDescription>
+              Inspect persisted orders, executions, and provider balances restored from PostgreSQL.
+            </DialogDescription>
+          </DialogHeader>
+          {historyDialogInstance ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <div className="space-x-2">
+                  {historyDialogInstance.providers.length > 0 ? (
+                    <>
+                      <span>Providers:</span>
+                      <span>{historyDialogInstance.providers.join(', ')}</span>
+                    </>
+                  ) : (
+                    <span>No providers assigned</span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {historyDialogInstance.baseline ? (
+                    <Badge className="border border-amber-200 bg-amber-50 text-amber-700">Baseline</Badge>
+                  ) : null}
+                  {historyDialogInstance.dynamic ? (
+                    <Badge className="border border-blue-200 bg-blue-50 text-blue-700">Dynamic</Badge>
+                  ) : null}
+                </div>
+              </div>
+              <Tabs value={historyTab} onValueChange={(value) => setHistoryTab(value as HistoryTab)}>
+                <TabsList>
+                  <TabsTrigger value="orders">Orders</TabsTrigger>
+                  <TabsTrigger value="executions">Executions</TabsTrigger>
+                  <TabsTrigger value="balances">Balances</TabsTrigger>
+                </TabsList>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    Showing up to {HISTORY_LIMITS[historyTab]} recent {historyTab}.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleHistoryRefresh}
+                    disabled={!historyDialogInstance || Boolean(activeHistorySection?.loading)}
+                  >
+                    {activeHistorySection?.loading ? (
+                      <Loader2Icon className="mr-2 h-3 w-3 animate-spin" />
+                    ) : (
+                      <RotateCcwIcon className="mr-2 h-3 w-3" />
+                    )}
+                    Refresh
+                  </Button>
+                </div>
+                <TabsContent value="orders">{renderHistorySection('orders')}</TabsContent>
+                <TabsContent value="executions">{renderHistorySection('executions')}</TabsContent>
+                <TabsContent value="balances">{renderHistorySection('balances')}</TabsContent>
+              </Tabs>
+            </>
+          ) : (
+            <p className="py-6 text-sm text-muted-foreground">Select an instance to view history.</p>
+          )}
+        </DialogContent>
+      </Dialog>
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={(open) => {

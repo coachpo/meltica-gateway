@@ -25,6 +25,9 @@ import {
   StrategyModuleUsageResponse,
   StrategyRefreshRequest,
   StrategyRegistryExport,
+  OrderHistoryResponse,
+  ExecutionHistoryResponse,
+  BalanceHistoryResponse,
 } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8880';
@@ -649,6 +652,69 @@ class ApiClient {
     return this.request(`/strategy/instances/${encodeURIComponent(id)}/stop`, {
       method: 'POST',
     });
+  }
+
+  async getInstanceOrders(
+    id: string,
+    params?: { limit?: number; provider?: string; states?: string[] }
+  ): Promise<OrderHistoryResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit && params.limit > 0) {
+      search.set('limit', String(params.limit));
+    }
+    const provider = params?.provider?.trim();
+    if (provider) {
+      search.set('provider', provider);
+    }
+    if (params?.states?.length) {
+      params.states.forEach((state) => {
+        const trimmed = state.trim();
+        if (trimmed) {
+          search.append('state', trimmed);
+        }
+      });
+    }
+    const query = search.toString();
+    const path = `/strategy/instances/${encodeURIComponent(id)}/orders${query ? `?${query}` : ''}`;
+    return this.request(path);
+  }
+
+  async getInstanceExecutions(
+    id: string,
+    params?: { limit?: number; provider?: string; orderId?: string }
+  ): Promise<ExecutionHistoryResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit && params.limit > 0) {
+      search.set('limit', String(params.limit));
+    }
+    const provider = params?.provider?.trim();
+    if (provider) {
+      search.set('provider', provider);
+    }
+    const orderId = params?.orderId?.trim();
+    if (orderId) {
+      search.set('orderId', orderId);
+    }
+    const query = search.toString();
+    const path = `/strategy/instances/${encodeURIComponent(id)}/executions${query ? `?${query}` : ''}`;
+    return this.request(path);
+  }
+
+  async getProviderBalances(
+    name: string,
+    params?: { limit?: number; asset?: string }
+  ): Promise<BalanceHistoryResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit && params.limit > 0) {
+      search.set('limit', String(params.limit));
+    }
+    const asset = params?.asset?.trim();
+    if (asset) {
+      search.set('asset', asset);
+    }
+    const query = search.toString();
+    const path = `/providers/${encodeURIComponent(name)}/balances${query ? `?${query}` : ''}`;
+    return this.request(path);
   }
 
   // Risk Limits

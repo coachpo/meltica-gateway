@@ -128,6 +128,9 @@ export default function ContextBackupPage() {
           ? 'text-xs text-destructive'
           : 'text-xs text-muted-foreground';
   const formattedInputLength = inputDiagnostics.length.toLocaleString();
+  const hasImportText = importText.trim().length > 0;
+  const restoreDisabled =
+    restoring || !hasImportText || inputDiagnostics.status === 'error' || !!validationError;
 
   const handleDownload = async () => {
     setError(null);
@@ -404,7 +407,7 @@ export default function ContextBackupPage() {
               <Button variant="outline" onClick={handleValidate} disabled={restoring}>
                 Validate payload
               </Button>
-              <Button onClick={handleRestore} disabled={restoring}>
+              <Button onClick={handleRestore} disabled={restoreDisabled}>
                 {restoring ? 'Restoring...' : 'Restore backup'}
               </Button>
             </div>

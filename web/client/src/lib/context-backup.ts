@@ -1,4 +1,4 @@
-import { ContextBackupPayload } from './types';
+import { ContextBackupPayload, InstanceSpec } from './types';
 
 const SENSITIVE_KEY_FRAGMENTS = ['api_key', 'apikey', 'secret', 'token', 'passphrase', 'password'];
 
@@ -61,8 +61,8 @@ export const sanitizeContextBackupPayload = (input: unknown): ContextBackupPaylo
     sanitizeRecord(entry, `Provider entry at index ${index}`)
   );
 
-  const lambdas = lambdasRaw.map((entry, index) =>
-    sanitizeRecord(entry, `Lambda entry at index ${index}`)
+  const lambdas = lambdasRaw.map(
+    (entry, index) => sanitizeRecord(entry, `Lambda entry at index ${index}`) as InstanceSpec
   );
 
   return {

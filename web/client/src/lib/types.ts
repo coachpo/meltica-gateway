@@ -180,6 +180,11 @@ export interface InstanceSummary {
   providers: string[];
   aggregatedSymbols: string[];
   running: boolean;
+  baseline?: boolean;
+  dynamic?: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  metadata?: Record<string, unknown> | null;
   usage?: ModuleRevisionUsage;
   links?: InstanceLinks;
 }
@@ -190,14 +195,7 @@ export interface ProviderSymbols {
 
 export interface InstanceSpec {
   id: string;
-  strategy: {
-    identifier: string;
-    selector?: string;
-    tag?: string;
-    hash?: string;
-    version?: string;
-    config: Record<string, unknown>;
-  };
+  strategy: LambdaStrategySpec;
   scope: Record<string, ProviderSymbols>;
   providers?: string[];
   aggregatedSymbols?: string[];
@@ -291,12 +289,10 @@ export interface ProviderRuntimeMetadata {
 export interface LambdaStrategySpec {
   identifier: string;
   config: Record<string, unknown>;
-}
-
-export interface LambdaManifestEntry {
-  id: string;
-  strategy: LambdaStrategySpec;
-  scope: Record<string, ProviderSymbols>;
+  selector?: string;
+  tag?: string;
+  hash?: string;
+  version?: string;
 }
 
 export interface LambdaInstanceSnapshot {
@@ -306,6 +302,11 @@ export interface LambdaInstanceSnapshot {
   providerSymbols: Record<string, ProviderSymbols>;
   aggregatedSymbols: string[];
   running: boolean;
+  baseline?: boolean;
+  dynamic?: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface ConfigBackup {
@@ -323,9 +324,6 @@ export interface ConfigBackup {
     runtime: ProviderRuntimeMetadata[];
   };
   lambdas: {
-    manifest: {
-      lambdas: LambdaManifestEntry[];
-    };
     instances: LambdaInstanceSnapshot[];
   };
 }
@@ -338,8 +336,69 @@ export interface RestoreConfigResponse {
 
 export interface ContextBackupPayload {
   providers: Record<string, unknown>[];
-  lambdas: Record<string, unknown>[];
+  lambdas: InstanceSpec[];
   risk: Record<string, unknown>;
+}
+
+export interface OrderRecord {
+  id: string;
+  provider: string;
+  strategyInstance: string;
+  clientOrderId: string;
+  symbol: string;
+  side: string;
+  type: string;
+  quantity: string;
+  price?: string | null;
+  state: string;
+  externalReference?: string | null;
+  placedAt: number;
+  metadata?: Record<string, unknown>;
+  acknowledgedAt?: number | null;
+  completedAt?: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ExecutionRecord {
+  orderId: string;
+  provider: string;
+  strategyInstance: string;
+  executionId: string;
+  quantity: string;
+  price: string;
+  fee?: string | null;
+  feeAsset?: string | null;
+  liquidity?: string | null;
+  tradedAt: number;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+}
+
+export interface BalanceRecord {
+  provider: string;
+  asset: string;
+  total: string;
+  available: string;
+  snapshotAt: number;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface OrderHistoryResponse {
+  orders: OrderRecord[];
+  count: number;
+}
+
+export interface ExecutionHistoryResponse {
+  executions: ExecutionRecord[];
+  count: number;
+}
+
+export interface BalanceHistoryResponse {
+  balances: BalanceRecord[];
+  count: number;
 }
 
 export interface RestoreContextResponse {
