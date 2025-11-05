@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type { ContextBackupPayload } from '@/lib/types';
 import {
@@ -12,10 +12,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast-provider';
 import { CodeEditor, CodeViewer } from '@/components/code';
+
+const CONTEXT_VIEWER_CONTAINER_CLASS = 'max-h-[60vh] min-h-[16rem] rounded-md border';
+const CONTEXT_EDITOR_CONTAINER_CLASS = 'max-h-[60vh] rounded-md border';
+const CONTEXT_CODE_CLASS = 'font-mono text-xs';
 
 export default function ContextBackupPage() {
   const [snapshot, setSnapshot] = useState<ContextBackupPayload | null>(null);
@@ -25,8 +28,10 @@ export default function ContextBackupPage() {
   const [restoring, setRestoring] = useState(false);
   const [importText, setImportText] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [importFileName, setImportFileName] = useState<string | null>(null);
 
   const { show: showToast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const sensitivePatterns = useMemo(() => getSensitiveKeyFragments().join(', '), []);
 
@@ -188,6 +193,7 @@ export default function ContextBackupPage() {
   const handleImportChange = (next: string) => {
     setImportText(next);
     setValidationError(null);
+    setImportFileName(null);
   };
 
   const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -199,6 +205,8 @@ export default function ContextBackupPage() {
       const text = await file.text();
       setImportText(text);
       setValidationError(null);
+      setImportFileName(file.name);
+      event.target.value = '';
       showToast({
         title: 'Backup file loaded',
         description: `Loaded backup file ${file.name}.`,
@@ -275,6 +283,10 @@ export default function ContextBackupPage() {
   const providerCount = snapshot?.providers?.length ?? 0;
   const lambdaCount = snapshot?.lambdas?.length ?? 0;
 
+  const handleFilePickerClick = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-2">
@@ -321,7 +333,7 @@ export default function ContextBackupPage() {
               <Button variant="outline" onClick={handleCopy} disabled={loadingSnapshot}>
                 Copy JSON
               </Button>
-              <Button variant="ghost" onClick={handleRefresh} disabled={loadingSnapshot}>
+              <Button variant="outline" onClick={handleRefresh} disabled={loadingSnapshot}>
                 {loadingSnapshot ? 'Refreshing...' : 'Refresh snapshot'}
               </Button>
             </div>
@@ -332,14 +344,11 @@ export default function ContextBackupPage() {
               <CodeViewer
                 value={formatContextBackupPayload(snapshot)}
                 mode="json"
-                theme="github"
                 height="16rem"
-                minLines={18}
-                maxLines={120}
-                wrapEnabled
-                showGutter={false}
-                className="max-h-[60vh] min-h-[16rem] rounded-md border"
-                editorClassName="font-mono text-xs"
+                allowHorizontalScroll
+                wrapEnabled={false}
+                className={CONTEXT_VIEWER_CONTAINER_CLASS}
+                editorClassName={CONTEXT_CODE_CLASS}
               />
             )}
           </CardContent>
@@ -362,14 +371,11 @@ export default function ContextBackupPage() {
                 value={importText}
                 onChange={handleImportChange}
                 mode="json"
-                theme="github"
-                wrapEnabled
-                minLines={12}
-                maxLines={50}
+                allowHorizontalScroll
+                wrapEnabled={false}
                 height="12rem"
-                showGutter={false}
-                className="max-h-[60vh] rounded-md border"
-                editorClassName="font-mono text-xs"
+                className={CONTEXT_EDITOR_CONTAINER_CLASS}
+                editorClassName={CONTEXT_CODE_CLASS}
                 placeholder={`{
   "providers": [],
   "lambdas": [],
@@ -385,7 +391,21 @@ export default function ContextBackupPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Input type="file" accept="application/json" onChange={handleImportFile} className="max-w-xs" />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json"
+                onChange={handleImportFile}
+                className="hidden"
+              />
+              <Button type="button" variant="outline" onClick={handleFilePickerClick} disabled={restoring}>
+                {importFileName ? 'Change file' : 'Select JSON file'}
+              </Button>
+              {importFileName ? (
+                <span className="text-xs text-muted-foreground">
+                  Loaded: <span className="font-medium">{importFileName}</span>
+                </span>
+              ) : null}
               <Button variant="outline" onClick={handleValidate} disabled={restoring}>
                 Validate payload
               </Button>

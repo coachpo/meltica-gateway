@@ -20,11 +20,16 @@ export function Nav() {
   const pathname = usePathname();
 
   return (
-    <nav className="border-b">
-      <div className="flex h-16 items-center px-6">
-        <div className="mr-8 text-xl font-semibold">Meltica Control</div>
-        <div className="flex flex-1 items-center justify-between gap-6">
-          <div className="flex flex-wrap gap-6">
+    <nav className="border-b bg-background">
+      <div className="flex flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-6">
+        <div className="flex items-center justify-between gap-4">
+          <div className="text-xl font-semibold">Meltica Control</div>
+          <div className="md:hidden">
+            <ThemeToggle />
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 md:flex-row md:flex-1 md:items-center md:justify-between">
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
             {navItems.map((item) => (
               <Link
                 key={item.href}
@@ -40,7 +45,9 @@ export function Nav() {
               </Link>
             ))}
           </div>
-          <ThemeToggle />
+          <div className="hidden md:block">
+            <ThemeToggle />
+          </div>
         </div>
       </div>
     </nav>
