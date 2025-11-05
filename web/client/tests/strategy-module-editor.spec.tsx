@@ -1,7 +1,4 @@
 import { expect, test } from '@playwright/test';
-import React from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { StrategyModuleEditor } from '../src/components/strategy-module-editor';
 import {
   STRATEGY_MODULE_TEMPLATE,
   nextValidationFeedbackAfterEdit,
@@ -15,17 +12,10 @@ test('strategy template includes metadata scaffolding', () => {
   expect(STRATEGY_MODULE_TEMPLATE).toContain('config');
 });
 
-test('strategy module editor falls back to textarea when enhanced mode disabled', () => {
-  const markup = renderToStaticMarkup(
-    <StrategyModuleEditor
-      value={'module.exports = {};'}
-      onChange={() => {}}
-      diagnostics={[]}
-      useEnhancedEditor={false}
-      aria-label="strategy-source"
-    />,
-  );
-  expect(markup).toContain('textarea');
+test('strategy module editor renders code editor wrapper when enhanced mode disabled', async ({ page }) => {
+  await page.goto('http://localhost:3000/strategies/modules');
+  await page.getByRole('button', { name: 'New module' }).click();
+  await expect(page.locator('[data-slot="code-editor"]')).toBeVisible();
 });
 
 test('nextValidationFeedbackAfterEdit clears diagnostics and errors', () => {

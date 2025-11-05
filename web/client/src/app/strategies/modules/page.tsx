@@ -13,6 +13,7 @@ import type {
   StrategyRefreshResult,
 } from '@/lib/types';
 import { StrategyModuleEditor } from '@/components/strategy-module-editor';
+import { CodeEditor, CodeViewer } from '@/components/code';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -32,7 +33,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -1666,7 +1666,7 @@ export default function StrategyModulesPage() {
           }
         }}
       >
-        <DialogContent className="w-full max-h-[90vh] overflow-y-auto sm:max-w-4xl lg:max-w-5xl">
+        <DialogContent className="w-[min(96vw,1440px)] max-h-[94vh] overflow-y-auto sm:max-w-[76rem] lg:max-w-[86rem]">
           <DialogHeader>
             <DialogTitle>
               {formMode === 'create' ? 'Upload strategy module' : `Edit ${formTarget?.name ?? ''}`}
@@ -2136,7 +2136,7 @@ export default function StrategyModulesPage() {
           }
         }}
       >
-        <DialogContent className="w-full max-w-2xl">
+        <DialogContent className="w-full max-w-3xl md:w-[90vw] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Targeted refresh</DialogTitle>
             <DialogDescription>
@@ -2147,12 +2147,21 @@ export default function StrategyModulesPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="refresh-strategies">Selectors</Label>
-                <Textarea
+                <CodeEditor
                   id="refresh-strategies"
                   value={refreshSelectorInput}
-                  onChange={(event) => setRefreshSelectorInput(event.target.value)}
-                  placeholder="grid:canary\ndelay@sha256:def..."
-                  className="min-h-[120px]"
+                  onChange={setRefreshSelectorInput}
+                  mode="text"
+                  theme="github"
+                  wrapEnabled
+                  minLines={6}
+                  maxLines={24}
+                  height="8rem"
+                  showGutter={false}
+                  className="max-h-[60vh] rounded-md border"
+                  editorClassName="font-mono text-xs"
+                  placeholder={`grid:canary
+delay@sha256:def...`}
                 />
                 <p className="text-xs text-muted-foreground">
                   One selector per line (or comma separated). Examples: <code>grid</code>, <code>grid:v2.1.0</code>, <code>grid@sha256:abc...</code>
@@ -2160,12 +2169,21 @@ export default function StrategyModulesPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="refresh-hashes">Hashes</Label>
-                <Textarea
+                <CodeEditor
                   id="refresh-hashes"
                   value={refreshHashInput}
-                  onChange={(event) => setRefreshHashInput(event.target.value)}
-                  placeholder="sha256:abc...\nsha256:def..."
-                  className="min-h-[120px]"
+                  onChange={setRefreshHashInput}
+                  mode="text"
+                  theme="github"
+                  wrapEnabled
+                  minLines={6}
+                  maxLines={24}
+                  height="8rem"
+                  showGutter={false}
+                  className="max-h-[60vh] rounded-md border"
+                  editorClassName="font-mono text-xs"
+                  placeholder={`sha256:abc...
+sha256:def...`}
                 />
                 <p className="text-xs text-muted-foreground">
                   Provide raw digests to refresh everything pinned to those hashes.
@@ -2535,7 +2553,7 @@ export default function StrategyModulesPage() {
           }
         }}
       >
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-[min(96vw,1440px)] max-h-[94vh] sm:max-w-[76rem] lg:max-w-[86rem]">
           <DialogHeader>
             <DialogTitle>
               {sourceModule ? `Source: ${sourceModule.file || sourceModule.name}` : 'Source'}
@@ -2552,12 +2570,19 @@ export default function StrategyModulesPage() {
               <AlertDescription>{sourceError}</AlertDescription>
             </Alert>
           ) : (
-            <Textarea
-              value={sourceContent}
-              readOnly
-              spellCheck={false}
-              className="font-mono text-sm h-[55vh] min-h-[300px]"
-            />
+            <div className="rounded-md border h-[60vh]">
+              <CodeViewer
+                value={sourceContent}
+                mode="javascript"
+                theme="tomorrow"
+                allowHorizontalScroll
+                wrapEnabled={false}
+                height="100%"
+                className="h-full w-full"
+                editorClassName="h-full font-mono text-sm"
+                showPrintMargin={false}
+              />
+            </div>
           )}
           <DialogFooter>
             <Button

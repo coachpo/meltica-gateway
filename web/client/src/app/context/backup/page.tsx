@@ -12,10 +12,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
-import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast-provider';
+import { CodeEditor, CodeViewer } from '@/components/code';
 
 export default function ContextBackupPage() {
   const [snapshot, setSnapshot] = useState<ContextBackupPayload | null>(null);
@@ -185,8 +185,8 @@ export default function ContextBackupPage() {
     }
   };
 
-  const handleImportChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    setImportText(event.target.value);
+  const handleImportChange = (next: string) => {
+    setImportText(next);
     setValidationError(null);
   };
 
@@ -329,10 +329,17 @@ export default function ContextBackupPage() {
               <p className="text-sm text-muted-foreground">Loading context snapshot...</p>
             )}
             {snapshot && (
-              <Textarea
-                className="h-64 font-mono text-xs"
+              <CodeViewer
                 value={formatContextBackupPayload(snapshot)}
-                readOnly
+                mode="json"
+                theme="github"
+                height="16rem"
+                minLines={18}
+                maxLines={120}
+                wrapEnabled
+                showGutter={false}
+                className="max-h-[60vh] min-h-[16rem] rounded-md border"
+                editorClassName="font-mono text-xs"
               />
             )}
           </CardContent>
@@ -350,16 +357,24 @@ export default function ContextBackupPage() {
               <label htmlFor="context-backup-import" className="text-sm font-medium text-foreground">
                 Paste backup JSON
               </label>
-              <Textarea
+              <CodeEditor
                 id="context-backup-import"
-                className="h-48 font-mono text-xs"
+                value={importText}
+                onChange={handleImportChange}
+                mode="json"
+                theme="github"
+                wrapEnabled
+                minLines={12}
+                maxLines={50}
+                height="12rem"
+                showGutter={false}
+                className="max-h-[60vh] rounded-md border"
+                editorClassName="font-mono text-xs"
                 placeholder={`{
   "providers": [],
   "lambdas": [],
   "risk": {}
 }`}
-                value={importText}
-                onChange={handleImportChange}
               />
               <p className={inputDiagnosticClass}>
                 {inputDiagnostics.message}{' '}
