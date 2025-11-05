@@ -85,8 +85,6 @@ type ModuleFormState = {
   promoteLatest: boolean;
 };
 
-const VALIDATION_UI_ENABLED = process.env.NEXT_PUBLIC_STRATEGY_VALIDATION_UI === 'true';
-
 const STRATEGY_DOCS_URL =
   'https://github.com/coachpo/meltica/blob/dev/docs/js-strategy-runtime.md';
 
@@ -121,7 +119,7 @@ const defaultFormState: ModuleFormState = {
   filename: '',
   tag: '',
   aliases: '',
-  source: STRATEGY_MODULE_TEMPLATE,
+  source: '',
   promoteLatest: true,
 };
 
@@ -328,7 +326,6 @@ export default function StrategyModulesPage() {
   const [uploadedFileInfo, setUploadedFileInfo] = useState<{ name: string; size: number } | null>(
     null,
   );
-  const validationUIEnabled = VALIDATION_UI_ENABLED;
   const [detailModule, setDetailModule] = useState<StrategyModuleSummary | null>(null);
   const [sourceModule, setSourceModule] = useState<StrategyModuleSummary | null>(null);
   const [sourceContent, setSourceContent] = useState('');
@@ -1778,34 +1775,28 @@ export default function StrategyModulesPage() {
                   <p className="text-xs text-muted-foreground">
                     Paste or load the JavaScript module to compile. Ensure <code>metadata</code> includes{' '}
                     <span className="font-medium">displayName</span>, at least one <code>events</code> entry, and any required configuration fields.
-                    {validationUIEnabled ? (
-                      <>
-                        {' '}
-                        <Link
-                          href={STRATEGY_DOCS_URL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline-offset-4 hover:underline"
-                        >
-                          View docs
-                        </Link>
-                        .
-                      </>
-                    ) : null}
+                    {' '}
+                    <Link
+                      href={STRATEGY_DOCS_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline-offset-4 hover:underline"
+                    >
+                      View docs
+                    </Link>
+                    .
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {validationUIEnabled ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleTemplateInsert}
-                      disabled={formProcessing || formPrefillLoading}
-                    >
-                      <FilePlus className="mr-2 h-4 w-4" />
-                      Insert template
-                    </Button>
-                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleTemplateInsert}
+                    disabled={formProcessing || formPrefillLoading}
+                  >
+                    <FilePlus className="mr-2 h-4 w-4" />
+                    Insert template
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
@@ -1827,12 +1818,11 @@ export default function StrategyModulesPage() {
               <StrategyModuleEditor
                 value={formData.source}
                 onChange={handleSourceChange}
-                diagnostics={validationUIEnabled ? formDiagnostics : []}
+                diagnostics={formDiagnostics}
                 disabled={formPrefillLoading || formProcessing}
                 readOnly={false}
-                useEnhancedEditor={validationUIEnabled}
+                useEnhancedEditor={false}
                 onSubmit={() => void handleFormSubmit()}
-                placeholder="module.exports = { metadata: { ... }, create: function (env) { return {}; } };"
                 aria-label="Strategy JavaScript source"
                 className="min-h-[320px] lg:min-h-[440px]"
               />
@@ -1851,7 +1841,7 @@ export default function StrategyModulesPage() {
               ) : null}
             </div>
           </div>
-          {validationUIEnabled && formDiagnostics.length > 0 ? (
+          {formDiagnostics.length > 0 ? (
             <Alert variant="destructive">
               <AlertTitle>Resolve validation issues</AlertTitle>
               <AlertDescription className="space-y-2 text-sm">
