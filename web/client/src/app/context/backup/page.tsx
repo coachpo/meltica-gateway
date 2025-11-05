@@ -376,11 +376,6 @@ export default function ContextBackupPage() {
                 height="12rem"
                 className={CONTEXT_EDITOR_CONTAINER_CLASS}
                 editorClassName={CONTEXT_CODE_CLASS}
-                placeholder={`{
-  "providers": [],
-  "lambdas": [],
-  "risk": {}
-}`}
               />
               <p className={inputDiagnosticClass}>
                 {inputDiagnostics.message}{' '}
