@@ -12,7 +12,6 @@ import type {
   StrategyRefreshRequest,
   StrategyRefreshResult,
 } from '@/lib/types';
-import { StrategyModuleEditor } from '@/components/strategy-module-editor';
 import { CodeEditor, CodeViewer } from '@/components/code';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -113,6 +112,10 @@ export const STRATEGY_MODULE_TEMPLATE = `module.exports = {
   }
 };
 `;
+
+const STRATEGY_SOURCE_EDITOR_CLASS = 'h-full font-mono text-sm';
+const STRATEGY_SOURCE_EDITOR_CONTAINER_CLASS =
+  'relative w-full rounded-md border h-[320px] max-h-[60vh] lg:h-[440px]';
 
 const defaultFormState: ModuleFormState = {
   name: '',
@@ -351,6 +354,22 @@ export default function StrategyModulesPage() {
     module: StrategyModuleSummary;
     revision: StrategyModuleRevision;
   } | null>(null);
+  const [templateConfirmOpen, setTemplateConfirmOpen] = useState(false);
+
+  const sourceEditorAnnotations = useMemo(
+    () =>
+      formDiagnostics
+        .filter((entry) => typeof entry.line === 'number' && (entry.line ?? 0) > 0)
+        .map((entry, index) => ({
+          row: Math.max(0, (entry.line ?? 1) - 1),
+          column: Math.max(0, (entry.column ?? 1) - 1),
+          type: 'error' as const,
+          text: entry.message || `Validation error ${index + 1}`,
+        })),
+    [formDiagnostics],
+  );
+
+  const sourceEditorReadOnly = formPrefillLoading || formProcessing;
 
   const detailMetadata = detailModule?.metadata;
   const detailDescription =
@@ -418,11 +437,20 @@ export default function StrategyModulesPage() {
     [clearValidationFeedback],
   );
 
-  const handleTemplateInsert = useCallback(() => {
+  const applyTemplateSource = useCallback(() => {
     setFormData((prev) => ({ ...prev, source: STRATEGY_MODULE_TEMPLATE }));
     clearValidationFeedback();
     setUploadedFileInfo(null);
   }, [clearValidationFeedback]);
+
+  const handleTemplateInsert = useCallback(() => {
+    const trimmed = formData.source.trim();
+    if (trimmed.length === 0) {
+      applyTemplateSource();
+      return;
+    }
+    setTemplateConfirmOpen(true);
+  }, [applyTemplateSource, formData.source]);
 
   const sortedModules = useMemo(
     () => [...modules].sort((a, b) => a.name.localeCompare(b.name)),
@@ -1806,15 +1834,24 @@ export default function StrategyModulesPage() {
                   {formatBytes(uploadedFileInfo.size)}
                 </p>
               ) : null}
-              <StrategyModuleEditor
+              <CodeEditor
                 value={formData.source}
                 onChange={handleSourceChange}
-                diagnostics={formDiagnostics}
-                disabled={formPrefillLoading || formProcessing}
-                readOnly={false}
-                onSubmit={() => void handleFormSubmit()}
+                mode="javascript"
+                allowHorizontalScroll={!sourceEditorReadOnly}
+                wrapEnabled={sourceEditorReadOnly}
+                height="100%"
+                highlightActiveLine={!sourceEditorReadOnly}
+                readOnly={sourceEditorReadOnly}
+                enableBasicAutocompletion
+                enableLiveAutocompletion
+                enableSnippets
+                editorProps={{ $blockScrolling: true }}
+                annotations={sourceEditorAnnotations}
+                onSubmitShortcut={() => void handleFormSubmit()}
+                className={STRATEGY_SOURCE_EDITOR_CONTAINER_CLASS}
+                editorClassName={STRATEGY_SOURCE_EDITOR_CLASS}
                 aria-label="Strategy JavaScript source"
-                className="min-h-[320px] lg:min-h-[440px]"
               />
               <input
                 type="file"
@@ -2554,13 +2591,11 @@ sha256:def...`}
               <CodeViewer
                 value={sourceContent}
                 mode="javascript"
-                theme="tomorrow"
                 allowHorizontalScroll
                 wrapEnabled={false}
                 height="100%"
                 className="h-full w-full"
-                editorClassName="h-full font-mono text-sm"
-                showPrintMargin={false}
+                editorClassName={STRATEGY_SOURCE_EDITOR_CLASS}
               />
             </div>
           )}
@@ -2659,6 +2694,18 @@ sha256:def...`}
             ? void handlePromoteRevision(promoteTarget.module, promoteTarget.revision)
             : undefined
         }
+      />
+      <ConfirmDialog
+        open={templateConfirmOpen}
+        onOpenChange={(open) => setTemplateConfirmOpen(open)}
+        title="Replace current source?"
+        description="Inserting the template will overwrite the editor contents."
+        confirmLabel="Insert template"
+        confirmVariant="default"
+        onConfirm={() => {
+          applyTemplateSource();
+          setTemplateConfirmOpen(false);
+        }}
       />
       <Dialog
         open={Boolean(aliasDialogTarget)}
