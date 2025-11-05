@@ -22,9 +22,10 @@ type AppConfig struct {
     Providers   map[Provider]map[string]any   // Provider-specific blobs
     Eventbus    EventbusConfig                // Message bus sizing
     Pools       PoolConfig                    // Object pooling capacities
+    Database    DatabaseConfig                // PostgreSQL connectivity
     APIServer   APIServerConfig               // Control server settings
     Telemetry   TelemetryConfig               // Observability settings
-    LambdaManifest LambdaManifest             // Inline lambda definitions
+    Strategies  StrategiesConfig              // Strategy loader / registry options
 }
 ```
 
@@ -55,9 +56,9 @@ See `config/app.example.yaml` for a complete sample. Key sections include:
 - `providers`: Arbitrary blobs forwarded to each exchange adapter; each entry must include an `exchange` block referencing a registered provider type (aliases map to the same exchange by using the same `exchange.identifier` value).
 - `eventbus`: In-memory event bus sizing.
 - `pools`: Object pool capacities.
+- `database`: PostgreSQL DSN, pooling, timeouts, and migration toggle.
 - `apiServer`: Control API bind address.
 - `telemetry`: OTLP exporter configuration.
-- `lambdaManifest`: Inline lambda definitions materialised at startup.
 
 ## Migration from Old System
 

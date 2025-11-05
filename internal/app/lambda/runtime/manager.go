@@ -26,7 +26,9 @@ import (
 	"github.com/coachpo/meltica/internal/app/lambda/strategies"
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/app/risk"
+	"github.com/coachpo/meltica/internal/domain/orderstore"
 	"github.com/coachpo/meltica/internal/domain/schema"
+	"github.com/coachpo/meltica/internal/domain/strategystore"
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
@@ -257,26 +259,47 @@ type Manager struct {
 	lifecycleMu  sync.RWMutex
 	lifecycleCtx context.Context
 
-	bus         eventbus.Bus
-	pools       *pool.PoolManager
-	providers   ProviderCatalog
-	logger      *log.Logger
-	registrar   RouteRegistrar
-	riskManager *risk.Manager
-	jsLoader    *js.Loader
-	dynamic     map[string]struct{}
-	clock       func() time.Time
-	strategyDir string
-	base        map[string]StrategyDefinition
+	bus              eventbus.Bus
+	pools            *pool.PoolManager
+	providers        ProviderCatalog
+	logger           *log.Logger
+	registrar        RouteRegistrar
+	riskManager      *risk.Manager
+	jsLoader         *js.Loader
+	dynamic          map[string]struct{}
+	baseline         map[string]struct{}
+	dynamicInstances map[string]struct{}
+	clock            func() time.Time
+	strategyDir      string
+	base             map[string]StrategyDefinition
 
-	strategies map[string]StrategyDefinition
-	specs      map[string]config.LambdaSpec
-	instances  map[string]*lambdaInstance
+	strategies    map[string]StrategyDefinition
+	specs         map[string]config.LambdaSpec
+	instances     map[string]*lambdaInstance
+	strategyStore strategystore.Store
+	orderStore    orderstore.Store
 
 	revisionUsage            map[string]*revisionUsage
 	revisionGauge            metric.Int64ObservableGauge
 	revisionLifecycleMetric  metric.Int64Counter
 	uploadValidationFailures metric.Int64Counter
+}
+
+// Option configures manager behaviour.
+type Option func(*Manager)
+
+// WithStrategyStore wires a strategy persistence store into the manager.
+func WithStrategyStore(store strategystore.Store) Option {
+	return func(m *Manager) {
+		m.strategyStore = store
+	}
+}
+
+// WithOrderStore wires an order persistence store into the manager.
+func WithOrderStore(store orderstore.Store) Option {
+	return func(m *Manager) {
+		m.orderStore = store
+	}
 }
 
 type lambdaInstance struct {
@@ -288,7 +311,7 @@ type lambdaInstance struct {
 }
 
 // NewManager creates a new lambda manager with the specified dependencies.
-func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar) (*Manager, error) {
+func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager, providers ProviderCatalog, logger *log.Logger, registrar RouteRegistrar, opts ...Option) (*Manager, error) {
 	if logger == nil {
 		logger = log.New(os.Stdout, "lambda-manager ", log.LstdFlags|log.Lmicroseconds)
 	}
@@ -326,16 +349,25 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 		riskManager:              rm,
 		jsLoader:                 loader,
 		dynamic:                  make(map[string]struct{}),
+		baseline:                 make(map[string]struct{}),
+		dynamicInstances:         make(map[string]struct{}),
 		clock:                    time.Now,
 		strategyDir:              loader.Root(),
 		base:                     make(map[string]StrategyDefinition),
 		strategies:               make(map[string]StrategyDefinition),
 		specs:                    make(map[string]config.LambdaSpec),
 		instances:                make(map[string]*lambdaInstance),
+		strategyStore:            nil,
+		orderStore:               nil,
 		revisionUsage:            make(map[string]*revisionUsage),
 		revisionGauge:            nil,
 		revisionLifecycleMetric:  nil,
 		uploadValidationFailures: nil,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(mgr)
+		}
 	}
 	mgr.setupMetrics()
 	if _, err := mgr.installJavaScriptStrategies(context.Background()); err != nil {
@@ -1171,18 +1203,6 @@ func (m *Manager) StrategyDetail(name string) (strategies.Metadata, bool) {
 	return def.Metadata(), true
 }
 
-// StartFromManifest registers all lambdas defined in the lambda manifest without starting them.
-func (m *Manager) StartFromManifest(manifest config.LambdaManifest) error {
-	for _, definition := range manifest.Lambdas {
-		spec := sanitizeSpec(definition)
-		if err := m.ensureSpec(spec, false); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // Create creates a new lambda instance from the specification.
 func (m *Manager) Create(spec config.LambdaSpec) (*core.BaseLambda, error) {
 	spec = sanitizeSpec(spec)
@@ -1195,6 +1215,9 @@ func (m *Manager) Create(spec config.LambdaSpec) (*core.BaseLambda, error) {
 	if err := m.ensureSpec(spec, false); err != nil {
 		return nil, fmt.Errorf("ensure spec %s: %w", spec.ID, err)
 	}
+	m.setBaselineInstance(spec.ID, false)
+	m.setDynamicInstance(spec.ID, true)
+	m.persistStrategy(spec.ID)
 	return nil, nil
 }
 
@@ -1241,13 +1264,16 @@ func (m *Manager) ensureSpec(spec config.LambdaSpec, allowReplace bool) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if _, exists := m.specs[spec.ID]; exists && !allowReplace {
+		m.mu.Unlock()
 		return ErrInstanceExists
 	}
 	strategy, hash, _ := revisionSignatureForSpec(spec)
 	m.ensureRevisionUsageLocked(strategy, hash)
 	m.specs[spec.ID] = cloneSpec(spec)
+	m.mu.Unlock()
+
+	m.persistStrategy(spec.ID)
 	return nil
 }
 
@@ -1313,7 +1339,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 		}
 	}
 	baseCfg := core.Config{Providers: resolvedProviders, ProviderSymbols: spec.ProviderSymbolMap(), DryRun: dryRun}
-	base := core.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager)
+	base := core.NewBaseLambda(spec.ID, baseCfg, m.bus, orderRouter, m.pools, strategy, m.riskManager, m.orderStore)
 	bindStrategy(strategy, base, m.logger)
 
 	runCtx, cancel := context.WithCancel(m.parentContext())
@@ -1332,6 +1358,7 @@ func (m *Manager) launch(ctx context.Context, spec config.LambdaSpec, registerNo
 	m.mu.Unlock()
 
 	go m.observe(runCtx, spec.ID, errs, strategy)
+	m.persistStrategy(spec.ID)
 	return base, resolvedProviders, routes, nil
 }
 
@@ -1374,6 +1401,7 @@ func (m *Manager) Stop(id string) error {
 		_ = m.registrar.UnregisterLambda(context.Background(), id)
 	}
 	closeStrategy(inst.strat)
+	m.persistStrategy(id)
 	return nil
 }
 
@@ -1390,6 +1418,9 @@ func (m *Manager) Remove(id string) error {
 		return ErrInstanceNotFound
 	}
 	delete(m.specs, id)
+	delete(m.baseline, strings.ToLower(strings.TrimSpace(id)))
+	delete(m.dynamicInstances, strings.ToLower(strings.TrimSpace(id)))
+	m.deleteStrategy(id)
 	return nil
 }
 
@@ -1497,6 +1528,16 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 	usage := m.revisionUsageSummaryLocked(spec)
 	m.mu.RUnlock()
 	return snapshotOf(spec, running, usage), true
+}
+
+// IsBaseline reports whether the instance originated from the baseline manifest.
+func (m *Manager) IsBaseline(id string) bool {
+	return m.isBaselineInstance(id)
+}
+
+// IsDynamic reports whether the instance was created dynamically via control APIs.
+func (m *Manager) IsDynamic(id string) bool {
+	return m.isDynamicInstance(id)
 }
 
 func summaryOf(spec config.LambdaSpec, running bool, usage *RevisionUsageSummary) InstanceSummary {
@@ -1673,6 +1714,28 @@ func copyMap(src map[string]any) map[string]any {
 	return dst
 }
 
+func cloneSymbolMap(src map[string]config.ProviderSymbols) map[string][]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(src))
+	for provider, assignment := range src {
+		out[provider] = append([]string(nil), assignment.Symbols...)
+	}
+	return out
+}
+
+func buildProviderSymbols(symbols map[string][]string) map[string]config.ProviderSymbols {
+	if len(symbols) == 0 {
+		return make(map[string]config.ProviderSymbols)
+	}
+	out := make(map[string]config.ProviderSymbols, len(symbols))
+	for provider, vals := range symbols {
+		out[provider] = config.ProviderSymbols{Symbols: append([]string(nil), vals...)}
+	}
+	return out
+}
+
 func copyStringSet(src map[string]struct{}) map[string]struct{} {
 	if len(src) == 0 {
 		return nil
@@ -1682,6 +1745,147 @@ func copyStringSet(src map[string]struct{}) map[string]struct{} {
 		dst[key] = struct{}{}
 	}
 	return dst
+}
+
+func (m *Manager) strategySnapshot(id string) (strategystore.Snapshot, bool) {
+	m.mu.RLock()
+	spec, ok := m.specs[id]
+	if !ok {
+		m.mu.RUnlock()
+		var empty strategystore.Snapshot
+		return empty, false
+	}
+	_, running := m.instances[id]
+	m.mu.RUnlock()
+
+	snapshot := strategystore.Snapshot{
+		ID:              spec.ID,
+		Strategy:        strategystore.Strategy{Identifier: spec.Strategy.Identifier, Selector: spec.Strategy.Selector, Tag: spec.Strategy.Tag, Hash: spec.Strategy.Hash, Version: spec.Strategy.Version, Config: copyMap(spec.Strategy.Config)},
+		Providers:       append([]string(nil), spec.Providers...),
+		ProviderSymbols: cloneSymbolMap(spec.ProviderSymbols),
+		Running:         running,
+		Dynamic:         m.isDynamicInstance(spec.ID),
+		Baseline:        m.isBaselineInstance(spec.ID),
+		Metadata:        map[string]any{},
+		UpdatedAt:       m.clock(),
+	}
+	return snapshot, true
+}
+
+func (m *Manager) persistStrategy(id string) {
+	if m == nil || m.strategyStore == nil {
+		return
+	}
+	snapshot, ok := m.strategySnapshot(id)
+	if !ok {
+		return
+	}
+	ctx := m.parentContext()
+	if err := m.strategyStore.Save(ctx, snapshot); err != nil && m.logger != nil {
+		m.logger.Printf("strategy/%s: persist failed: %v", id, err)
+	}
+}
+
+func (m *Manager) deleteStrategy(id string) {
+	if m == nil || m.strategyStore == nil {
+		return
+	}
+	ctx := m.parentContext()
+	if err := m.strategyStore.Delete(ctx, id); err != nil && m.logger != nil {
+		m.logger.Printf("strategy/%s: delete snapshot failed: %v", id, err)
+	}
+}
+
+func (m *Manager) restoreStrategySnapshot(ctx context.Context, snapshot strategystore.Snapshot) {
+	if snapshot.ID == "" {
+		return
+	}
+	spec := specFromSnapshot(snapshot)
+	if err := m.ensureSpec(spec, true); err != nil {
+		if m.logger != nil {
+			m.logger.Printf("strategy/%s: restore spec failed: %v", snapshot.ID, err)
+		}
+		return
+	}
+	m.setBaselineInstance(snapshot.ID, snapshot.Baseline)
+	m.setDynamicInstance(snapshot.ID, snapshot.Dynamic)
+	if snapshot.Running {
+		if err := m.Start(ctx, snapshot.ID); err != nil && m.logger != nil {
+			if !errors.Is(err, ErrInstanceAlreadyRunning) {
+				m.logger.Printf("strategy/%s: restore start failed: %v", snapshot.ID, err)
+			}
+		}
+	}
+}
+
+// RestoreSnapshot rehydrates a strategy instance snapshot without failing the manager on errors.
+func (m *Manager) RestoreSnapshot(ctx context.Context, snapshot strategystore.Snapshot) {
+	if m == nil {
+		return
+	}
+	m.restoreStrategySnapshot(ctx, snapshot)
+}
+
+func specFromSnapshot(snapshot strategystore.Snapshot) config.LambdaSpec {
+	spec := config.LambdaSpec{
+		ID:              snapshot.ID,
+		Strategy:        config.LambdaStrategySpec{Identifier: snapshot.Strategy.Identifier, Config: copyMap(snapshot.Strategy.Config), Selector: snapshot.Strategy.Selector, Tag: snapshot.Strategy.Tag, Hash: snapshot.Strategy.Hash, Version: snapshot.Strategy.Version},
+		Providers:       append([]string(nil), snapshot.Providers...),
+		ProviderSymbols: buildProviderSymbols(snapshot.ProviderSymbols),
+	}
+	if len(snapshot.Providers) > 0 && len(spec.ProviderSymbols) == 0 {
+		spec.Providers = append([]string(nil), snapshot.Providers...)
+	} else {
+		spec.RefreshProviders()
+	}
+	return sanitizeSpec(spec)
+}
+
+func (m *Manager) setBaselineInstance(id string, baseline bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if baseline {
+		m.baseline[strings.ToLower(strings.TrimSpace(id))] = struct{}{}
+	} else {
+		delete(m.baseline, strings.ToLower(strings.TrimSpace(id)))
+	}
+}
+
+func (m *Manager) isBaselineInstance(id string) bool {
+	if m == nil || id == "" {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.baseline[strings.ToLower(strings.TrimSpace(id))]
+	return ok
+}
+
+func (m *Manager) setDynamicInstance(id string, dynamic bool) {
+	if m == nil || id == "" {
+		return
+	}
+	key := strings.ToLower(strings.TrimSpace(id))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if dynamic {
+		m.dynamicInstances[key] = struct{}{}
+	} else {
+		delete(m.dynamicInstances, key)
+	}
+}
+
+func (m *Manager) isDynamicInstance(id string) bool {
+	if m == nil || id == "" {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.dynamicInstances[strings.ToLower(strings.TrimSpace(id))]
+	return ok
 }
 
 type strategySelection struct {

@@ -10,17 +10,18 @@ import (
 	"testing"
 
 	"github.com/coachpo/meltica/internal/app/lambda/js"
+	"github.com/coachpo/meltica/internal/domain/strategystore"
 	"github.com/coachpo/meltica/internal/infra/config"
 )
 
-func newTestManager(t *testing.T) *Manager {
+func newTestManager(t *testing.T, opts ...Option) *Manager {
 	t.Helper()
 	cfg := config.AppConfig{
 		Strategies: config.StrategiesConfig{
 			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
 		},
 	}
-	manager, err := NewManager(cfg, nil, nil, nil, log.New(io.Discard, "", 0), nil)
+	manager, err := NewManager(cfg, nil, nil, nil, log.New(io.Discard, "", 0), nil, opts...)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -125,6 +126,41 @@ func baseLambdaSpec() config.LambdaSpec {
 	}
 }
 
+func TestManagerStrategyPersistenceLifecycle(t *testing.T) {
+	store := &recordingStrategyStore{}
+	mgr := newTestManager(t, WithStrategyStore(store))
+	spec := baseLambdaSpec()
+
+	if err := mgr.ensureSpec(spec, false); err != nil {
+		t.Fatalf("ensureSpec: %v", err)
+	}
+	if len(store.saved) == 0 {
+		t.Fatalf("expected snapshot to be persisted after ensureSpec")
+	}
+	initial := store.saved[len(store.saved)-1]
+	if initial.Running {
+		t.Fatalf("expected initial snapshot to be stopped")
+	}
+
+	mgr.mu.Lock()
+	mgr.instances[spec.ID] = &lambdaInstance{}
+	mgr.mu.Unlock()
+	mgr.persistStrategy(spec.ID)
+
+	if len(store.saved) < 2 {
+		t.Fatalf("expected running snapshot to be persisted")
+	}
+	latest := store.saved[len(store.saved)-1]
+	if !latest.Running {
+		t.Fatalf("expected latest snapshot to be running")
+	}
+
+	mgr.deleteStrategy(spec.ID)
+	if len(store.deleted) == 0 || store.deleted[len(store.deleted)-1] != spec.ID {
+		t.Fatalf("expected delete call for %s", spec.ID)
+	}
+}
+
 func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("strategy selector resolution", func(t *testing.T) {
 		mgr := newTestManager(t)
@@ -172,9 +208,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 				},
 				Providers: []string{"mock"},
 			}
-			if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
-				t.Fatalf("%s: StartFromManifest: %v", tc.id, err)
-			}
+		if _, err := mgr.Create(spec); err != nil {
+			t.Fatalf("%s: Create: %v", tc.id, err)
+		}
 			stored, err := mgr.specForID(tc.id)
 			if err != nil {
 				t.Fatalf("%s: specForID: %v", tc.id, err)
@@ -197,9 +233,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("strategy immutable", func(t *testing.T) {
 		mgr := newTestManager(t)
 		spec := baseLambdaSpec()
-		if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
-			t.Fatalf("register spec: %v", err)
-		}
+	if _, err := mgr.Create(spec); err != nil {
+		t.Fatalf("register spec: %v", err)
+	}
 
 		spec.Strategy.Identifier = "delay"
 		if err := mgr.Update(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "strategy is immutable") {
@@ -210,9 +246,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("providers immutable", func(t *testing.T) {
 		mgr := newTestManager(t)
 		spec := baseLambdaSpec()
-		if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
-			t.Fatalf("register spec: %v", err)
-		}
+	if _, err := mgr.Create(spec); err != nil {
+		t.Fatalf("register spec: %v", err)
+	}
 
 		spec.ProviderSymbols = nil
 		spec.Providers = []string{"binance-spot"}
@@ -224,9 +260,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("scope immutable", func(t *testing.T) {
 		mgr := newTestManager(t)
 		spec := baseLambdaSpec()
-		if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
-			t.Fatalf("register spec: %v", err)
-		}
+	if _, err := mgr.Create(spec); err != nil {
+		t.Fatalf("register spec: %v", err)
+	}
 
 		spec.ProviderSymbols = map[string]config.ProviderSymbols{
 			"okx-spot": {Symbols: []string{"ETH-USDT"}},
@@ -239,9 +275,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("config mutable", func(t *testing.T) {
 		mgr := newTestManager(t)
 		spec := baseLambdaSpec()
-		if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
-			t.Fatalf("register spec: %v", err)
-		}
+	if _, err := mgr.Create(spec); err != nil {
+		t.Fatalf("register spec: %v", err)
+	}
 
 		spec.Strategy.Config = map[string]any{"logger_prefix": "[updated]"}
 		if err := mgr.Update(context.Background(), spec); err != nil {
@@ -259,11 +295,35 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	})
 }
 
+type recordingStrategyStore struct {
+	saved   []strategystore.Snapshot
+	deleted []string
+}
+
+func (r *recordingStrategyStore) Save(_ context.Context, snapshot strategystore.Snapshot) error {
+	cloned := snapshot
+	cloned.Providers = append([]string(nil), snapshot.Providers...)
+	if cloned.Metadata == nil {
+		cloned.Metadata = make(map[string]any)
+	}
+	r.saved = append(r.saved, cloned)
+	return nil
+}
+
+func (r *recordingStrategyStore) Delete(_ context.Context, id string) error {
+	r.deleted = append(r.deleted, id)
+	return nil
+}
+
+func (r *recordingStrategyStore) Load(context.Context) ([]strategystore.Snapshot, error) {
+	return nil, nil
+}
+
 func TestManagerRevisionUsageDetail(t *testing.T) {
 	mgr := newTestManager(t)
 	spec := baseLambdaSpec()
-	if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
-		t.Fatalf("StartFromManifest: %v", err)
+	if _, err := mgr.Create(spec); err != nil {
+		t.Fatalf("Create lambda: %v", err)
 	}
 	stored, err := mgr.specForID(spec.ID)
 	if err != nil {
@@ -331,8 +391,8 @@ func TestRemoveStrategyGuardedWhenHashInUse(t *testing.T) {
 		},
 		Providers: []string{"mock"},
 	}
-	if err := mgr.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{spec}}); err != nil {
-		t.Fatalf("StartFromManifest: %v", err)
+	if _, err := mgr.Create(spec); err != nil {
+		t.Fatalf("Create lambda: %v", err)
 	}
 	stored, err := mgr.specForID("guarded")
 	if err != nil {

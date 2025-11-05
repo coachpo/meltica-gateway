@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/coachpo/meltica/internal/app/risk"
+	"github.com/coachpo/meltica/internal/domain/orderstore"
 	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/pool"
@@ -70,6 +71,7 @@ type BaseLambda struct {
 	config            Config
 	bus               eventbus.Bus
 	orderSubmitter    OrderSubmitter
+	orderStore        orderstore.Store
 	pools             *pool.PoolManager
 	logger            *log.Logger
 	strategy          TradingStrategy
@@ -107,7 +109,7 @@ type OrderSubmitter interface {
 }
 
 // NewBaseLambda creates a new base lambda with the provided strategy.
-func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter OrderSubmitter, pools *pool.PoolManager, strategy TradingStrategy, riskManager *risk.Manager) *BaseLambda {
+func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter OrderSubmitter, pools *pool.PoolManager, strategy TradingStrategy, riskManager *risk.Manager, orderStore orderstore.Store) *BaseLambda {
 	config.Providers = normalizeProviders(config.Providers)
 	config.ProviderSymbols = normalizeProviderSymbols(config.ProviderSymbols)
 	providerSet := make(map[string]struct{}, len(config.Providers))
@@ -152,6 +154,7 @@ func NewBaseLambda(id string, config Config, bus eventbus.Bus, orderSubmitter Or
 		config:            config,
 		bus:               bus,
 		orderSubmitter:    orderSubmitter,
+		orderStore:        orderStore,
 		pools:             pools,
 		logger:            log.New(os.Stdout, "", log.LstdFlags),
 		strategy:          strategy,
@@ -521,6 +524,8 @@ func (l *BaseLambda) handleExecReport(ctx context.Context, evt *schema.Event) {
 		return
 	}
 
+	l.persistExecReport(ctx, evt, payload)
+
 	if l.riskManager != nil {
 		l.riskManager.HandleExecution(evt.Symbol, payload)
 	}
@@ -588,6 +593,7 @@ func (l *BaseLambda) handleBalanceUpdate(ctx context.Context, evt *schema.Event)
 	if !ok {
 		return
 	}
+	l.persistBalance(ctx, evt, payload)
 	l.strategy.OnBalanceUpdate(ctx, evt, payload)
 }
 
@@ -672,7 +678,12 @@ func (l *BaseLambda) SubmitOrder(ctx context.Context, provider string, side sche
 		}
 	}
 
+	if err := l.persistNewOrder(ctx, orderReq); err != nil {
+		return err
+	}
+
 	if err := l.orderSubmitter.SubmitOrder(ctx, *orderReq); err != nil {
+		l.persistOrderFailure(ctx, orderReq.ClientOrderID, err)
 		return fmt.Errorf("submit order: %w", err)
 	}
 
@@ -729,7 +740,12 @@ func (l *BaseLambda) SubmitMarketOrder(ctx context.Context, provider string, sid
 		}
 	}
 
+	if err := l.persistNewOrder(ctx, orderReq); err != nil {
+		return err
+	}
+
 	if err := l.orderSubmitter.SubmitOrder(ctx, *orderReq); err != nil {
+		l.persistOrderFailure(ctx, orderReq.ClientOrderID, err)
 		return fmt.Errorf("submit market order: %w", err)
 	}
 
@@ -952,6 +968,200 @@ func (l *BaseLambda) matchesBalanceCurrency(symbol string) bool {
 		return ok
 	}
 	return false
+}
+
+func (l *BaseLambda) persistNewOrder(ctx context.Context, req *schema.OrderRequest) error {
+	if l == nil || l.orderStore == nil || l.IsDryRun() {
+		return nil
+	}
+	metadata := map[string]any{}
+	if strings.TrimSpace(req.TIF) != "" {
+		metadata["tif"] = strings.ToUpper(strings.TrimSpace(req.TIF))
+	}
+	if req.Price != nil {
+		metadata["price"] = *req.Price
+	}
+	if len(metadata) == 0 {
+		metadata = nil
+	}
+	placedAt := req.Timestamp
+	if placedAt.IsZero() {
+		placedAt = time.Now()
+	}
+	order := orderstore.Order{
+		ID:                req.ClientOrderID,
+		Provider:          strings.TrimSpace(req.Provider),
+		StrategyInstance:  l.id,
+		ClientOrderID:     req.ClientOrderID,
+		Symbol:            req.Symbol,
+		Side:              string(req.Side),
+		Type:              string(req.OrderType),
+		Quantity:          req.Quantity,
+		Price:             req.Price,
+		State:             "PENDING",
+		PlacedAt:          placedAt.Unix(),
+		ExternalReference: "",
+		Metadata:          metadata,
+	}
+	if err := l.orderStore.CreateOrder(ctx, order); err != nil {
+		return fmt.Errorf("persist order: %w", err)
+	}
+	return nil
+}
+
+func (l *BaseLambda) persistOrderFailure(ctx context.Context, orderID string, submitErr error) {
+	if l == nil || l.orderStore == nil || l.IsDryRun() {
+		return
+	}
+	meta := map[string]any{"error": submitErr.Error()}
+	now := time.Now()
+	update := orderstore.OrderUpdate{
+		ID:             orderID,
+		State:          string(schema.ExecReportStateREJECTED),
+		AcknowledgedAt: nil,
+		CompletedAt:    unixPtr(now),
+		Metadata:       meta,
+	}
+	if err := l.orderStore.UpdateOrder(ctx, update); err != nil && l.logger != nil {
+		l.logger.Printf("[%s] persist order failure: %v", l.id, err)
+	}
+}
+
+func (l *BaseLambda) persistExecReport(ctx context.Context, evt *schema.Event, payload schema.ExecReportPayload) {
+	if l == nil || l.orderStore == nil || l.IsDryRun() {
+		return
+	}
+	meta := map[string]any{
+		"exchange_order_id": payload.ExchangeOrderID,
+		"filled_quantity":   payload.FilledQuantity,
+		"remaining_qty":     payload.RemainingQty,
+		"avg_fill_price":    payload.AvgFillPrice,
+	}
+	if payload.RejectReason != nil {
+		meta["reject_reason"] = *payload.RejectReason
+	}
+	if strings.TrimSpace(payload.CommissionAmount) != "" {
+		meta["commission_amount"] = payload.CommissionAmount
+	}
+	if strings.TrimSpace(payload.CommissionAsset) != "" {
+		meta["commission_asset"] = payload.CommissionAsset
+	}
+	timestamp := payload.Timestamp
+	if timestamp.IsZero() && evt != nil {
+		timestamp = evt.EmitTS
+	}
+	if timestamp.IsZero() {
+		timestamp = time.Now()
+	}
+	update := orderstore.OrderUpdate{
+		ID:             payload.ClientOrderID,
+		State:          string(payload.State),
+		AcknowledgedAt: nil,
+		CompletedAt:    nil,
+		Metadata:       meta,
+	}
+	ack := unixPtr(timestamp)
+	switch payload.State {
+	case schema.ExecReportStateACK, schema.ExecReportStatePARTIAL:
+		update.AcknowledgedAt = ack
+	case schema.ExecReportStateFILLED, schema.ExecReportStateCANCELLED, schema.ExecReportStateREJECTED, schema.ExecReportStateEXPIRED:
+		update.AcknowledgedAt = ack
+		update.CompletedAt = ack
+	}
+	var exec *orderstore.Execution
+	if payload.State == schema.ExecReportStateFILLED || payload.State == schema.ExecReportStatePARTIAL {
+		execution := l.buildExecutionSnapshot(evt, payload)
+		exec = &execution
+	}
+	if err := l.orderStore.WithTransaction(ctx, func(txCtx context.Context, tx orderstore.Tx) error {
+		if err := tx.UpdateOrder(txCtx, update); err != nil {
+			return fmt.Errorf("order update: %w", err)
+		}
+		if exec != nil {
+			if err := tx.RecordExecution(txCtx, *exec); err != nil {
+				return fmt.Errorf("record execution: %w", err)
+			}
+		}
+		return nil
+	}); err != nil && l.logger != nil {
+		l.logger.Printf("[%s] persist order update: %v", l.id, err)
+	}
+}
+
+func (l *BaseLambda) buildExecutionSnapshot(evt *schema.Event, payload schema.ExecReportPayload) orderstore.Execution {
+	exec := orderstore.Execution{
+		OrderID:     payload.ClientOrderID,
+		Provider:    "",
+		ExecutionID: "",
+		Quantity:    payload.FilledQuantity,
+		Price:       payload.AvgFillPrice,
+		Fee:         nil,
+		FeeAsset:    nil,
+		Liquidity:   "",
+		TradedAt:    0,
+		Metadata: map[string]any{
+			"remaining_qty": payload.RemainingQty,
+			"state":         payload.State,
+		},
+	}
+	if evt != nil {
+		exec.ExecutionID = evt.EventID
+		exec.Provider = evt.Provider
+		exec.Metadata["event_symbol"] = evt.Symbol
+	}
+	if strings.TrimSpace(exec.ExecutionID) == "" {
+		exec.ExecutionID = fmt.Sprintf("%s-%d", payload.ClientOrderID, payload.Timestamp.UnixNano())
+	}
+	tradedAt := payload.Timestamp
+	if tradedAt.IsZero() && evt != nil {
+		tradedAt = evt.EmitTS
+	}
+	if tradedAt.IsZero() {
+		tradedAt = time.Now()
+	}
+	exec.TradedAt = tradedAt.Unix()
+	if strings.TrimSpace(payload.CommissionAmount) != "" {
+		fee := payload.CommissionAmount
+		exec.Fee = &fee
+	}
+	if strings.TrimSpace(payload.CommissionAsset) != "" {
+		asset := payload.CommissionAsset
+		exec.FeeAsset = &asset
+	}
+	return exec
+}
+
+func (l *BaseLambda) persistBalance(ctx context.Context, evt *schema.Event, payload schema.BalanceUpdatePayload) {
+	if l == nil || l.orderStore == nil {
+		return
+	}
+	timestamp := payload.Timestamp
+	if timestamp.IsZero() {
+		timestamp = time.Now()
+	}
+	meta := map[string]any{}
+	if evt != nil {
+		meta["symbol"] = evt.Symbol
+	}
+	balance := orderstore.BalanceSnapshot{
+		Provider:   evt.Provider,
+		Asset:      strings.ToUpper(strings.TrimSpace(payload.Currency)),
+		Total:      payload.Total,
+		Available:  payload.Available,
+		SnapshotAt: timestamp.Unix(),
+		Metadata:   meta,
+	}
+	if err := l.orderStore.UpsertBalance(ctx, balance); err != nil && l.logger != nil {
+		l.logger.Printf("[%s] persist balance: %v", l.id, err)
+	}
+}
+
+func unixPtr(t time.Time) *int64 {
+	if t.IsZero() {
+		return nil
+	}
+	v := t.Unix()
+	return &v
 }
 
 func (l *BaseLambda) buildRiskControlPayload(provider string, err error) schema.RiskControlPayload {

@@ -1,6 +1,8 @@
 GO111MODULE=on
+MIGRATE_BIN ?= migrate
+DATABASE_URL ?= postgresql://localhost:5432/meltica?sslmode=disable
 
-.PHONY: test bench lint vet tidy build build-linux-arm64 clean coverage run
+.PHONY: test bench lint vet tidy build build-linux-arm64 clean coverage run migrate migrate-down
 
 lint:
 	golangci-lint run --config .golangci.yml
@@ -45,3 +47,16 @@ run:
 backtest:
 	go run ./cmd/backtest/main.go --data=./data.csv --strategy=$(STRATEGY)
 
+migrate:
+	@if [ -z "$(DATABASE_URL)" ]; then \
+		echo "DATABASE_URL must be set (e.g. postgresql://localhost:5432/meltica?sslmode=disable)"; \
+		exit 1; \
+	fi
+	$(MIGRATE_BIN) -database "$(DATABASE_URL)" -path db/migrations up
+
+migrate-down:
+	@if [ -z "$(DATABASE_URL)" ]; then \
+		echo "DATABASE_URL must be set (e.g. postgresql://localhost:5432/meltica?sslmode=disable)"; \
+		exit 1; \
+	fi
+	$(MIGRATE_BIN) -database "$(DATABASE_URL)" -path db/migrations down 1

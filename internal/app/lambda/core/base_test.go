@@ -11,7 +11,7 @@ func TestSelectProviderDeterministic(t *testing.T) {
 			"gamma": []string{"BTC-USDT"},
 		},
 	}
-	base := NewBaseLambda("lambda-select", cfg, nil, nil, nil, nil, nil)
+	base := NewBaseLambda("lambda-select", cfg, nil, nil, nil, nil, nil, nil)
 
 	testCases := []struct {
 		seed uint64

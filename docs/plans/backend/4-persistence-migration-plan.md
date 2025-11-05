@@ -17,6 +17,10 @@
 - Event bus (`internal/infra/bus/eventbus/memory.go:22-118`) and provider manager (`internal/app/provider/manager.go:22-99`) rely on atomics, maps, and pools that reset on restart.
 - Strategy assets already persist to disk through `internal/app/lambda/js/loader.go:715-789`, providing a precedent for file-backed durability.
 
+## Migration Environment
+
+- All upgrade runs target the DSN `postgresql://localhost:5432/meltica` using `user=postgres` and `password=root`, and migrations connect through the `pgx` driver to stay aligned with runtime dependencies.
+
 ## Target Architecture
 
 ### Persistence Layer Modules
@@ -48,6 +52,8 @@
 
 ## Implementation Phases
 
+- Migration upgrades will target PostgreSQL via the DSN `postgresql://localhost:5432/meltica` using credentials `user=postgres` and `password=root`, executed through the `pgx` driver to stay aligned with runtime expectations.
+
 1. **Foundations**
    - Add `DatabaseConfig` to config structs and YAML, keeping all connection metadata in configuration files or environment variables rather than in PostgreSQL.
    - Create migration scaffolding (`db/migrations`) and wire `Makefile` targets (`make migrate`, `make migrate-down`).
@@ -57,11 +63,14 @@
    - Define initial migrations covering providers, orders, executions, balances, strategies, and outbox.
    - Generate repository code with `sqlc`; expose interfaces in `internal/domain` or dedicated `internal/app` adapters.
    - Add integration tests using Docker-based Postgres (Testcontainers) under `tests/contract/persistence`.
+   - Introduce domain-level repositories for orders, executions, and balances to decouple `core` from Postgres specifics.
 
 3. **Provider and Strategy State Migration**
    - Replace in-memory provider registry storage with persistence-backed repositories.
    - Snapshot dispatcher routes to `provider_routes` and reload them during start-up to restore state.
+   - Persist cached dispatcher routes on shutdown and prune entries when providers are removed so the database reflects active topology.
    - Persist strategy instance metadata (`lambda` runtime) to `strategy_instances`, ensuring refresh and deletion flows write to both disk and DB.
+   - Rehydrate provider specifications from persisted snapshots during gateway bootstrap before reconciling config-managed providers.
 
 4. **Order Lifecycle Persistence**
    - Refactor `BaseLambda` to write orders and state transitions into `orders` within transactions when calling submit/ack handlers.
@@ -77,6 +86,7 @@
    - Mandate PostgreSQL across all environments and remove the memory driver from runtime builds.
    - Run performance benchmarks, tune indexes, and validate connection pooling.
    - Update operational docs, runbooks, and dashboards to monitor DB metrics and replica lag (if applicable).
+   - Remove reliance on `lambdaManifest` YAML; bootstrap instances from the database/control plane only.
 
 ## Testing and Quality Strategy
 
@@ -104,3 +114,4 @@
 - Evaluate replacing or augmenting the in-memory event bus with a durable message broker once Postgres persistence stabilizes.
 - Design analytics pipelines (PnL, compliance) leveraging the persisted data.
 - Expand auditing with append-only ledgers and immutable history for regulated environments.
+- Update frontend tooling to manage lambda instances via the persisted API (see backend-plan.md upgrade guide).

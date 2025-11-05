@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadMissingFile(t *testing.T) {
@@ -74,15 +75,14 @@ telemetry:
   serviceName: test-service
   otlpInsecure: true
   enableMetrics: false
-lambdaManifest:
-  lambdas:
-    - id: test-lambda
-      scope:
-        binance-spot:
-          symbols:
-            - BTC-USDT
-      strategy:
-        identifier: delay
+database:
+  dsn: postgresql://localhost:5432/meltica?sslmode=disable
+  maxConns: 32
+  minConns: 4
+  maxConnLifetime: 45m
+  maxConnIdleTime: 10m
+  healthCheckPeriod: 1m
+  runMigrations: true
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write temp config: %v", err)
@@ -153,25 +153,33 @@ lambdaManifest:
 		t.Fatalf("expected pool order request queue size 60, got %d", cfg.Pools.OrderRequest.WaitQueueSize)
 	}
 
-	if len(cfg.LambdaManifest.Lambdas) != 1 {
-		t.Fatalf("expected 1 lambda, got %d", len(cfg.LambdaManifest.Lambdas))
-	}
-	manifest := cfg.LambdaManifest.Lambdas[0]
-	if manifest.ID != "test-lambda" {
-		t.Fatalf("unexpected lambda id %s", manifest.ID)
-	}
-	if manifest.Strategy.Identifier != "delay" {
-		t.Fatalf("unexpected strategy identifier %s", manifest.Strategy.Identifier)
-	}
-	if len(manifest.Providers) != 1 || manifest.Providers[0] != "binance-spot" {
-		t.Fatalf("unexpected providers: %+v", manifest.Providers)
-	}
-
 	if cfg.Risk.OrderBurst != 1 {
 		t.Fatalf("expected default order burst 1, got %d", cfg.Risk.OrderBurst)
 	}
 	if cfg.Risk.MaxConcurrentOrders != 0 {
 		t.Fatalf("expected default max concurrent orders 0, got %d", cfg.Risk.MaxConcurrentOrders)
+	}
+
+	if cfg.Database.DSN != "postgresql://localhost:5432/meltica?sslmode=disable" {
+		t.Fatalf("unexpected database DSN %q", cfg.Database.DSN)
+	}
+	if cfg.Database.MaxConns != 32 {
+		t.Fatalf("expected database maxConns 32, got %d", cfg.Database.MaxConns)
+	}
+	if cfg.Database.MinConns != 4 {
+		t.Fatalf("expected database minConns 4, got %d", cfg.Database.MinConns)
+	}
+	if cfg.Database.MaxConnLifetime != 45*time.Minute {
+		t.Fatalf("expected database maxConnLifetime 45m, got %s", cfg.Database.MaxConnLifetime)
+	}
+	if cfg.Database.MaxConnIdleTime != 10*time.Minute {
+		t.Fatalf("expected database maxConnIdleTime 10m, got %s", cfg.Database.MaxConnIdleTime)
+	}
+	if cfg.Database.HealthCheckPeriod != time.Minute {
+		t.Fatalf("expected database healthCheckPeriod 1m, got %s", cfg.Database.HealthCheckPeriod)
+	}
+	if !cfg.Database.RunMigrations {
+		t.Fatalf("expected database runMigrations to be true")
 	}
 }
 
@@ -197,6 +205,62 @@ func TestFanoutWorkersMissing(t *testing.T) {
 	cfg := loadConfigWithFanout(t, "")
 	if workers := cfg.Eventbus.FanoutWorkerCount(); workers != 4 {
 		t.Fatalf("expected missing fanout workers to default to 4, got %d", workers)
+	}
+}
+
+func TestDatabaseDefaultsApplied(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.yaml")
+	yaml := `
+environment: dev
+eventbus:
+  bufferSize: 16
+  fanoutWorkers: 2
+pools:
+  event:
+    size: 32
+  orderRequest:
+    size: 16
+risk:
+  maxPositionSize: "1"
+  maxNotionalValue: "10"
+  notionalCurrency: USD
+  orderThrottle: 1
+apiServer:
+  addr: ":1234"
+telemetry:
+  otlpEndpoint: http://localhost:4318
+  serviceName: svc
+  otlpInsecure: true
+  enableMetrics: true
+lambdaManifest: {}
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	cfg, err := Load(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Database.DSN != "postgresql://localhost:5432/meltica" {
+		t.Fatalf("expected default DSN, got %q", cfg.Database.DSN)
+	}
+	if cfg.Database.MaxConns != 16 {
+		t.Fatalf("expected default maxConns 16, got %d", cfg.Database.MaxConns)
+	}
+	if cfg.Database.MinConns != 1 {
+		t.Fatalf("expected default minConns 1, got %d", cfg.Database.MinConns)
+	}
+	if cfg.Database.MaxConnLifetime != 30*time.Minute {
+		t.Fatalf("expected default maxConnLifetime 30m, got %s", cfg.Database.MaxConnLifetime)
+	}
+	if cfg.Database.MaxConnIdleTime != 5*time.Minute {
+		t.Fatalf("expected default maxConnIdleTime 5m, got %s", cfg.Database.MaxConnIdleTime)
+	}
+	if cfg.Database.HealthCheckPeriod != 30*time.Second {
+		t.Fatalf("expected default healthCheckPeriod 30s, got %s", cfg.Database.HealthCheckPeriod)
 	}
 }
 

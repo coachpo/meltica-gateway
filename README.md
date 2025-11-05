@@ -45,6 +45,7 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
    ```bash
    cp config/app.example.yaml config/app.yaml
    # edit providers, telemetry endpoint, or lambda manifest as needed
+   cp .env.example .env        # optional: provides DATABASE_URL for migrations
    ```
 3. **Run locally**:
    ```bash
@@ -65,8 +66,11 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
 | `make test`                | Run `go test ./... -race -count=1 -timeout=30s` across the module. |
 | `make lint`                | Execute `golangci-lint` with `.golangci.yml`.                      |
 | `make coverage`            | Enforce the ≥70% TS-01 coverage bar and emit `coverage.out`.       |
+| `make migrate`             | Apply all pending database migrations via `golang-migrate`.        |
+| `make migrate-down`        | Roll back the most recent database migration.                      |
 | `make contract-ws-routing` | Run the focused contract suite in `tests/contract/ws-routing`.     |
 | `make bench`               | Launch benchmark runs for hot paths.                               |
+| `sqlc generate`            | Rebuild typed PostgreSQL repositories under `internal/infra/persistence/postgres/sqlc/`. |
 
 ## Observability & Control References
 
@@ -79,6 +83,7 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
 - [`AGENTS.md`](AGENTS.md): Contributor guidelines and coding conventions.
 - [`GEMINI.md`](GEMINI.md): Additional context for Gemini AI agents working inside the repo.
 - [`CLAUDE.md`](CLAUDE.md): Additional context for Claude AI agents working inside the repo.
+- [`docs/development/migrations.md`](docs/development/migrations.md): How to run and create database migrations.
 
 ## License
 

@@ -32,7 +32,7 @@ func loadTestStrategy(t *testing.T, name string) core.TradingStrategy {
 		t.Fatalf("instantiate strategy %q: %v", name, err)
 	}
 
-	base := core.NewBaseLambda("test", core.Config{Providers: []string{"test"}, DryRun: true}, nil, nil, nil, jsStrategy, nil)
+	base := core.NewBaseLambda("test", core.Config{Providers: []string{"test"}, DryRun: true}, nil, nil, nil, jsStrategy, nil, nil)
 	jsStrategy.Attach(base)
 	base.EnableTrading(true)
 	return jsStrategy

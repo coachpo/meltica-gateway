@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coachpo/meltica/internal/app/dispatcher"
+	"github.com/coachpo/meltica/internal/domain/providerstore"
 	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
@@ -59,6 +60,135 @@ func TestSanitizedProviderSpecsRemovesSensitiveFields(t *testing.T) {
 	}
 	if nested["rest_timeout"] != "1s" {
 		t.Fatalf("expected rest_timeout to be retained, got %v", nested["rest_timeout"])
+	}
+}
+
+func TestCreatePersistsProviderSnapshot(t *testing.T) {
+	store := &recordingStore{}
+	manager := NewManager(nil, nil, nil, nil, nil, WithPersistence(store))
+
+	spec := config.ProviderSpec{
+		Name:    "binance",
+		Adapter: "binance",
+		Config: map[string]any{
+			"identifier":    "binance",
+			"provider_name": "binance",
+		},
+	}
+
+	if _, err := manager.Create(context.Background(), spec, false); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	if len(store.saved) == 0 {
+		t.Fatalf("expected snapshot persisted")
+	}
+	snapshot := store.saved[len(store.saved)-1]
+	if snapshot.Name != "binance" {
+		t.Fatalf("expected snapshot name binance, got %s", snapshot.Name)
+	}
+	if snapshot.Status != string(StatusPending) {
+		t.Fatalf("expected pending status, got %s", snapshot.Status)
+	}
+
+	if err := manager.Remove("binance"); err != nil {
+		t.Fatalf("remove provider: %v", err)
+	}
+	if len(store.deleted) == 0 || store.deleted[len(store.deleted)-1] != "binance" {
+		t.Fatalf("expected delete call for binance, got %v", store.deleted)
+	}
+}
+
+func TestRestoreProviderSnapshot(t *testing.T) {
+	store := &recordingStore{}
+	logger := log.New(io.Discard, "", 0)
+	manager := NewManager(nil, nil, nil, dispatcher.NewTable(), logger, WithPersistence(store))
+
+	snapshot := providerstore.Snapshot{
+		Name:    "binance",
+		Adapter: "binance",
+		Config: map[string]any{
+			"identifier":    "binance",
+			"provider_name": "binance",
+		},
+		Status: string(StatusRunning),
+	}
+
+	manager.Restore(snapshot)
+	if !manager.HasProvider("binance") {
+		t.Fatalf("expected restored provider to exist")
+	}
+	if len(store.saved) != 0 {
+		t.Fatalf("restore should not persist snapshot immediately")
+	}
+
+	detail, ok := manager.ProviderMetadataFor("binance")
+	if !ok {
+		t.Fatalf("expected metadata for restored provider")
+	}
+	if detail.Status != StatusStopped {
+		t.Fatalf("expected restored status to normalise to stopped, got %s", detail.Status)
+	}
+	if detail.Running {
+		t.Fatalf("expected restored provider not running")
+	}
+}
+
+func TestStopProviderPersistsRoutes(t *testing.T) {
+	store := &recordingStore{}
+	logger := log.New(io.Discard, "", 0)
+	manager := NewManager(nil, nil, nil, dispatcher.NewTable(), logger, WithPersistence(store))
+
+	spec := config.ProviderSpec{
+		Name:    "binance",
+		Adapter: "binance",
+		Config: map[string]any{
+			"identifier":    "binance",
+			"provider_name": "binance",
+		},
+	}
+
+	if _, err := manager.Create(context.Background(), spec, false); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+
+	manager.mu.Lock()
+	state := manager.states["binance"]
+	state.running = true
+	state.status = StatusRunning
+	state.instance = &testProviderInstance{name: "binance"}
+	state.cachedRoutes = []dispatcher.Route{
+		{
+			Provider: "binance",
+			Type:     schema.RouteTypeTrade,
+			WSTopics: []string{"trade"},
+			RestFns: []dispatcher.RestFn{
+				{
+					Name:     "depth",
+					Endpoint: "/depth",
+					Interval: time.Second,
+					Parser:   "depth",
+				},
+			},
+			Filters: []dispatcher.FilterRule{
+				{Field: "symbol", Op: "eq", Value: "BTCUSDT"},
+			},
+		},
+	}
+	manager.mu.Unlock()
+
+	if _, err := manager.StopProvider("binance"); err != nil {
+		t.Fatalf("stop provider: %v", err)
+	}
+
+	routes := store.savedRoutes["binance"]
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route persisted, got %d", len(routes))
+	}
+	if routes[0].Type != schema.RouteTypeTrade {
+		t.Fatalf("expected route type trade, got %s", routes[0].Type)
+	}
+	if routes[0].RestFns[0].Interval != time.Second {
+		t.Fatalf("expected interval 1s, got %s", routes[0].RestFns[0].Interval)
 	}
 }
 
@@ -190,3 +320,50 @@ func (i *testProviderInstance) SubmitOrder(ctx context.Context, req schema.Order
 func (i *testProviderInstance) SubscribeRoute(route dispatcher.Route) error   { return nil }
 func (i *testProviderInstance) UnsubscribeRoute(route dispatcher.Route) error { return nil }
 func (i *testProviderInstance) Instruments() []schema.Instrument              { return nil }
+
+type recordingStore struct {
+	saved       []providerstore.Snapshot
+	deleted     []string
+	savedRoutes map[string][]providerstore.RouteSnapshot
+	seedRoutes  map[string][]providerstore.RouteSnapshot
+}
+
+func (r *recordingStore) SaveProvider(ctx context.Context, snapshot providerstore.Snapshot) error {
+	r.saved = append(r.saved, snapshot)
+	return nil
+}
+
+func (r *recordingStore) DeleteProvider(ctx context.Context, name string) error {
+	r.deleted = append(r.deleted, name)
+	return nil
+}
+
+func (r *recordingStore) LoadProviders(ctx context.Context) ([]providerstore.Snapshot, error) {
+	return nil, nil
+}
+
+func (r *recordingStore) SaveRoutes(ctx context.Context, provider string, routes []providerstore.RouteSnapshot) error {
+	if r.savedRoutes == nil {
+		r.savedRoutes = make(map[string][]providerstore.RouteSnapshot)
+	}
+	cloned := make([]providerstore.RouteSnapshot, len(routes))
+	copy(cloned, routes)
+	r.savedRoutes[provider] = cloned
+	return nil
+}
+
+func (r *recordingStore) LoadRoutes(ctx context.Context, provider string) ([]providerstore.RouteSnapshot, error) {
+	if r.seedRoutes == nil {
+		return nil, nil
+	}
+	cloned := make([]providerstore.RouteSnapshot, len(r.seedRoutes[provider]))
+	copy(cloned, r.seedRoutes[provider])
+	return cloned, nil
+}
+
+func (r *recordingStore) DeleteRoutes(ctx context.Context, provider string) error {
+	if r.savedRoutes != nil {
+		delete(r.savedRoutes, provider)
+	}
+	return nil
+}

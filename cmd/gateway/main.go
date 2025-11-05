@@ -16,13 +16,18 @@ import (
 	"github.com/coachpo/meltica/internal/app/dispatcher"
 	lambdaruntime "github.com/coachpo/meltica/internal/app/lambda/runtime"
 	"github.com/coachpo/meltica/internal/app/provider"
+	"github.com/coachpo/meltica/internal/domain/orderstore"
+	"github.com/coachpo/meltica/internal/domain/providerstore"
 	"github.com/coachpo/meltica/internal/domain/schema"
+	"github.com/coachpo/meltica/internal/domain/strategystore"
 	"github.com/coachpo/meltica/internal/infra/adapters"
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/config"
+	postgresstore "github.com/coachpo/meltica/internal/infra/persistence/postgres"
 	"github.com/coachpo/meltica/internal/infra/pool"
 	httpserver "github.com/coachpo/meltica/internal/infra/server/http"
 	"github.com/coachpo/meltica/internal/infra/telemetry"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sourcegraph/conc"
 )
 
@@ -38,6 +43,8 @@ const (
 	poolManagerShutdownTimeout   = 5 * time.Second
 	telemetryShutdownTimeout     = 5 * time.Second
 	controlReadHeaderTimeout     = 5 * time.Second
+	databaseConnectTimeout       = 15 * time.Second
+	databaseShutdownTimeout      = 5 * time.Second
 )
 
 func main() {
@@ -54,8 +61,15 @@ func main() {
 	logger.Printf("configuration loaded: env=%s, providers=%d",
 		appCfg.Environment, len(appCfg.Providers))
 
-	logger.Printf("lambda manifest loaded: lambdas=%d", len(appCfg.LambdaManifest.Lambdas))
-	logger.Printf("providers configured: %d", len(appCfg.Providers))
+logger.Printf("providers configured: %d", len(appCfg.Providers))
+
+	dbPool, err := initDatabase(ctx, logger, appCfg.Database)
+	if err != nil {
+		logger.Fatalf("connect database: %v", err)
+	}
+	providerStore := postgresstore.NewProviderStore(dbPool)
+	strategyStore := postgresstore.NewStrategyStore(dbPool)
+	orderStore := postgresstore.NewOrderStore(dbPool)
 
 	telemetryProvider, err := initTelemetry(ctx, logger, appCfg)
 	if err != nil {
@@ -72,20 +86,20 @@ func main() {
 	bus := newEventBus(appCfg.Eventbus, poolMgr)
 
 	table := dispatcher.NewTable()
-	providerManager, err := initProviders(ctx, logger, appCfg, poolMgr, table, bus)
+	providerManager, err := initProviders(ctx, logger, appCfg, poolMgr, table, bus, providerStore)
 	if err != nil {
 		logger.Fatalf("initialise providers: %v", err)
 	}
 
 	registrar := dispatcher.NewRegistrar(table, providerManager)
 
-	lambdaManager, err := startLambdaManager(ctx, appCfg, bus, poolMgr, providerManager, registrar, logger)
+	lambdaManager, err := startLambdaManager(ctx, appCfg, bus, poolMgr, providerManager, registrar, logger, strategyStore, orderStore)
 	if err != nil {
 		logger.Fatalf("initialise lambdas: %v", err)
 	}
 	logger.Printf("strategy instances registered: %d", len(lambdaManager.Instances()))
 
-	apiServer := buildAPIServer(appCfg, lambdaManager, providerManager)
+	apiServer := buildAPIServer(appCfg, lambdaManager, providerManager, orderStore)
 	startAPIServer(&lifecycle, logger, apiServer)
 	logger.Printf("control API listening on %s", apiServer.Addr)
 
@@ -104,6 +118,7 @@ func main() {
 		dataBus:    bus,
 		poolMgr:    poolMgr,
 		telemetry:  telemetryProvider,
+		dbPool:     dbPool,
 	})
 
 	logger.Printf("shutdown completed in %v", time.Since(shutdownStart))
@@ -148,6 +163,41 @@ func initTelemetry(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 	return provider, nil
 }
 
+func initDatabase(ctx context.Context, logger *log.Logger, dbCfg config.DatabaseConfig) (*pgxpool.Pool, error) {
+	poolCfg, err := pgxpool.ParseConfig(dbCfg.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("parse database dsn: %w", err)
+	}
+
+	poolCfg.MaxConns = dbCfg.MaxConns
+	poolCfg.MinConns = dbCfg.MinConns
+	poolCfg.MaxConnLifetime = dbCfg.MaxConnLifetime
+	poolCfg.MaxConnIdleTime = dbCfg.MaxConnIdleTime
+	poolCfg.HealthCheckPeriod = dbCfg.HealthCheckPeriod
+	poolCfg.ConnConfig.ConnectTimeout = databaseConnectTimeout
+
+	connectCtx, cancel := context.WithTimeout(ctx, databaseConnectTimeout)
+	defer cancel()
+
+	pool, err := pgxpool.NewWithConfig(connectCtx, poolCfg)
+	if err != nil {
+		return nil, fmt.Errorf("create database pool: %w", err)
+	}
+
+	pingCtx, pingCancel := context.WithTimeout(ctx, databaseConnectTimeout)
+	defer pingCancel()
+
+	if err := pool.Ping(pingCtx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("database ping: %w", err)
+	}
+
+	logger.Printf("database connected: maxConns=%d minConns=%d runMigrations=%t",
+		poolCfg.MaxConns, poolCfg.MinConns, dbCfg.RunMigrations)
+
+	return pool, nil
+}
+
 func buildPoolManager(cfg config.PoolConfig) (*pool.PoolManager, error) {
 	manager := pool.NewPoolManager()
 	eventQueueSize := cfg.Event.QueueSize()
@@ -169,20 +219,35 @@ func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager) eventbus.Bu
 	})
 }
 
-func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppConfig, poolMgr *pool.PoolManager, table *dispatcher.Table, bus eventbus.Bus) (*provider.Manager, error) {
+func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppConfig, poolMgr *pool.PoolManager, table *dispatcher.Table, bus eventbus.Bus, store providerstore.Store) (*provider.Manager, error) {
 	registry := provider.NewRegistry()
 	adapters.RegisterAll(registry)
 
-	manager := provider.NewManager(registry, poolMgr, bus, table, logger)
+	opts := []provider.Option{}
+	if store != nil {
+		opts = append(opts, provider.WithPersistence(store))
+	}
+	manager := provider.NewManager(registry, poolMgr, bus, table, logger, opts...)
 	manager.SetLifecycleContext(ctx)
+	restoreProviderSnapshots(ctx, logger, store, manager)
 	specs, err := config.BuildProviderSpecs(appCfg.Providers)
 	if err != nil {
 		return nil, fmt.Errorf("build provider specs: %w", err)
 	}
-	if len(specs) > 0 {
-		if _, err := manager.Start(ctx, specs); err != nil {
-			return nil, fmt.Errorf("start providers: %w", err)
+	started := 0
+	for _, spec := range specs {
+		if manager.HasProvider(spec.Name) {
+			if _, err := manager.Update(ctx, spec, true); err != nil {
+				return nil, fmt.Errorf("update provider %s: %w", spec.Name, err)
+			}
+		} else {
+			if _, err := manager.Create(ctx, spec, true); err != nil {
+				return nil, fmt.Errorf("create provider %s: %w", spec.Name, err)
+			}
 		}
+		started++
+	}
+	if started > 0 {
 		logger.Printf("providers started: %d", len(manager.Providers()))
 	} else {
 		logger.Printf("no providers configured; skipping provider startup")
@@ -191,20 +256,65 @@ func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppCon
 	return manager, nil
 }
 
-func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger) (*lambdaruntime.Manager, error) {
-	manager, err := lambdaruntime.NewManager(appCfg, bus, poolMgr, providers, logger, registrar)
+func restoreProviderSnapshots(ctx context.Context, logger *log.Logger, store providerstore.Store, manager *provider.Manager) {
+	if store == nil || manager == nil {
+		return
+	}
+	snapshots, err := store.LoadProviders(ctx)
+	if err != nil {
+		if logger != nil {
+			logger.Printf("provider persistence load failed: %v", err)
+		}
+		return
+	}
+	if len(snapshots) == 0 {
+		return
+	}
+	for _, snapshot := range snapshots {
+		manager.Restore(snapshot)
+	}
+	if logger != nil {
+		logger.Printf("provider snapshots restored: %d", len(snapshots))
+	}
+}
+
+func restoreStrategySnapshots(ctx context.Context, logger *log.Logger, store strategystore.Store, manager *lambdaruntime.Manager) {
+	if store == nil || manager == nil {
+		return
+	}
+	snapshots, err := store.Load(ctx)
+	if err != nil {
+		if logger != nil {
+			logger.Printf("strategy persistence load failed: %v", err)
+		}
+		return
+	}
+	if len(snapshots) == 0 {
+		return
+	}
+	for _, snapshot := range snapshots {
+		manager.RestoreSnapshot(ctx, snapshot)
+	}
+	if logger != nil {
+		logger.Printf("strategy snapshots restored: %d", len(snapshots))
+	}
+}
+
+func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventbus.Bus, poolMgr *pool.PoolManager, providers *provider.Manager, registrar lambdaruntime.RouteRegistrar, logger *log.Logger, strategyStore strategystore.Store, orderStore orderstore.Store) (*lambdaruntime.Manager, error) {
+	manager, err := lambdaruntime.NewManager(appCfg, bus, poolMgr, providers, logger, registrar,
+		lambdaruntime.WithStrategyStore(strategyStore),
+		lambdaruntime.WithOrderStore(orderStore),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("init lambda manager: %w", err)
 	}
 	manager.SetLifecycleContext(ctx)
-	if err := manager.StartFromManifest(appCfg.LambdaManifest); err != nil {
-		return nil, fmt.Errorf("start manifest lambdas: %w", err)
-	}
+	restoreStrategySnapshots(ctx, logger, strategyStore, manager)
 	return manager, nil
 }
 
-func buildAPIServer(appCfg config.AppConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager) *http.Server {
-	handler := httpserver.NewHandler(appCfg, lambdaManager, providerManager)
+func buildAPIServer(appCfg config.AppConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager, orderStore orderstore.Store) *http.Server {
+	handler := httpserver.NewHandler(appCfg, lambdaManager, providerManager, orderStore)
 
 	return &http.Server{
 		Addr:                         appCfg.APIServer.Addr,
@@ -241,6 +351,7 @@ type gracefulShutdownConfig struct {
 	dataBus    eventbus.Bus
 	poolMgr    *pool.PoolManager
 	telemetry  *telemetry.Provider
+	dbPool     *pgxpool.Pool
 }
 
 func performGracefulShutdown(ctx context.Context, logger *log.Logger, cfg gracefulShutdownConfig) {
@@ -307,6 +418,13 @@ func performGracefulShutdown(ctx context.Context, logger *log.Logger, cfg gracef
 	if cfg.telemetry != nil {
 		shutdownStep("shutting down telemetry", telemetryShutdownTimeout, func(stepCtx context.Context) error {
 			return cfg.telemetry.Shutdown(stepCtx)
+		})
+	}
+
+	if cfg.dbPool != nil {
+		shutdownStep("closing database pool", databaseShutdownTimeout, func(context.Context) error {
+			cfg.dbPool.Close()
+			return nil
 		})
 	}
 }

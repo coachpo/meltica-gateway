@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/coachpo/meltica/internal/app/dispatcher"
+	"github.com/coachpo/meltica/internal/domain/providerstore"
 	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/infra/adapters/shared"
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
@@ -31,7 +32,18 @@ type Manager struct {
 	lifecycleMu  sync.RWMutex
 	lifecycleCtx context.Context
 
-	states map[string]*providerState
+	persistence providerstore.Store
+	states      map[string]*providerState
+}
+
+// Option configures optional manager behaviour.
+type Option func(*Manager)
+
+// WithPersistence wires a provider persistence store into the manager.
+func WithPersistence(store providerstore.Store) Option {
+	return func(m *Manager) {
+		m.persistence = store
+	}
 }
 
 type providerState struct {
@@ -43,6 +55,23 @@ type providerState struct {
 	running       bool
 	status        Status
 	startupErr    error
+}
+
+func statusFromString(value string) Status {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(StatusPending):
+		return StatusPending
+	case string(StatusStarting):
+		return StatusStarting
+	case string(StatusRunning):
+		return StatusRunning
+	case string(StatusStopped):
+		return StatusStopped
+	case string(StatusFailed):
+		return StatusFailed
+	default:
+		return StatusPending
+	}
 }
 
 // Status represents the lifecycle state of a provider.
@@ -75,7 +104,7 @@ var (
 )
 
 // NewManager creates a new provider manager.
-func NewManager(reg *Registry, pools *pool.PoolManager, bus eventbus.Bus, table *dispatcher.Table, logger *log.Logger) *Manager {
+func NewManager(reg *Registry, pools *pool.PoolManager, bus eventbus.Bus, table *dispatcher.Table, logger *log.Logger, opts ...Option) *Manager {
 	if reg == nil {
 		reg = NewRegistry()
 	}
@@ -85,7 +114,7 @@ func NewManager(reg *Registry, pools *pool.PoolManager, bus eventbus.Bus, table 
 	if table == nil {
 		table = dispatcher.NewTable()
 	}
-	return &Manager{
+	manager := &Manager{
 		mu:           sync.RWMutex{},
 		registry:     reg,
 		pools:        pools,
@@ -95,7 +124,14 @@ func NewManager(reg *Registry, pools *pool.PoolManager, bus eventbus.Bus, table 
 		lifecycleMu:  sync.RWMutex{},
 		lifecycleCtx: context.Background(),
 		states:       make(map[string]*providerState),
+		persistence:  nil,
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(manager)
+		}
+	}
+	return manager
 }
 
 // SetLifecycleContext configures the parent context for provider lifecycles.
@@ -121,6 +157,18 @@ func (m *Manager) parentContext() context.Context {
 // Registry exposes the underlying factory registry.
 func (m *Manager) Registry() *Registry {
 	return m.registry
+}
+
+// HasProvider reports whether a provider with the given name has been registered.
+func (m *Manager) HasProvider(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return false
+	}
+	m.mu.RLock()
+	_, ok := m.states[trimmed]
+	m.mu.RUnlock()
+	return ok
 }
 
 // Start constructs all providers from the supplied specifications.
@@ -165,11 +213,15 @@ func (m *Manager) Create(ctx context.Context, spec config.ProviderSpec, start bo
 	m.states[spec.Name] = state
 	m.mu.Unlock()
 
+	m.persistSnapshot(spec.Name)
+
 	if start {
 		if _, err := m.StartProvider(ctx, spec.Name); err != nil {
 			m.mu.Lock()
 			delete(m.states, spec.Name)
 			m.mu.Unlock()
+			m.deleteSnapshot(spec.Name)
+			m.deleteRoutes(spec.Name)
 			return empty, err
 		}
 	}
@@ -211,6 +263,11 @@ func (m *Manager) Update(ctx context.Context, spec config.ProviderSpec, start bo
 	}
 	state.spec = spec
 	m.mu.Unlock()
+	if wasRunning {
+		m.persistRoutes(spec.Name)
+	}
+
+	m.persistSnapshot(spec.Name)
 
 	if start {
 		if _, err := m.StartProvider(ctx, spec.Name); err != nil {
@@ -241,6 +298,9 @@ func (m *Manager) Remove(name string) error {
 	m.stopProviderLocked(state)
 	delete(m.states, trimmed)
 	m.mu.Unlock()
+
+	m.deleteSnapshot(trimmed)
+	m.deleteRoutes(trimmed)
 	return nil
 }
 
@@ -321,6 +381,9 @@ func (m *Manager) StopProvider(name string) (RuntimeDetail, error) {
 	}
 	m.stopProviderLocked(state)
 	m.mu.Unlock()
+
+	m.persistSnapshot(trimmed)
+	m.persistRoutes(trimmed)
 	detail, ok := m.ProviderMetadataFor(trimmed)
 	if !ok {
 		return empty, fmt.Errorf("%w: %s", ErrProviderNotFound, trimmed)
@@ -383,6 +446,7 @@ func (m *Manager) prepareProviderStart(name string) (config.ProviderSpec, []disp
 	spec := state.spec
 	cachedRoutes := cloneRoutes(state.cachedRoutes)
 	m.mu.Unlock()
+	m.persistSnapshot(name)
 	return spec, cachedRoutes, nil
 }
 
@@ -398,6 +462,7 @@ func (m *Manager) recordProviderStartFailure(name string, startErr error) {
 		state.startupErr = startErr
 	}
 	m.mu.Unlock()
+	m.persistSnapshot(name)
 }
 
 func (m *Manager) recordProviderStartSuccess(name string, cancel context.CancelFunc, instance Instance, subscriptions *shared.SubscriptionManager) bool {
@@ -412,6 +477,9 @@ func (m *Manager) recordProviderStartSuccess(name string, cancel context.CancelF
 		state.startupErr = nil
 	}
 	m.mu.Unlock()
+	if ok {
+		m.persistSnapshot(name)
+	}
 	return ok
 }
 
@@ -505,6 +573,223 @@ func cloneConfigMap(cfg map[string]any) map[string]any {
 		clone[k] = v
 	}
 	return clone
+}
+
+func (m *Manager) snapshotFor(name string) (providerstore.Snapshot, bool) {
+	m.mu.RLock()
+	state, ok := m.states[name]
+	if !ok {
+		m.mu.RUnlock()
+		var empty providerstore.Snapshot
+		return empty, false
+	}
+	snapshot := providerstore.Snapshot{
+		Name:        state.spec.Name,
+		DisplayName: state.spec.Name,
+		Adapter:     state.spec.Adapter,
+		Config:      cloneConfigMap(state.spec.Config),
+		Status:      string(state.status),
+		Metadata:    nil,
+	}
+	m.mu.RUnlock()
+	return snapshot, true
+}
+
+func (m *Manager) persistSnapshot(name string) {
+	if m.persistence == nil {
+		return
+	}
+	snapshot, ok := m.snapshotFor(name)
+	if !ok {
+		return
+	}
+	ctx := m.parentContext()
+	if err := m.persistence.SaveProvider(ctx, snapshot); err != nil && m.logger != nil {
+		m.logger.Printf("provider/%s: persist state failed: %v", name, err)
+	}
+}
+
+func (m *Manager) deleteSnapshot(name string) {
+	if m.persistence == nil {
+		return
+	}
+	ctx := m.parentContext()
+	if err := m.persistence.DeleteProvider(ctx, name); err != nil && m.logger != nil {
+		m.logger.Printf("provider/%s: delete persisted state failed: %v", name, err)
+	}
+}
+
+// Restore primes the manager with a snapshot loaded from persistence without starting the provider.
+func (m *Manager) Restore(snapshot providerstore.Snapshot) {
+	name := strings.TrimSpace(snapshot.Name)
+	if name == "" {
+		return
+	}
+	spec := config.ProviderSpec{
+		Name:    name,
+		Adapter: strings.TrimSpace(snapshot.Adapter),
+		Config:  cloneConfigMap(snapshot.Config),
+	}
+	status := statusFromString(snapshot.Status)
+	m.mu.Lock()
+	if _, exists := m.states[name]; exists {
+		m.mu.Unlock()
+		return
+	}
+	m.states[name] = &providerState{
+		spec:          spec,
+		instance:      nil,
+		subscriptions: nil,
+		cancel:        nil,
+		cachedRoutes:  nil,
+		running:       false,
+		status:        normalizeRestoredStatus(status),
+		startupErr:    nil,
+	}
+	m.mu.Unlock()
+	m.loadRoutes(name)
+}
+
+func normalizeRestoredStatus(status Status) Status {
+	switch status {
+	case StatusPending:
+		return StatusPending
+	case StatusRunning:
+		return StatusStopped
+	case StatusStarting:
+		return StatusStopped
+	case StatusStopped:
+		return StatusStopped
+	case StatusFailed:
+		return StatusFailed
+	}
+	return StatusPending
+}
+
+func (m *Manager) persistRoutes(name string) {
+	if m.persistence == nil {
+		return
+	}
+	routes, ok := m.routeSnapshots(name)
+	if !ok {
+		return
+	}
+	ctx := m.parentContext()
+	if err := m.persistence.SaveRoutes(ctx, name, routes); err != nil && m.logger != nil {
+		m.logger.Printf("provider/%s: persist routes failed: %v", name, err)
+	}
+}
+
+func (m *Manager) deleteRoutes(name string) {
+	if m.persistence == nil {
+		return
+	}
+	ctx := m.parentContext()
+	if err := m.persistence.DeleteRoutes(ctx, name); err != nil && m.logger != nil {
+		m.logger.Printf("provider/%s: delete routes failed: %v", name, err)
+	}
+}
+
+func (m *Manager) loadRoutes(name string) {
+	if m.persistence == nil {
+		return
+	}
+	ctx := m.parentContext()
+	snapshots, err := m.persistence.LoadRoutes(ctx, name)
+	if err != nil {
+		if m.logger != nil {
+			m.logger.Printf("provider/%s: load routes failed: %v", name, err)
+		}
+		return
+	}
+	if len(snapshots) == 0 {
+		return
+	}
+	routes := dispatcherRoutesFromSnapshots(name, snapshots)
+	m.mu.Lock()
+	if state, ok := m.states[name]; ok {
+		state.cachedRoutes = routes
+	}
+	m.mu.Unlock()
+}
+
+func (m *Manager) routeSnapshots(name string) ([]providerstore.RouteSnapshot, bool) {
+	m.mu.RLock()
+	state, ok := m.states[name]
+	var routes []dispatcher.Route
+	if ok {
+		routes = cloneRoutes(state.cachedRoutes)
+	}
+	m.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	return routeSnapshotsFromRoutes(routes), true
+}
+
+func routeSnapshotsFromRoutes(routes []dispatcher.Route) []providerstore.RouteSnapshot {
+	if len(routes) == 0 {
+		return nil
+	}
+	out := make([]providerstore.RouteSnapshot, 0, len(routes))
+	for _, route := range routes {
+		snapshot := providerstore.RouteSnapshot{
+			Type:     route.Type,
+			WSTopics: append([]string(nil), route.WSTopics...),
+			RestFns:  make([]providerstore.RouteRestFn, len(route.RestFns)),
+			Filters:  make([]providerstore.RouteFilter, len(route.Filters)),
+		}
+		for i, fn := range route.RestFns {
+			snapshot.RestFns[i] = providerstore.RouteRestFn{
+				Name:     fn.Name,
+				Endpoint: fn.Endpoint,
+				Interval: fn.Interval,
+				Parser:   fn.Parser,
+			}
+		}
+		for i, filter := range route.Filters {
+			snapshot.Filters[i] = providerstore.RouteFilter{
+				Field: filter.Field,
+				Op:    filter.Op,
+				Value: filter.Value,
+			}
+		}
+		out = append(out, snapshot)
+	}
+	return out
+}
+
+func dispatcherRoutesFromSnapshots(provider string, snapshots []providerstore.RouteSnapshot) []dispatcher.Route {
+	if len(snapshots) == 0 {
+		return nil
+	}
+	out := make([]dispatcher.Route, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		route := dispatcher.Route{
+			Provider: provider,
+			Type:     schema.NormalizeRouteType(snapshot.Type),
+			WSTopics: append([]string(nil), snapshot.WSTopics...),
+			RestFns:  make([]dispatcher.RestFn, len(snapshot.RestFns)),
+			Filters:  make([]dispatcher.FilterRule, len(snapshot.Filters)),
+		}
+		for i, fn := range snapshot.RestFns {
+			route.RestFns[i] = dispatcher.RestFn{
+				Name:     fn.Name,
+				Endpoint: fn.Endpoint,
+				Interval: fn.Interval,
+				Parser:   fn.Parser,
+			}
+		}
+		for i, filter := range snapshot.Filters {
+			route.Filters[i] = dispatcher.FilterRule{
+				Field: filter.Field,
+				Op:    filter.Op,
+				Value: filter.Value,
+			}
+		}
+		out = append(out, route)
+	}
+	return out
 }
 
 // Providers returns a copy of the provider map.

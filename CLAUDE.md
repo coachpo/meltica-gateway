@@ -81,7 +81,6 @@ All event handlers must return pooled objects via `pool.Put()` to avoid leaks.
 - `pools`: Event and OrderRequest pool capacities
 - `apiServer`: Control API bind address (default `:8880`)
 - `telemetry`: OTLP endpoint, service name, and enable flags
-- `lambdaManifest`: Inline lambda definitions materialized at startup
 
 **Example workflow:**
 ```bash

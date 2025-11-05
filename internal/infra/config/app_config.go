@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -159,6 +160,67 @@ type StrategiesConfig struct {
 	RequireRegistry bool   `yaml:"requireRegistry"`
 }
 
+// DatabaseConfig controls PostgreSQL connectivity and migration behaviour.
+type DatabaseConfig struct {
+	DSN               string        `yaml:"dsn"`
+	MaxConns          int32         `yaml:"maxConns"`
+	MinConns          int32         `yaml:"minConns"`
+	MaxConnLifetime   time.Duration `yaml:"maxConnLifetime"`
+	MaxConnIdleTime   time.Duration `yaml:"maxConnIdleTime"`
+	HealthCheckPeriod time.Duration `yaml:"healthCheckPeriod"`
+	RunMigrations     bool          `yaml:"runMigrations"`
+}
+
+func (c *DatabaseConfig) applyDefaults() {
+	c.DSN = strings.TrimSpace(c.DSN)
+	if c.DSN == "" {
+		c.DSN = "postgresql://localhost:5432/meltica"
+	}
+	if c.MaxConns <= 0 {
+		c.MaxConns = 16
+	}
+	if c.MinConns <= 0 {
+		c.MinConns = 1
+	}
+	if c.MinConns > c.MaxConns {
+		c.MinConns = c.MaxConns
+	}
+	if c.MaxConnLifetime <= 0 {
+		c.MaxConnLifetime = 30 * time.Minute
+	}
+	if c.MaxConnIdleTime <= 0 {
+		c.MaxConnIdleTime = 5 * time.Minute
+	}
+	if c.HealthCheckPeriod <= 0 {
+		c.HealthCheckPeriod = 30 * time.Second
+	}
+}
+
+func (c DatabaseConfig) validate() error {
+	if strings.TrimSpace(c.DSN) == "" {
+		return fmt.Errorf("dsn required")
+	}
+	if c.MaxConns <= 0 {
+		return fmt.Errorf("maxConns must be >0")
+	}
+	if c.MinConns < 0 {
+		return fmt.Errorf("minConns must be >=0")
+	}
+	if c.MinConns > c.MaxConns {
+		return fmt.Errorf("minConns must be <= maxConns")
+	}
+	if c.MaxConnLifetime <= 0 {
+		return fmt.Errorf("maxConnLifetime must be >0")
+	}
+	if c.MaxConnIdleTime <= 0 {
+		return fmt.Errorf("maxConnIdleTime must be >0")
+	}
+	if c.HealthCheckPeriod <= 0 {
+		return fmt.Errorf("healthCheckPeriod must be >0")
+	}
+	return nil
+}
+
 // AppConfig is the unified Meltica application configuration sourced from YAML.
 type AppConfig struct {
 	Environment    Environment                 `yaml:"environment"`
@@ -169,7 +231,7 @@ type AppConfig struct {
 	APIServer      APIServerConfig             `yaml:"apiServer"`
 	Telemetry      TelemetryConfig             `yaml:"telemetry"`
 	Strategies     StrategiesConfig            `yaml:"strategies"`
-	LambdaManifest LambdaManifest              `yaml:"lambdaManifest"`
+	Database       DatabaseConfig              `yaml:"database"`
 }
 
 func defaultRiskConfig() RiskConfig {
@@ -296,6 +358,9 @@ func (c *AppConfig) normalise() error {
 		}
 		c.Risk.AllowedOrderTypes = normalized
 	}
+
+	c.Database.applyDefaults()
+
 	return nil
 }
 
@@ -369,8 +434,8 @@ func (c AppConfig) Validate() error {
 		return fmt.Errorf("strategies directory required")
 	}
 
-	if err := c.LambdaManifest.Validate(); err != nil {
-		return fmt.Errorf("lambda manifest: %w", err)
+	if err := c.Database.validate(); err != nil {
+		return fmt.Errorf("database: %w", err)
 	}
 
 	return nil

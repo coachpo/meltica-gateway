@@ -90,6 +90,7 @@ func main() {
 		nil,
 		jsStrategy,
 		nil,
+		nil,
 	)
 	jsStrategy.Attach(base)
 	base.EnableTrading(true)

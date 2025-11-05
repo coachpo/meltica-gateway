@@ -20,6 +20,7 @@ import (
 	"github.com/coachpo/meltica/internal/app/lambda/js"
 	lambdaruntime "github.com/coachpo/meltica/internal/app/lambda/runtime"
 	"github.com/coachpo/meltica/internal/app/provider"
+	"github.com/coachpo/meltica/internal/domain/orderstore"
 	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/config"
@@ -142,29 +143,23 @@ func TestBuildContextBackup(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 
-	manifest := config.LambdaManifest{
-		Lambdas: []config.LambdaSpec{
-			{
-				ID:       "alpha",
-				Strategy: config.LambdaStrategySpec{Identifier: "logging", Config: map[string]any{}},
-				ProviderSymbols: map[string]config.ProviderSymbols{
-					"binance": {
-						Symbols: []string{"BTC-USDT"},
-					},
-				},
-			},
+	lambdaSpec := config.LambdaSpec{
+		ID:        "alpha",
+		Strategy:  config.LambdaStrategySpec{Identifier: "logging", Config: map[string]any{}},
+		Providers: []string{"binance"},
+		ProviderSymbols: map[string]config.ProviderSymbols{
+			"binance": {Symbols: []string{"BTC-USDT"}},
 		},
 	}
-
-	if err := lambdaManager.StartFromManifest(manifest); err != nil {
-		t.Fatalf("StartFromManifest failed: %v", err)
+	if _, err := lambdaManager.Create(lambdaSpec); err != nil {
+		t.Fatalf("Create lambda spec: %v", err)
 	}
 
 	server := &httpServer{
 		manager:       lambdaManager,
 		providers:     providerManager,
+		orderStore:    nil,
 		baseProviders: map[string]struct{}{},
-		baseLambdas:   map[string]struct{}{},
 	}
 
 	snapshot := server.buildContextBackup()
@@ -289,8 +284,8 @@ func TestApplyContextBackupRestoresState(t *testing.T) {
 	server := &httpServer{
 		manager:       lambdaManager,
 		providers:     providerManager,
+		orderStore:    nil,
 		baseProviders: map[string]struct{}{},
-		baseLambdas:   map[string]struct{}{},
 	}
 
 	payload := contextBackup{
@@ -473,8 +468,8 @@ func TestHandleProviderDeleteBlockedWhenInUse(t *testing.T) {
 	server := &httpServer{
 		manager:       lambdaManager,
 		providers:     providerManager,
+		orderStore:    nil,
 		baseProviders: map[string]struct{}{},
-		baseLambdas:   map[string]struct{}{},
 	}
 
 	providerSpec := config.ProviderSpec{
@@ -496,8 +491,8 @@ func TestHandleProviderDeleteBlockedWhenInUse(t *testing.T) {
 			"binance": {Symbols: []string{"BTC-USDT"}},
 		},
 	}
-	if err := lambdaManager.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{lambdaSpec}}); err != nil {
-		t.Fatalf("start manifest: %v", err)
+	if _, err := lambdaManager.Create(lambdaSpec); err != nil {
+		t.Fatalf("create lambda: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodDelete, "/providers/binance", nil)
@@ -584,8 +579,8 @@ func TestProviderUsageInfersProvidersFromScope(t *testing.T) {
 			"binance": {Symbols: []string{"BTC-USDT"}},
 		},
 	}
-	if err := lambdaManager.StartFromManifest(config.LambdaManifest{Lambdas: []config.LambdaSpec{lambdaSpec}}); err != nil {
-		t.Fatalf("start manifest: %v", err)
+	if _, err := lambdaManager.Create(lambdaSpec); err != nil {
+		t.Fatalf("create lambda: %v", err)
 	}
 
 	// Simulate a summary with no providers while scope is populated.
@@ -607,8 +602,8 @@ func TestProviderUsageInfersProvidersFromScope(t *testing.T) {
 	server := &httpServer{
 		manager:       lambdaManager,
 		providers:     providerManager,
+		orderStore:    nil,
 		baseProviders: map[string]struct{}{},
-		baseLambdas:   map[string]struct{}{},
 	}
 
 	summaries := lambdaManager.Instances()
@@ -655,8 +650,8 @@ func TestCreateProviderRespondsAcceptedPending(t *testing.T) {
 
 	server := &httpServer{
 		providers:     providerManager,
+		orderStore:    nil,
 		baseProviders: map[string]struct{}{},
-		baseLambdas:   map[string]struct{}{},
 	}
 
 	body := `{"name":"stub","adapter":{"identifier":"stub","config":{}},"enabled":true}`
@@ -735,8 +730,8 @@ func TestStartProviderActionReturnsAccepted(t *testing.T) {
 
 	server := &httpServer{
 		providers:     providerManager,
+		orderStore:    nil,
 		baseProviders: map[string]struct{}{},
-		baseLambdas:   map[string]struct{}{},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/providers/stub/start", nil)
@@ -777,6 +772,145 @@ func TestStartProviderActionReturnsAccepted(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("expected provider to transition to running state")
+}
+
+func TestInstanceOrdersEndpointReturnsRecords(t *testing.T) {
+	store := &stubOrderStore{
+		orders: []orderstore.OrderRecord{
+			{
+				Order: orderstore.Order{
+					ID:               "ord-1",
+					Provider:         "binance",
+					StrategyInstance: "demo",
+					ClientOrderID:    "ord-1",
+					Symbol:           "BTC-USDT",
+					Side:             "BUY",
+					Type:             "LIMIT",
+					Quantity:         "1.000",
+					Price:            strPtr("21000"),
+					State:            "ACK",
+					PlacedAt:         1_700_000_000,
+					Metadata:         map[string]any{"note": "test"},
+				},
+				AcknowledgedAt: strInt64Ptr(1_700_000_001),
+				CreatedAt:      1_700_000_000,
+				UpdatedAt:      1_700_000_010,
+			},
+		},
+	}
+	handler := NewHandler(config.AppConfig{}, nil, nil, store)
+
+	req := httptest.NewRequest(http.MethodGet, "/strategy/instances/demo/orders?limit=9999", nil)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+
+	var payload struct {
+		Orders []orderstore.OrderRecord `json:"orders"`
+		Count  int                      `json:"count"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Count != 1 {
+		t.Fatalf("expected count 1, got %d", payload.Count)
+	}
+	if len(payload.Orders) != 1 || payload.Orders[0].Order.ID != "ord-1" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestInstanceOrdersEndpointInvalidLimit(t *testing.T) {
+	handler := NewHandler(config.AppConfig{}, nil, nil, &stubOrderStore{})
+	req := httptest.NewRequest(http.MethodGet, "/strategy/instances/demo/orders?limit=bogus", nil)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", res.Code)
+	}
+}
+
+func TestProviderBalancesEndpointReturnsRecords(t *testing.T) {
+	store := &stubOrderStore{
+		balances: []orderstore.BalanceRecord{
+			{
+				BalanceSnapshot: orderstore.BalanceSnapshot{
+					Provider:   "binance",
+					Asset:      "USDT",
+					Total:      "1000",
+					Available:  "500",
+					SnapshotAt: 1_700_000_000,
+					Metadata:   map[string]any{"note": "snapshot"},
+				},
+				CreatedAt: 1_700_000_000,
+				UpdatedAt: 1_700_000_100,
+			},
+		},
+	}
+	handler := NewHandler(config.AppConfig{}, nil, nil, store)
+
+	req := httptest.NewRequest(http.MethodGet, "/providers/binance/balances", nil)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+
+	var payload struct {
+		Balances []orderstore.BalanceRecord `json:"balances"`
+		Count    int                        `json:"count"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Count != 1 || len(payload.Balances) != 1 {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+	if payload.Balances[0].BalanceSnapshot.Provider != "binance" {
+		t.Fatalf("unexpected provider in payload: %#v", payload.Balances[0])
+	}
+}
+
+type stubOrderStore struct {
+	orders     []orderstore.OrderRecord
+	executions []orderstore.ExecutionRecord
+	balances   []orderstore.BalanceRecord
+}
+
+func (s *stubOrderStore) CreateOrder(context.Context, orderstore.Order) error             { return nil }
+func (s *stubOrderStore) UpdateOrder(context.Context, orderstore.OrderUpdate) error       { return nil }
+func (s *stubOrderStore) RecordExecution(context.Context, orderstore.Execution) error     { return nil }
+func (s *stubOrderStore) UpsertBalance(context.Context, orderstore.BalanceSnapshot) error { return nil }
+func (s *stubOrderStore) WithTransaction(ctx context.Context, fn func(context.Context, orderstore.Tx) error) error {
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, s)
+}
+func (s *stubOrderStore) ListOrders(context.Context, orderstore.OrderQuery) ([]orderstore.OrderRecord, error) {
+	return s.orders, nil
+}
+func (s *stubOrderStore) ListExecutions(context.Context, orderstore.ExecutionQuery) ([]orderstore.ExecutionRecord, error) {
+	return s.executions, nil
+}
+func (s *stubOrderStore) ListBalances(context.Context, orderstore.BalanceQuery) ([]orderstore.BalanceRecord, error) {
+	return s.balances, nil
+}
+
+func strPtr(value string) *string {
+	return &value
+}
+
+func strInt64Ptr(value int64) *int64 {
+	return &value
 }
 
 type ioDiscards struct{}

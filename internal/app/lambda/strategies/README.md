@@ -15,7 +15,7 @@ A no-operation strategy that does nothing. Useful for:
 **Usage:**
 ```go
 strategy := &strategies.NoOp{}
-lambda := core.NewBaseLambda(id, config, bus, control, provider, pools, strategy)
+lambda := core.NewBaseLambda(id, config, bus, control, provider, pools, strategy, nil)
 ```
 
 ### 2. Logging Strategy
@@ -34,7 +34,7 @@ Logs all market events for debugging and analysis.
 strategy := &strategies.Logging{
     Logger: log.Default(),
 }
-lambda := core.NewBaseLambda(id, config, bus, control, provider, pools, strategy)
+lambda := core.NewBaseLambda(id, config, bus, control, provider, pools, strategy, nil)
 ```
 
 ## Demo Strategies
@@ -197,7 +197,7 @@ func NewMyStrategy(lambda *core.BaseLambda, myParam float64) *MyStrategy {
 ### 3. Use Your Strategy
 
 ```go
-baseLambda := core.NewBaseLambda(id, config, bus, control, provider, pools, &NoOp{})
+baseLambda := core.NewBaseLambda(id, config, bus, control, provider, pools, &NoOp{}, nil)
 strategy := NewMyStrategy(baseLambda, 42.0)
 
 // Replace the strategy

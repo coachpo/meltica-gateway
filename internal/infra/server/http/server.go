@@ -18,6 +18,7 @@ import (
 	"github.com/coachpo/meltica/internal/app/lambda/runtime"
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/app/risk"
+	"github.com/coachpo/meltica/internal/domain/orderstore"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
@@ -45,6 +46,15 @@ const (
 
 	riskLimitsPath    = "/risk/limits"
 	contextBackupPath = "/context/backup"
+
+	instanceOrdersSuffix     = "orders"
+	instanceExecutionsSuffix = "executions"
+	providerBalancesSuffix   = "balances"
+
+	defaultOrdersLimit     = 50
+	defaultExecutionsLimit = 100
+	defaultBalancesLimit   = 100
+	maxListLimit           = 500
 )
 
 type handlerFunc func(http.ResponseWriter, *http.Request)
@@ -52,8 +62,8 @@ type handlerFunc func(http.ResponseWriter, *http.Request)
 type httpServer struct {
 	manager       *runtime.Manager
 	providers     *provider.Manager
+	orderStore    orderstore.Store
 	baseProviders map[string]struct{}
-	baseLambdas   map[string]struct{}
 }
 
 type providerPayload struct {
@@ -103,7 +113,7 @@ type instanceSnapshotResponse struct {
 }
 
 // NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *provider.Manager) http.Handler {
+func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *provider.Manager, orders orderstore.Store) http.Handler {
 	baseProviders := make(map[string]struct{}, len(appCfg.Providers))
 	for name := range appCfg.Providers {
 		normalized := strings.ToLower(strings.TrimSpace(string(name)))
@@ -111,18 +121,11 @@ func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *pr
 			baseProviders[normalized] = struct{}{}
 		}
 	}
-	baseLambdas := make(map[string]struct{}, len(appCfg.LambdaManifest.Lambdas))
-	for _, lambda := range appCfg.LambdaManifest.Lambdas {
-		normalized := strings.ToLower(strings.TrimSpace(lambda.ID))
-		if normalized != "" {
-			baseLambdas[normalized] = struct{}{}
-		}
-	}
 	server := &httpServer{
 		manager:       manager,
 		providers:     providers,
+		orderStore:    orders,
 		baseProviders: baseProviders,
-		baseLambdas:   baseLambdas,
 	}
 	mux := http.NewServeMux()
 
@@ -894,17 +897,16 @@ func (s *httpServer) handleProviderResource(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *httpServer) handleProviderAction(w http.ResponseWriter, r *http.Request, name, action string) {
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w, http.MethodPost)
-		return
-	}
-	if s.providers == nil {
-		writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
-		return
-	}
-
 	switch action {
 	case "start":
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return
+		}
+		if s.providers == nil {
+			writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
+			return
+		}
 		detail, err := s.providers.StartProviderAsync(name)
 		if err != nil {
 			s.writeProviderError(w, err)
@@ -914,12 +916,26 @@ func (s *httpServer) handleProviderAction(w http.ResponseWriter, r *http.Request
 		w.Header().Set("Location", location)
 		writeJSON(w, http.StatusAccepted, detail)
 	case "stop":
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return
+		}
+		if s.providers == nil {
+			writeError(w, http.StatusServiceUnavailable, "provider manager unavailable")
+			return
+		}
 		detail, err := s.providers.StopProvider(name)
 		if err != nil {
 			s.writeProviderError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, detail)
+	case providerBalancesSuffix:
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+		s.handleProviderBalances(w, r, name)
 	default:
 		writeError(w, http.StatusNotFound, "unsupported action")
 	}
@@ -1137,33 +1153,156 @@ func (s *httpServer) handleInstanceResource(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *httpServer) handleInstanceAction(w http.ResponseWriter, r *http.Request, id, action string) {
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w, http.MethodPost)
-		return
-	}
-
 	switch action {
 	case "start":
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return
+		}
+		if s.manager == nil {
+			writeError(w, http.StatusServiceUnavailable, "lambda manager unavailable")
+			return
+		}
 		if err := s.manager.Start(r.Context(), id); err != nil {
 			s.writeManagerError(w, err)
 			return
 		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "id": id, "action": action})
 	case "stop":
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return
+		}
+		if s.manager == nil {
+			writeError(w, http.StatusServiceUnavailable, "lambda manager unavailable")
+			return
+		}
 		if err := s.manager.Stop(id); err != nil {
 			s.writeManagerError(w, err)
 			return
 		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "id": id, "action": action})
+	case instanceOrdersSuffix:
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+		s.handleInstanceOrders(w, r, id)
+	case instanceExecutionsSuffix:
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+		s.handleInstanceExecutions(w, r, id)
 	default:
 		writeError(w, http.StatusNotFound, "unsupported action")
+	}
+}
+
+func (s *httpServer) handleInstanceOrders(w http.ResponseWriter, r *http.Request, id string) {
+	if s.orderStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "order store unavailable")
 		return
 	}
-
-	snapshot, _ := s.manager.Instance(id)
-	response := instanceSnapshotResponse{
-		InstanceSnapshot: snapshot,
-		Links:            s.buildInstanceLinksFromSnapshot(snapshot),
+	values := r.URL.Query()
+	limit, err := parseLimitParam(values.Get("limit"), defaultOrdersLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	states := values["state"]
+	for i, state := range states {
+		states[i] = strings.TrimSpace(state)
+	}
+	provider := strings.TrimSpace(values.Get("provider"))
+	records, err := s.orderStore.ListOrders(r.Context(), orderstore.OrderQuery{
+		StrategyInstance: id,
+		Provider:         provider,
+		States:           states,
+		Limit:            limit,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response := map[string]any{
+		"orders": records,
+		"count":  len(records),
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *httpServer) handleInstanceExecutions(w http.ResponseWriter, r *http.Request, id string) {
+	if s.orderStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "order store unavailable")
+		return
+	}
+	values := r.URL.Query()
+	limit, err := parseLimitParam(values.Get("limit"), defaultExecutionsLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	provider := strings.TrimSpace(values.Get("provider"))
+	orderID := strings.TrimSpace(values.Get("orderId"))
+	records, err := s.orderStore.ListExecutions(r.Context(), orderstore.ExecutionQuery{
+		StrategyInstance: id,
+		Provider:         provider,
+		OrderID:          orderID,
+		Limit:            limit,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response := map[string]any{
+		"executions": records,
+		"count":      len(records),
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *httpServer) handleProviderBalances(w http.ResponseWriter, r *http.Request, name string) {
+	if s.orderStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "order store unavailable")
+		return
+	}
+	values := r.URL.Query()
+	limit, err := parseLimitParam(values.Get("limit"), defaultBalancesLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	asset := strings.TrimSpace(values.Get("asset"))
+	records, err := s.orderStore.ListBalances(r.Context(), orderstore.BalanceQuery{
+		Provider: strings.TrimSpace(name),
+		Asset:    asset,
+		Limit:    limit,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response := map[string]any{
+		"balances": records,
+		"count":    len(records),
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func parseLimitParam(raw string, fallback int) (int, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(trimmed)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("invalid limit")
+	}
+	if value > maxListLimit {
+		return maxListLimit, nil
+	}
+	return value, nil
 }
 
 func (s *httpServer) writeManagerError(w http.ResponseWriter, err error) {
@@ -1377,13 +1516,6 @@ func decodeInstanceSpec(r *http.Request) (config.LambdaSpec, error) {
 	if spec.Strategy.Identifier == "" {
 		return spec, fmt.Errorf("strategy required")
 	}
-	manifest := config.LambdaManifest{
-		Lambdas: []config.LambdaSpec{spec},
-	}
-	if err := manifest.Validate(); err != nil {
-		return spec, fmt.Errorf("validate lambda manifest: %w", err)
-	}
-	spec = manifest.Lambdas[0]
 	if len(spec.AllSymbols()) == 0 {
 		return spec, fmt.Errorf("symbols required")
 	}
@@ -1585,7 +1717,7 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 	}
 
 	targetLambdas := make(map[string]struct{}, len(payload.Lambdas))
-	manifest := config.LambdaManifest{Lambdas: make([]config.LambdaSpec, 0, len(payload.Lambdas))}
+	restoredSpecs := make([]config.LambdaSpec, 0, len(payload.Lambdas))
 	for _, spec := range payload.Lambdas {
 		copied := config.LambdaSpec{
 			ID: strings.TrimSpace(spec.ID),
@@ -1603,15 +1735,10 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 		if copied.ID == "" {
 			return fmt.Errorf("lambda id required")
 		}
-		manifest.Lambdas = append(manifest.Lambdas, copied)
+		restoredSpecs = append(restoredSpecs, copied)
 		targetLambdas[strings.ToLower(copied.ID)] = struct{}{}
 	}
-	if len(manifest.Lambdas) > 0 {
-		if err := manifest.Validate(); err != nil {
-			return fmt.Errorf("validate lambdas: %w", err)
-		}
-	}
-	for _, spec := range manifest.Lambdas {
+	for _, spec := range restoredSpecs {
 		for _, providerName := range spec.Providers {
 			trimmed := strings.TrimSpace(providerName)
 			if trimmed == "" {
@@ -1669,8 +1796,8 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 		}
 	}
 
-	restored := make([]config.LambdaSpec, 0, len(manifest.Lambdas))
-	for _, spec := range manifest.Lambdas {
+	restored := make([]config.LambdaSpec, 0, len(restoredSpecs))
+	for _, spec := range restoredSpecs {
 		if s.isBaselineLambda(spec.ID) {
 			continue
 		}
@@ -1680,9 +1807,9 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 		restored = append(restored, spec)
 	}
 
-	if len(restored) > 0 {
-		if err := s.manager.StartFromManifest(config.LambdaManifest{Lambdas: restored}); err != nil {
-			return fmt.Errorf("restore lambdas: %w", err)
+	for _, spec := range restored {
+		if _, err := s.manager.Create(spec); err != nil {
+			return fmt.Errorf("restore lambda %s: %w", spec.ID, err)
 		}
 	}
 
@@ -1773,11 +1900,10 @@ func (s *httpServer) isBaselineProvider(name string) bool {
 }
 
 func (s *httpServer) isBaselineLambda(id string) bool {
-	if id == "" {
+	if id == "" || s.manager == nil {
 		return false
 	}
-	_, ok := s.baseLambdas[strings.ToLower(strings.TrimSpace(id))]
-	return ok
+	return s.manager.IsBaseline(id)
 }
 
 func limitRequestBody(w http.ResponseWriter, r *http.Request) {

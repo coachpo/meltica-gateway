@@ -8,11 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LambdaManifest declares the lambda instances Meltica should materialise at startup.
-type LambdaManifest struct {
-	Lambdas []LambdaSpec `yaml:"lambdas"`
-}
-
 // LambdaStrategySpec defines the strategy identifier and associated configuration payload.
 type LambdaStrategySpec struct {
 	Identifier string         `yaml:"identifier" json:"identifier"`
@@ -131,7 +126,7 @@ func (s *LambdaSpec) UnmarshalYAML(value *yaml.Node) error {
 		if err := valNode.Decode(&assignment); err != nil {
 			return fmt.Errorf("scope[%s]: %w", name, err)
 		}
-		assignment.normalize()
+		assignment.Normalize()
 		if _, exists := assignments[name]; exists {
 			return fmt.Errorf("scope[%s]: duplicate provider entry", name)
 		}
@@ -140,7 +135,7 @@ func (s *LambdaSpec) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	s.ID = base.ID
-	base.Strategy.normalize()
+	base.Strategy.Normalize()
 	s.Strategy = base.Strategy
 	s.ProviderSymbols = assignments
 	s.Providers = normalizeProviderNames(names)
@@ -158,27 +153,16 @@ func (s *LambdaSpec) refreshProviders() {
 		return
 	}
 	names := make([]string, 0, len(s.ProviderSymbols))
-	for name, assignment := range s.ProviderSymbols {
-		assignment.normalize()
-		s.ProviderSymbols[name] = assignment
-		names = append(names, name)
+	for provider, assignment := range s.ProviderSymbols {
+		normalized := strings.TrimSpace(provider)
+		if normalized == "" {
+			continue
+		}
+		assignment.Normalize()
+		s.ProviderSymbols[normalized] = assignment
+		names = append(names, normalized)
 	}
 	s.Providers = normalizeProviderNames(names)
-}
-
-// SymbolsForProvider returns the symbol assignments for a provider, if any.
-func (s LambdaSpec) SymbolsForProvider(provider string) []string {
-	name := strings.TrimSpace(provider)
-	if name == "" {
-		return nil
-	}
-	assignment, ok := s.ProviderSymbols[name]
-	if !ok {
-		return nil
-	}
-	cloned := make([]string, len(assignment.Symbols))
-	copy(cloned, assignment.Symbols)
-	return cloned
 }
 
 // RefreshProviders re-evaluates provider membership based on assignments and symbol scope.
@@ -213,6 +197,21 @@ func (s LambdaSpec) ProviderSymbolMap() map[string][]string {
 		out[normalizedName] = symbols
 	}
 	return out
+}
+
+// SymbolsForProvider returns the symbol assignments for a provider, if any.
+func (s LambdaSpec) SymbolsForProvider(provider string) []string {
+	name := strings.TrimSpace(provider)
+	if name == "" {
+		return nil
+	}
+	assignment, ok := s.ProviderSymbols[name]
+	if !ok {
+		return nil
+	}
+	cloned := make([]string, len(assignment.Symbols))
+	copy(cloned, assignment.Symbols)
+	return cloned
 }
 
 // AllSymbols returns the unique set of symbols referenced by the spec.
@@ -253,44 +252,4 @@ func normalizeProviderNames(providers []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// Validate performs semantic validation of the manifest definition.
-func (m LambdaManifest) Validate() error {
-	if len(m.Lambdas) == 0 {
-		return nil
-	}
-	for i := range m.Lambdas {
-		spec := &m.Lambdas[i]
-		spec.refreshProviders()
-		if strings.TrimSpace(spec.ID) == "" {
-			return fmt.Errorf("lambdas[%d]: id required", i)
-		}
-		if strings.TrimSpace(spec.Strategy.Identifier) == "" {
-			return fmt.Errorf("lambdas[%d]: strategy required", i)
-		}
-		if len(spec.Providers) == 0 {
-			return fmt.Errorf("lambdas[%d]: providers required", i)
-		}
-		if len(spec.ProviderSymbols) == 0 {
-			return fmt.Errorf("lambdas[%d]: scope mapping required", i)
-		}
-		for j, provider := range spec.Providers {
-			name := strings.TrimSpace(provider)
-			if name == "" {
-				return fmt.Errorf("lambdas[%d].providers[%d]: provider name required", i, j)
-			}
-			assignment, ok := spec.ProviderSymbols[name]
-			if !ok {
-				return fmt.Errorf("lambdas[%d].providers[%q]: scope entry missing", i, name)
-			}
-			if len(assignment.Symbols) == 0 {
-				return fmt.Errorf("lambdas[%d].providers[%q]: at least one symbol required", i, name)
-			}
-		}
-		if len(spec.AllSymbols()) == 0 {
-			return fmt.Errorf("lambdas[%d]: at least one symbol required", i)
-		}
-	}
-	return nil
 }
