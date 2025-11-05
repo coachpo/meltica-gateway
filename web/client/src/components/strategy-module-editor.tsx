@@ -12,7 +12,6 @@ type StrategyModuleEditorProps = {
   disabled?: boolean;
   readOnly?: boolean;
   placeholder?: string;
-  useEnhancedEditor: boolean;
   onSubmit?: () => void;
   className?: string;
   'aria-label'?: string;
@@ -25,15 +24,11 @@ export function StrategyModuleEditor({
   disabled = false,
   readOnly = false,
   placeholder,
-  useEnhancedEditor,
   onSubmit,
   className,
   'aria-label': ariaLabel,
 }: StrategyModuleEditorProps) {
   const annotations = useMemo(() => {
-    if (!useEnhancedEditor) {
-      return [];
-    }
     return diagnostics
       .filter((entry) => typeof entry.line === 'number' && (entry.line ?? 0) > 0)
       .map((entry, index) => ({
@@ -42,7 +37,7 @@ export function StrategyModuleEditor({
         type: 'error' as const,
         text: entry.message || `Validation error ${index + 1}`,
       }));
-  }, [diagnostics, useEnhancedEditor]);
+  }, [diagnostics]);
 
   const isReadOnly = readOnly || disabled;
 
@@ -56,15 +51,15 @@ export function StrategyModuleEditor({
       wrapEnabled={isReadOnly}
       height="100%"
       showPrintMargin={false}
-      highlightActiveLine={useEnhancedEditor && !readOnly}
-      showGutter={useEnhancedEditor}
+      highlightActiveLine={!readOnly}
+      showGutter={true}
       readOnly={isReadOnly}
       placeholder={placeholder}
       setOptions={{
-        displayIndentGuides: useEnhancedEditor,
+        displayIndentGuides: true,
       }}
-      enableBasicAutocompletion={useEnhancedEditor}
-      enableLiveAutocompletion={useEnhancedEditor}
+      enableBasicAutocompletion={true}
+      enableLiveAutocompletion={true}
       enableSnippets={false}
       editorProps={{ $blockScrolling: true }}
       annotations={annotations}

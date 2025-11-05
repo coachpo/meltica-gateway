@@ -419,19 +419,10 @@ export default function StrategyModulesPage() {
   );
 
   const handleTemplateInsert = useCallback(() => {
-    const trimmed = formData.source.trim();
-    if (trimmed.length > 0 && typeof window !== 'undefined') {
-      const confirmed = window.confirm(
-        'Replace the existing source with a starter template?',
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
     setFormData((prev) => ({ ...prev, source: STRATEGY_MODULE_TEMPLATE }));
     clearValidationFeedback();
     setUploadedFileInfo(null);
-  }, [clearValidationFeedback, formData.source]);
+  }, [clearValidationFeedback]);
 
   const sortedModules = useMemo(
     () => [...modules].sort((a, b) => a.name.localeCompare(b.name)),
@@ -1821,7 +1812,6 @@ export default function StrategyModulesPage() {
                 diagnostics={formDiagnostics}
                 disabled={formPrefillLoading || formProcessing}
                 readOnly={false}
-                useEnhancedEditor={false}
                 onSubmit={() => void handleFormSubmit()}
                 aria-label="Strategy JavaScript source"
                 className="min-h-[320px] lg:min-h-[440px]"
