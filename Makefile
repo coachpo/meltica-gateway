@@ -1,6 +1,6 @@
 GO111MODULE=on
 MIGRATE_BIN ?= migrate
-DATABASE_URL ?= postgresql://localhost:5432/meltica?sslmode=disable
+DATABASE_URL ?= postgresql://postgres:root@localhost:5432/meltica?sslmode=disable
 
 .PHONY: test bench lint vet tidy build build-linux-arm64 clean coverage run migrate migrate-down
 

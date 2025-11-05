@@ -17,6 +17,7 @@ import (
 	lambdaruntime "github.com/coachpo/meltica/internal/app/lambda/runtime"
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/domain/orderstore"
+	"github.com/coachpo/meltica/internal/domain/outboxstore"
 	"github.com/coachpo/meltica/internal/domain/providerstore"
 	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/domain/strategystore"
@@ -61,7 +62,7 @@ func main() {
 	logger.Printf("configuration loaded: env=%s, providers=%d",
 		appCfg.Environment, len(appCfg.Providers))
 
-logger.Printf("providers configured: %d", len(appCfg.Providers))
+	logger.Printf("providers configured: %d", len(appCfg.Providers))
 
 	dbPool, err := initDatabase(ctx, logger, appCfg.Database)
 	if err != nil {
@@ -70,6 +71,7 @@ logger.Printf("providers configured: %d", len(appCfg.Providers))
 	providerStore := postgresstore.NewProviderStore(dbPool)
 	strategyStore := postgresstore.NewStrategyStore(dbPool)
 	orderStore := postgresstore.NewOrderStore(dbPool)
+	outboxStore := postgresstore.NewOutboxStore(dbPool)
 
 	telemetryProvider, err := initTelemetry(ctx, logger, appCfg)
 	if err != nil {
@@ -83,7 +85,7 @@ logger.Printf("providers configured: %d", len(appCfg.Providers))
 
 	var lifecycle conc.WaitGroup
 
-	bus := newEventBus(appCfg.Eventbus, poolMgr)
+	bus := newEventBus(appCfg.Eventbus, poolMgr, outboxStore, logger)
 
 	table := dispatcher.NewTable()
 	providerManager, err := initProviders(ctx, logger, appCfg, poolMgr, table, bus, providerStore)
@@ -99,7 +101,7 @@ logger.Printf("providers configured: %d", len(appCfg.Providers))
 	}
 	logger.Printf("strategy instances registered: %d", len(lambdaManager.Instances()))
 
-	apiServer := buildAPIServer(appCfg, lambdaManager, providerManager, orderStore)
+	apiServer := buildAPIServer(appCfg, lambdaManager, providerManager, orderStore, outboxStore)
 	startAPIServer(&lifecycle, logger, apiServer)
 	logger.Printf("control API listening on %s", apiServer.Addr)
 
@@ -211,12 +213,13 @@ func buildPoolManager(cfg config.PoolConfig) (*pool.PoolManager, error) {
 	return manager, nil
 }
 
-func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager) eventbus.Bus {
-	return eventbus.NewMemoryBus(eventbus.MemoryConfig{
+func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager, outbox outboxstore.Store, logger *log.Logger) eventbus.Bus {
+	memoryBus := eventbus.NewMemoryBus(eventbus.MemoryConfig{
 		BufferSize:    cfg.BufferSize,
 		FanoutWorkers: cfg.FanoutWorkerCount(),
 		Pools:         pools,
 	})
+	return eventbus.NewDurableBus(memoryBus, outbox, eventbus.WithDurableLogger(logger))
 }
 
 func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppConfig, poolMgr *pool.PoolManager, table *dispatcher.Table, bus eventbus.Bus, store providerstore.Store) (*provider.Manager, error) {
@@ -313,8 +316,8 @@ func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventb
 	return manager, nil
 }
 
-func buildAPIServer(appCfg config.AppConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager, orderStore orderstore.Store) *http.Server {
-	handler := httpserver.NewHandler(appCfg, lambdaManager, providerManager, orderStore)
+func buildAPIServer(appCfg config.AppConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager, orderStore orderstore.Store, outboxStore outboxstore.Store) *http.Server {
+	handler := httpserver.NewHandler(appCfg, lambdaManager, providerManager, orderStore, outboxStore)
 
 	return &http.Server{
 		Addr:                         appCfg.APIServer.Addr,

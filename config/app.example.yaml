@@ -3,7 +3,7 @@ environment: dev
 
 # database: PostgreSQL connection details
 database:
-  dsn: postgresql://localhost:5432/meltica
+  dsn: postgresql://postgres:root@localhost:5432/meltica?sslmode=require
   maxConns: 16
   minConns: 1
   maxConnLifetime: 30m

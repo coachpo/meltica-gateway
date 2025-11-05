@@ -19,6 +19,7 @@ import (
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/app/risk"
 	"github.com/coachpo/meltica/internal/domain/orderstore"
+	"github.com/coachpo/meltica/internal/domain/outboxstore"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
@@ -50,10 +51,13 @@ const (
 	instanceOrdersSuffix     = "orders"
 	instanceExecutionsSuffix = "executions"
 	providerBalancesSuffix   = "balances"
+	outboxPath               = "/outbox"
+	outboxDetailPrefix       = outboxPath + "/"
 
 	defaultOrdersLimit     = 50
 	defaultExecutionsLimit = 100
 	defaultBalancesLimit   = 100
+	defaultOutboxLimit     = 100
 	maxListLimit           = 500
 )
 
@@ -63,6 +67,7 @@ type httpServer struct {
 	manager       *runtime.Manager
 	providers     *provider.Manager
 	orderStore    orderstore.Store
+	outboxStore   outboxstore.Store
 	baseProviders map[string]struct{}
 }
 
@@ -113,7 +118,7 @@ type instanceSnapshotResponse struct {
 }
 
 // NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *provider.Manager, orders orderstore.Store) http.Handler {
+func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *provider.Manager, orders orderstore.Store, outbox outboxstore.Store) http.Handler {
 	baseProviders := make(map[string]struct{}, len(appCfg.Providers))
 	for name := range appCfg.Providers {
 		normalized := strings.ToLower(strings.TrimSpace(string(name)))
@@ -125,6 +130,7 @@ func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *pr
 		manager:       manager,
 		providers:     providers,
 		orderStore:    orders,
+		outboxStore:   outbox,
 		baseProviders: baseProviders,
 	}
 	mux := http.NewServeMux()
@@ -175,6 +181,11 @@ func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *pr
 		http.MethodGet:  server.handleContextBackupExport,
 		http.MethodPost: server.handleContextBackupRestore,
 	}))
+
+	mux.Handle(outboxPath, server.methodHandlers(map[string]handlerFunc{
+		http.MethodGet: server.listOutbox,
+	}))
+	mux.Handle(outboxDetailPrefix, http.HandlerFunc(server.handleOutboxEntry))
 
 	return withCORS(mux)
 }
@@ -1288,6 +1299,63 @@ func (s *httpServer) handleProviderBalances(w http.ResponseWriter, r *http.Reque
 		"count":    len(records),
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *httpServer) listOutbox(w http.ResponseWriter, r *http.Request) {
+	if s.outboxStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "outbox store unavailable")
+		return
+	}
+	limit, err := parseLimitParam(r.URL.Query().Get("limit"), defaultOutboxLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	records, err := s.outboxStore.ListPending(r.Context(), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response := map[string]any{
+		"events": records,
+		"count":  len(records),
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *httpServer) handleOutboxEntry(w http.ResponseWriter, r *http.Request) {
+	idSegment := strings.TrimPrefix(r.URL.Path, outboxDetailPrefix)
+	idSegment = strings.Trim(idSegment, "/")
+	if idSegment == "" {
+		writeError(w, http.StatusNotFound, "outbox entry id required")
+		return
+	}
+	id, err := strconv.ParseInt(idSegment, 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid outbox entry id")
+		return
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		s.deleteOutboxEntry(w, r, id)
+	default:
+		methodNotAllowed(w, http.MethodDelete)
+	}
+}
+
+func (s *httpServer) deleteOutboxEntry(w http.ResponseWriter, r *http.Request, id int64) {
+	if s.outboxStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "outbox store unavailable")
+		return
+	}
+	if err := s.outboxStore.Delete(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":     id,
+		"status": "deleted",
+	})
 }
 
 func parseLimitParam(raw string, fallback int) (int, error) {
