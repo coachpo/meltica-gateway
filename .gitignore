@@ -58,3 +58,5 @@ web/.next
 
 # Strategies
 !strategies/**/*
+
+!db/**/*
