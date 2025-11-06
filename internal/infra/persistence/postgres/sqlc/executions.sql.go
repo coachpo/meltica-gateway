@@ -100,7 +100,7 @@ SELECT
     e.execution_id,
     e.fill_quantity::text AS fill_quantity_text,
     e.fill_price::text AS fill_price_text,
-    e.fee::text AS fee_text,
+    COALESCE(e.fee::text, ''::text)::text AS fee_text,
     e.fee_asset,
     e.liquidity,
     e.traded_at,
