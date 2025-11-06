@@ -16,7 +16,7 @@ func TestOutboxStoreNilPool(t *testing.T) {
 		AggregateType: "eventbus",
 		AggregateID:   "evt-1",
 		EventType:     "Trade",
-		Payload:       json.RawMessage(`{"event_id":"evt-1"}`),
+		Payload:       json.RawMessage(`{"eventId":"evt-1"}`),
 	}
 	if _, err := store.Enqueue(ctx, event); err == nil {
 		t.Fatalf("expected error when pool nil")

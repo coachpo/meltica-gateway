@@ -22,8 +22,8 @@ const (
 
 // ControlMessage is exchanged over the control bus to mutate routing or trading state.
 type ControlMessage struct {
-	MessageID  string             `json:"message_id"`
-	ConsumerID string             `json:"consumer_id"`
+	MessageID  string             `json:"messageId"`
+	ConsumerID string             `json:"consumerId"`
 	Type       ControlMessageType `json:"type"`
 	Payload    json.RawMessage    `json:"payload"`
 	Timestamp  time.Time          `json:"timestamp"`
@@ -47,7 +47,7 @@ func (m ControlMessage) DecodePayload(dest any) error {
 type SubscribePayload struct {
 	Symbol     string   `json:"symbol"`
 	Providers  []string `json:"providers"`
-	EventTypes []string `json:"event_types"`
+	EventTypes []string `json:"eventTypes"`
 }
 
 // TradingModePayload flips the trading switch for a consumer.
@@ -57,11 +57,11 @@ type TradingModePayload struct {
 
 // ControlAcknowledgement is returned to acknowledge control commands.
 type ControlAcknowledgement struct {
-	MessageID      string    `json:"message_id"`
-	ConsumerID     string    `json:"consumer_id"`
+	MessageID      string    `json:"messageId"`
+	ConsumerID     string    `json:"consumerId"`
 	Success        bool      `json:"success"`
-	RoutingVersion int       `json:"routing_version"`
-	ErrorMessage   string    `json:"error_message,omitempty"`
+	RoutingVersion int       `json:"routingVersion"`
+	ErrorMessage   string    `json:"errorMessage,omitempty"`
 	Result         any       `json:"result,omitempty"`
 	Timestamp      time.Time `json:"timestamp"`
 }

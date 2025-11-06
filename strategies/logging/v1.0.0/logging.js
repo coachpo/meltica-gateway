@@ -99,9 +99,9 @@ module.exports = {
           "Order filled:",
           `provider=${evt?.provider ?? ""}`,
           `symbol=${evt?.symbol ?? ""}`,
-          `id=${payload?.clientOrderID ?? payload?.client_order_id ?? ""}`,
-          `qty=${payload?.filledQuantity ?? payload?.filled_quantity ?? ""}`,
-          `price=${payload?.avgFillPrice ?? payload?.avg_fill_price ?? ""}`
+          `id=${payload?.clientOrderId ?? ""}`,
+          `qty=${payload?.filledQuantity ?? ""}`,
+          `price=${payload?.avgFillPrice ?? ""}`
         );
       },
       onOrderRejected: function (_ctx, evt, payload, reason) {
@@ -109,7 +109,7 @@ module.exports = {
           "Order rejected:",
           `provider=${evt?.provider ?? ""}`,
           `symbol=${evt?.symbol ?? ""}`,
-          `id=${payload?.clientOrderID ?? payload?.client_order_id ?? ""}`,
+          `id=${payload?.clientOrderId ?? ""}`,
           `reason=${reason ?? payload?.rejectReason ?? ""}`
         );
       },
@@ -118,9 +118,9 @@ module.exports = {
           "Order partial fill:",
           `provider=${evt?.provider ?? ""}`,
           `symbol=${evt?.symbol ?? ""}`,
-          `id=${payload?.clientOrderID ?? payload?.client_order_id ?? ""}`,
-          `filled=${payload?.filledQuantity ?? payload?.filled_quantity ?? ""}`,
-          `remaining=${payload?.remainingQty ?? payload?.remaining_qty ?? ""}`
+          `id=${payload?.clientOrderId ?? ""}`,
+          `filled=${payload?.filledQuantity ?? ""}`,
+          `remaining=${payload?.remainingQty ?? ""}`
         );
       },
       onOrderCancelled: function (_ctx, evt, payload) {
@@ -128,7 +128,7 @@ module.exports = {
           "Order cancelled:",
           `provider=${evt?.provider ?? ""}`,
           `symbol=${evt?.symbol ?? ""}`,
-          `id=${payload?.clientOrderID ?? payload?.client_order_id ?? ""}`
+          `id=${payload?.clientOrderId ?? ""}`
         );
       },
       onOrderAcknowledged: function (_ctx, evt, payload) {
@@ -136,7 +136,7 @@ module.exports = {
           "Order acknowledged:",
           `provider=${evt?.provider ?? ""}`,
           `symbol=${evt?.symbol ?? ""}`,
-          `id=${payload?.clientOrderID ?? payload?.client_order_id ?? ""}`
+          `id=${payload?.clientOrderId ?? ""}`
         );
       },
       onOrderExpired: function (_ctx, evt, payload) {
@@ -144,7 +144,7 @@ module.exports = {
           "Order expired:",
           `provider=${evt?.provider ?? ""}`,
           `symbol=${evt?.symbol ?? ""}`,
-          `id=${payload?.clientOrderID ?? payload?.client_order_id ?? ""}`
+          `id=${payload?.clientOrderId ?? ""}`
         );
       },
       onKlineSummary: function (_ctx, evt, payload) {
@@ -152,10 +152,10 @@ module.exports = {
           "Kline:",
           `provider=${evt?.provider ?? ""}`,
           `symbol=${evt?.symbol ?? ""}`,
-          `open=${payload?.openPrice ?? payload?.open_price ?? ""}`,
-          `close=${payload?.closePrice ?? payload?.close_price ?? ""}`,
-          `high=${payload?.highPrice ?? payload?.high_price ?? ""}`,
-          `low=${payload?.lowPrice ?? payload?.low_price ?? ""}`,
+          `open=${payload?.openPrice ?? ""}`,
+          `close=${payload?.closePrice ?? ""}`,
+          `high=${payload?.highPrice ?? ""}`,
+          `low=${payload?.lowPrice ?? ""}`,
           `vol=${payload?.volume ?? ""}`
         );
       },

@@ -171,14 +171,14 @@ func BuildEventKey(instr string, route RouteType, seq uint64) string {
 // Event represents a canonical event emitted by providers or dispatcher.
 type Event struct {
 	returned       bool
-	EventID        string    `json:"event_id"`
-	RoutingVersion int       `json:"routing_version"`
+	EventID        string    `json:"eventId"`
+	RoutingVersion int       `json:"routingVersion"`
 	Provider       string    `json:"provider"`
 	Symbol         string    `json:"symbol"`
 	Type           EventType `json:"type"`
-	SeqProvider    uint64    `json:"seq_provider"`
-	IngestTS       time.Time `json:"ingest_ts"`
-	EmitTS         time.Time `json:"emit_ts"`
+	SeqProvider    uint64    `json:"seqProvider"`
+	IngestTS       time.Time `json:"ingestTs"`
+	EmitTS         time.Time `json:"emitTs"`
 	Payload        any       `json:"payload"`
 }
 
@@ -251,11 +251,11 @@ type BookSnapshotPayload struct {
 	Bids       []PriceLevel `json:"bids"`
 	Asks       []PriceLevel `json:"asks"`
 	Checksum   string       `json:"checksum"`
-	LastUpdate time.Time    `json:"last_update"`
+	LastUpdate time.Time    `json:"lastUpdate"`
 
 	// Binance-specific sequence tracking (optional, used internally during assembly)
-	FirstUpdateID uint64 `json:"first_update_id,omitempty"` // U - First update ID in event
-	FinalUpdateID uint64 `json:"final_update_id,omitempty"` // u - Final update ID in event
+	FirstUpdateID uint64 `json:"firstUpdateId,omitempty"` // U - First update ID in event
+	FinalUpdateID uint64 `json:"finalUpdateId,omitempty"` // u - Final update ID in event
 }
 
 // TradeSide captures the direction of a trade.
@@ -270,7 +270,7 @@ const (
 
 // TradePayload represents an executed trade event.
 type TradePayload struct {
-	TradeID   string    `json:"trade_id"`
+	TradeID   string    `json:"tradeId"`
 	Side      TradeSide `json:"side"`
 	Price     string    `json:"price"`
 	Quantity  string    `json:"quantity"`
@@ -279,10 +279,10 @@ type TradePayload struct {
 
 // TickerPayload conveys ticker statistics.
 type TickerPayload struct {
-	LastPrice string    `json:"last_price"`
-	BidPrice  string    `json:"bid_price"`
-	AskPrice  string    `json:"ask_price"`
-	Volume24h string    `json:"volume_24h"`
+	LastPrice string    `json:"lastPrice"`
+	BidPrice  string    `json:"bidPrice"`
+	AskPrice  string    `json:"askPrice"`
+	Volume24h string    `json:"volume24h"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -316,31 +316,31 @@ const (
 
 // ExecReportPayload represents state transitions for submitted orders.
 type ExecReportPayload struct {
-	ClientOrderID    string          `json:"client_order_id"`
-	ExchangeOrderID  string          `json:"exchange_order_id"`
+	ClientOrderID    string          `json:"clientOrderId"`
+	ExchangeOrderID  string          `json:"exchangeOrderId"`
 	State            ExecReportState `json:"state"`
 	Side             TradeSide       `json:"side"`
-	OrderType        OrderType       `json:"order_type"`
+	OrderType        OrderType       `json:"orderType"`
 	Price            string          `json:"price"`
 	Quantity         string          `json:"quantity"`
-	FilledQuantity   string          `json:"filled_quantity"`
-	RemainingQty     string          `json:"remaining_qty"`
-	AvgFillPrice     string          `json:"avg_fill_price"`
-	CommissionAmount string          `json:"commission_amount,omitempty"`
-	CommissionAsset  string          `json:"commission_asset,omitempty"`
+	FilledQuantity   string          `json:"filledQuantity"`
+	RemainingQty     string          `json:"remainingQty"`
+	AvgFillPrice     string          `json:"avgFillPrice"`
+	CommissionAmount string          `json:"commissionAmount,omitempty"`
+	CommissionAsset  string          `json:"commissionAsset,omitempty"`
 	Timestamp        time.Time       `json:"timestamp"`
-	RejectReason     *string         `json:"reject_reason,omitempty"`
+	RejectReason     *string         `json:"rejectReason,omitempty"`
 }
 
 // KlineSummaryPayload represents aggregated candlestick data.
 type KlineSummaryPayload struct {
-	OpenPrice  string    `json:"open_price"`
-	ClosePrice string    `json:"close_price"`
-	HighPrice  string    `json:"high_price"`
-	LowPrice   string    `json:"low_price"`
+	OpenPrice  string    `json:"openPrice"`
+	ClosePrice string    `json:"closePrice"`
+	HighPrice  string    `json:"highPrice"`
+	LowPrice   string    `json:"lowPrice"`
 	Volume     string    `json:"volume"`
-	OpenTime   time.Time `json:"open_time"`
-	CloseTime  time.Time `json:"close_time"`
+	OpenTime   time.Time `json:"openTime"`
+	CloseTime  time.Time `json:"closeTime"`
 }
 
 // InstrumentUpdatePayload advertises an updated instrument definition for a provider.
@@ -368,14 +368,14 @@ const (
 
 // RiskControlPayload conveys details about runtime risk control actions.
 type RiskControlPayload struct {
-	StrategyID         string            `json:"strategy_id"`
+	StrategyID         string            `json:"strategyId"`
 	Provider           string            `json:"provider"`
 	Symbol             string            `json:"symbol"`
 	Status             RiskControlStatus `json:"status"`
 	Reason             string            `json:"reason"`
-	BreachType         string            `json:"breach_type"`
+	BreachType         string            `json:"breachType"`
 	Metrics            map[string]string `json:"metrics,omitempty"`
-	KillSwitchEngaged  bool              `json:"kill_switch_engaged"`
-	CircuitBreakerOpen bool              `json:"circuit_breaker_open"`
+	KillSwitchEngaged  bool              `json:"killSwitchEngaged"`
+	CircuitBreakerOpen bool              `json:"circuitBreakerOpen"`
 	Timestamp          time.Time         `json:"timestamp"`
 }

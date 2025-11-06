@@ -900,7 +900,7 @@ func TestOutboxListReturnsRecords(t *testing.T) {
 				AggregateType: "provider",
 				AggregateID:   "binance",
 				EventType:     "Trade",
-				Payload:       json.RawMessage(`{"event_id":"evt-1"}`),
+				Payload:       json.RawMessage(`{"eventId":"evt-1"}`),
 			},
 		},
 	}

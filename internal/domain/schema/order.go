@@ -5,12 +5,12 @@ import "time"
 // OrderRequest represents an order submission from a consumer.
 type OrderRequest struct {
 	returned      bool
-	ClientOrderID string    `json:"client_order_id"`
-	ConsumerID    string    `json:"consumer_id"`
+	ClientOrderID string    `json:"clientOrderId"`
+	ConsumerID    string    `json:"consumerId"`
 	Provider      string    `json:"provider"`
 	Symbol        string    `json:"symbol"`
 	Side          TradeSide `json:"side"`
-	OrderType     OrderType `json:"order_type"`
+	OrderType     OrderType `json:"orderType"`
 	Price         *string   `json:"price,omitempty"`
 	Quantity      string    `json:"quantity"`
 	TIF           string    `json:"tif"`

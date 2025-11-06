@@ -278,8 +278,8 @@ func (m *Manager) CheckOrder(ctx context.Context, req *schema.OrderRequest) erro
 	if m.limits.MaxPositionSize.GreaterThan(decimal.Zero) {
 		if projected.Abs().GreaterThan(m.limits.MaxPositionSize) {
 			breach := newBreachError(BreachTypePositionLimit, "projected position exceeds maximum", nil, map[string]string{
-				"projected_position": projected.Abs().String(),
-				"max_position":       m.limits.MaxPositionSize.String(),
+				"projectedPosition": projected.Abs().String(),
+				"maxPosition":       m.limits.MaxPositionSize.String(),
 			})
 			m.recordRiskBreachLocked(breach)
 			return breach
@@ -289,8 +289,8 @@ func (m *Manager) CheckOrder(ctx context.Context, req *schema.OrderRequest) erro
 	notional := projected.Abs().Mul(price)
 	if m.limits.MaxNotionalValue.GreaterThan(decimal.Zero) && notional.GreaterThan(m.limits.MaxNotionalValue) {
 		breach := newBreachError(BreachTypeNotionalLimit, "projected notional exceeds maximum", nil, map[string]string{
-			"projected_notional": notional.String(),
-			"max_notional":       m.limits.MaxNotionalValue.String(),
+			"projectedNotional": notional.String(),
+			"maxNotional":       m.limits.MaxNotionalValue.String(),
 		})
 		m.recordRiskBreachLocked(breach)
 		return breach
@@ -432,7 +432,7 @@ func (m *Manager) enforceOrderTypeLocked(orderType schema.OrderType) error {
 		return nil
 	}
 	return newBreachError(BreachTypeOrderType, fmt.Sprintf("order type %s not allowed", orderType), nil, map[string]string{
-		"order_type": string(orderType),
+		"orderType": string(orderType),
 	})
 }
 
@@ -476,11 +476,11 @@ func (m *Manager) validatePriceBandLocked(symbol string, price decimal.Decimal) 
 	lower := reference.Mul(decimal.NewFromFloat(1 - m.limits.PriceBandPercent/100))
 	if price.GreaterThan(upper) || price.LessThan(lower) {
 		return decimal.Zero, newBreachError(BreachTypePriceBand, "price outside allowable band", nil, map[string]string{
-			"price":        price.String(),
-			"band_lower":   lower.String(),
-			"band_upper":   upper.String(),
-			"symbol":       symbol,
-			"band_percent": fmt.Sprintf("%.4f", m.limits.PriceBandPercent),
+			"price":       price.String(),
+			"bandLower":   lower.String(),
+			"bandUpper":   upper.String(),
+			"symbol":      symbol,
+			"bandPercent": fmt.Sprintf("%.4f", m.limits.PriceBandPercent),
 		})
 	}
 	return price, nil
@@ -521,18 +521,18 @@ func (m *Manager) applyFillLocked(symbol string, side schema.TradeSide, fillQty,
 	m.notionals[symbol] = notional
 	if m.limits.MaxPositionSize.GreaterThan(decimal.Zero) && position.Abs().GreaterThan(m.limits.MaxPositionSize) {
 		breach := newBreachError(BreachTypePositionLimit, "post-fill position exceeds maximum", nil, map[string]string{
-			"position":     position.Abs().String(),
-			"max_position": m.limits.MaxPositionSize.String(),
-			"symbol":       symbol,
+			"position":    position.Abs().String(),
+			"maxPosition": m.limits.MaxPositionSize.String(),
+			"symbol":      symbol,
 		})
 		m.recordRiskBreachLocked(breach)
 		m.engageKillSwitchLocked(breach.Error())
 	}
 	if m.limits.MaxNotionalValue.GreaterThan(decimal.Zero) && notional.GreaterThan(m.limits.MaxNotionalValue) {
 		breach := newBreachError(BreachTypeNotionalLimit, "post-fill notional exceeds maximum", nil, map[string]string{
-			"notional":     notional.String(),
-			"max_notional": m.limits.MaxNotionalValue.String(),
-			"symbol":       symbol,
+			"notional":    notional.String(),
+			"maxNotional": m.limits.MaxNotionalValue.String(),
+			"symbol":      symbol,
 		})
 		m.recordRiskBreachLocked(breach)
 		m.engageKillSwitchLocked(breach.Error())

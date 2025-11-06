@@ -1032,19 +1032,19 @@ func (l *BaseLambda) persistExecReport(ctx context.Context, evt *schema.Event, p
 		return
 	}
 	meta := map[string]any{
-		"exchange_order_id": payload.ExchangeOrderID,
-		"filled_quantity":   payload.FilledQuantity,
-		"remaining_qty":     payload.RemainingQty,
-		"avg_fill_price":    payload.AvgFillPrice,
+		"exchangeOrderId": payload.ExchangeOrderID,
+		"filledQuantity":  payload.FilledQuantity,
+		"remainingQty":    payload.RemainingQty,
+		"avgFillPrice":    payload.AvgFillPrice,
 	}
 	if payload.RejectReason != nil {
-		meta["reject_reason"] = *payload.RejectReason
+		meta["rejectReason"] = *payload.RejectReason
 	}
 	if strings.TrimSpace(payload.CommissionAmount) != "" {
-		meta["commission_amount"] = payload.CommissionAmount
+		meta["commissionAmount"] = payload.CommissionAmount
 	}
 	if strings.TrimSpace(payload.CommissionAsset) != "" {
-		meta["commission_asset"] = payload.CommissionAsset
+		meta["commissionAsset"] = payload.CommissionAsset
 	}
 	timestamp := payload.Timestamp
 	if timestamp.IsZero() && evt != nil {
@@ -1100,14 +1100,14 @@ func (l *BaseLambda) buildExecutionSnapshot(evt *schema.Event, payload schema.Ex
 		Liquidity:   "",
 		TradedAt:    0,
 		Metadata: map[string]any{
-			"remaining_qty": payload.RemainingQty,
-			"state":         payload.State,
+			"remainingQty": payload.RemainingQty,
+			"state":        payload.State,
 		},
 	}
 	if evt != nil {
 		exec.ExecutionID = evt.EventID
 		exec.Provider = evt.Provider
-		exec.Metadata["event_symbol"] = evt.Symbol
+		exec.Metadata["eventSymbol"] = evt.Symbol
 	}
 	if strings.TrimSpace(exec.ExecutionID) == "" {
 		exec.ExecutionID = fmt.Sprintf("%s-%d", payload.ClientOrderID, payload.Timestamp.UnixNano())

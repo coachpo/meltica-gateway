@@ -277,7 +277,7 @@ func (b *DurableBus) enqueueEvent(ctx context.Context, evt *schema.Event) (int64
 		headers["symbol"] = trimmed
 	}
 	if trimmed := strings.TrimSpace(evt.EventID); trimmed != "" {
-		headers["event_id"] = trimmed
+		headers["eventId"] = trimmed
 	}
 	aggregateType, aggregateID := aggregateIdentifiers(evt)
 	record, err := b.store.Enqueue(safeContext(ctx), outboxstore.Event{
