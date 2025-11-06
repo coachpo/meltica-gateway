@@ -33,10 +33,13 @@ export const CodeViewer = forwardRef<unknown, CodeViewerProps>(function CodeView
   },
   ref,
 ) {
-  const mergedSetOptions = useMemo(() => ({
-    ...setOptions,
-    readOnly: true,
-  }), [setOptions]);
+  const mergedSetOptions = useMemo(() => {
+    const baseOptions = setOptions ?? {};
+    return {
+      ...baseOptions,
+      readOnly: true,
+    };
+  }, [setOptions]);
 
   return (
     <CodeEditor

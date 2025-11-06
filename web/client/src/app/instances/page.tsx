@@ -6,6 +6,7 @@ import { apiClient } from '@/lib/api-client';
 import {
   BalanceRecord,
   ExecutionRecord,
+  InstanceSpec,
   InstanceSummary,
   OrderRecord,
   Provider,
@@ -38,6 +39,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { CodeEditor } from '@/components/code';
+import { formatInstanceSpec, parseInstanceSpecDraft } from './spec-utils';
 
 type ProviderInstrumentStatus = {
   symbols: string[];
@@ -153,6 +156,18 @@ const HISTORY_LIMITS: Record<HistoryTab, number> = {
   balances: 50,
 };
 
+const EMPTY_INSTANCE_SPEC: InstanceSpec = {
+  id: '',
+  strategy: {
+    identifier: '',
+    selector: '',
+    config: {},
+  },
+  scope: {},
+};
+
+const DEFAULT_INSTANCE_JSON = formatInstanceSpec(EMPTY_INSTANCE_SPEC);
+
 export default function InstancesPage() {
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
@@ -167,6 +182,8 @@ export default function InstancesPage() {
   const [dialogSaving, setDialogSaving] = useState(false);
   const [instanceLoading, setInstanceLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<Record<string, boolean>>({});
+  const [formMode, setFormMode] = useState<'json' | 'guided'>('json');
+  const [instanceJsonDraft, setInstanceJsonDraft] = useState<string>(DEFAULT_INSTANCE_JSON);
 
   const [newInstance, setNewInstance] = useState({
     id: '',
@@ -189,6 +206,34 @@ export default function InstancesPage() {
   const [historyDialogInstance, setHistoryDialogInstance] = useState<InstanceSummary | null>(null);
   const [historyTab, setHistoryTab] = useState<HistoryTab>('orders');
   const [historyState, setHistoryState] = useState<Record<string, HistoryEntry>>({});
+
+  const jsonDiagnostics = useMemo(() => {
+    const trimmed = instanceJsonDraft.trim();
+    if (!trimmed) {
+      return {
+        status: 'idle' as const,
+        message: 'Provide a JSON instance specification to enable submission.',
+      };
+    }
+    const result = parseInstanceSpecDraft(instanceJsonDraft, { strict: false });
+    if (result.error) {
+      return {
+        status: 'error' as const,
+        message: result.error,
+      };
+    }
+    return {
+      status: 'success' as const,
+      message: 'JSON payload parses successfully.',
+    };
+  }, [instanceJsonDraft]);
+
+  const jsonDiagnosticClass =
+    jsonDiagnostics.status === 'success'
+      ? 'text-xs text-emerald-600 dark:text-emerald-400'
+      : jsonDiagnostics.status === 'error'
+        ? 'text-xs text-destructive'
+        : 'text-xs text-muted-foreground';
 
   const ensureHistoryEntry = useCallback((id: string) => {
     if (!id) {
@@ -458,6 +503,237 @@ export default function InstancesPage() {
     setPrefilledConfig(false);
     setDialogSaving(false);
     setInstanceLoading(false);
+    setFormMode('json');
+    setInstanceJsonDraft(DEFAULT_INSTANCE_JSON);
+  };
+
+  const populateFormFromSpec = useCallback(
+    (spec: InstanceSpec, options?: { setPrefilled?: boolean }) => {
+      setNewInstance({
+        id: spec.id,
+        strategyIdentifier: spec.strategy.identifier,
+      });
+      const selectorValue =
+        spec.strategy.selector?.trim() ||
+        (spec.strategy.hash
+          ? `${spec.strategy.identifier}@${spec.strategy.hash}`
+          : spec.strategy.tag
+            ? `${spec.strategy.identifier}:${spec.strategy.tag}`
+            : spec.strategy.identifier);
+      setStrategySelectorInput(selectorValue);
+
+      const providerNames = Object.keys(spec.scope ?? {});
+      setSelectedProviders(providerNames);
+
+      const symbolMap: Record<string, string[]> = {};
+      providerNames.forEach((name) => {
+        const assignment = spec.scope[name];
+        const symbols = Array.isArray(assignment?.symbols) ? assignment.symbols : [];
+        symbolMap[name] = symbols
+          .map((symbol) => (typeof symbol === 'string' ? symbol : String(symbol ?? '')))
+          .filter((symbol) => symbol.length > 0);
+      });
+      setProviderSymbols(symbolMap);
+      setProviderSymbolFilters({});
+
+      const strategyMeta = strategies.find((strategy) => strategy.name === spec.strategy.identifier);
+      if (strategyMeta) {
+        const values: Record<string, string> = {};
+        strategyMeta.config.forEach((field) => {
+          const raw = spec.strategy.config[field.name];
+          if (raw === undefined || raw === null) {
+            values[field.name] = field.type === 'bool' ? 'false' : '';
+            return;
+          }
+          if (field.type === 'bool') {
+            values[field.name] = raw === true ? 'true' : 'false';
+            return;
+          }
+          values[field.name] = String(raw);
+        });
+        setConfigValues(values);
+      } else {
+        const values = Object.fromEntries(
+          Object.entries(spec.strategy.config ?? {}).map(([key, value]) => [key, String(value)]),
+        );
+        setConfigValues(values);
+      }
+
+      if (options?.setPrefilled) {
+        setPrefilledConfig(true);
+      }
+    },
+    [strategies],
+  );
+
+  const buildPayloadFromBuilder = (strict: boolean): { spec?: InstanceSpec; error?: string } => {
+    const idValue = newInstance.id.trim();
+    if (strict && !idValue) {
+      return { error: 'Instance ID is required' };
+    }
+
+    const selectorCandidate = strategySelectorInput.trim() || newInstance.strategyIdentifier.trim();
+    const parsedSelector = parseStrategySelector(selectorCandidate);
+    const originalIdentifier = newInstance.strategyIdentifier.trim();
+    let identifier = parsedSelector.identifier || originalIdentifier;
+    identifier = identifier.trim();
+
+    if (dialogMode === 'edit') {
+      identifier = originalIdentifier;
+    }
+
+    if (strict && !identifier) {
+      return { error: 'Strategy identifier is required' };
+    }
+
+    if (
+      strict &&
+      dialogMode === 'edit' &&
+      identifier.toLowerCase() !== originalIdentifier.toLowerCase()
+    ) {
+      return { error: 'Strategy identifier cannot be changed after creation.' };
+    }
+
+    const tag = parsedSelector.tag?.trim() ? parsedSelector.tag.trim() : undefined;
+    const hash = parsedSelector.hash?.trim() ? parsedSelector.hash.trim() : undefined;
+
+    let selectorValue = parsedSelector.selector?.trim() ?? '';
+    if (!selectorValue) {
+      if (hash) {
+        selectorValue = `${identifier || originalIdentifier}@${hash}`;
+      } else if (tag) {
+        selectorValue = `${identifier || originalIdentifier}:${tag}`;
+      } else {
+        selectorValue = identifier;
+      }
+    }
+
+    if (dialogMode === 'edit') {
+      selectorValue = strategySelectorInput.trim() || selectorValue;
+    }
+
+    if (strict && selectedProviders.length === 0) {
+      return { error: 'Select at least one provider' };
+    }
+
+    const scope: Record<string, { symbols: string[] }> = {};
+    const aggregatedSymbols = new Set<string>();
+    for (const providerName of selectedProviders) {
+      const selectedSymbols = providerSymbols[providerName] ?? [];
+      const parsedSymbols = Array.from(
+        new Set(
+          selectedSymbols
+            .map((symbol) => symbol.trim().toUpperCase())
+            .filter((symbol) => symbol.length > 0),
+        ),
+      );
+      if (strict && parsedSymbols.length === 0) {
+        return { error: `Provider "${providerName}" requires at least one symbol` };
+      }
+      parsedSymbols.forEach((symbol) => aggregatedSymbols.add(symbol));
+      scope[providerName] = { symbols: parsedSymbols };
+    }
+
+    if (strict && aggregatedSymbols.size === 0) {
+      return { error: 'At least one instrument symbol is required' };
+    }
+
+    const strategyMeta = strategies.find((strategy) => strategy.name === identifier);
+    if (strict && !strategyMeta) {
+      return { error: 'Strategy metadata is unavailable' };
+    }
+
+    const configPayload: Record<string, unknown> = {};
+    if (strategyMeta) {
+      for (const field of strategyMeta.config) {
+        const rawValue = configValues[field.name] ?? '';
+        if (field.type === 'bool') {
+          configPayload[field.name] = rawValue === 'true';
+          continue;
+        }
+        if (rawValue === '') {
+          if (strict && field.required) {
+            return { error: `Configuration field "${field.name}" is required` };
+          }
+          continue;
+        }
+        if (field.type === 'int') {
+          const parsed = parseInt(rawValue, 10);
+          if (strict && Number.isNaN(parsed)) {
+            return { error: `Configuration field "${field.name}" must be an integer` };
+          }
+          if (!Number.isNaN(parsed)) {
+            configPayload[field.name] = parsed;
+          }
+          continue;
+        }
+        if (field.type === 'float') {
+          const parsed = parseFloat(rawValue);
+          if (strict && Number.isNaN(parsed)) {
+            return { error: `Configuration field "${field.name}" must be a number` };
+          }
+          if (!Number.isNaN(parsed)) {
+            configPayload[field.name] = parsed;
+          }
+          continue;
+        }
+        configPayload[field.name] = rawValue;
+      }
+    } else if (!strict) {
+      Object.entries(configValues).forEach(([key, value]) => {
+        if (value !== '') {
+          configPayload[key] = value;
+        }
+      });
+    }
+
+    const spec: InstanceSpec = {
+      id: idValue,
+      strategy: {
+        identifier,
+        selector: selectorValue,
+        config: configPayload,
+      },
+      scope,
+    };
+
+    if (tag) {
+      spec.strategy.tag = tag;
+    }
+    if (hash) {
+      spec.strategy.hash = hash;
+    }
+    if (Object.keys(scope).length > 0) {
+      spec.providers = Object.keys(scope);
+      spec.aggregatedSymbols = Array.from(aggregatedSymbols);
+    }
+
+    return { spec };
+  };
+
+  const handleFormModeChange = (value: string) => {
+    if (value !== 'json' && value !== 'guided') {
+      return;
+    }
+    if (value === 'json') {
+      const { spec } = buildPayloadFromBuilder(false);
+      if (spec) {
+        setInstanceJsonDraft(formatInstanceSpec(spec));
+      } else if (!instanceJsonDraft.trim()) {
+        setInstanceJsonDraft(DEFAULT_INSTANCE_JSON);
+      }
+      setFormError(null);
+    } else {
+      const result = parseInstanceSpecDraft(instanceJsonDraft, { strict: false });
+      if (result.error) {
+        setFormError(result.error);
+        return;
+      }
+      if (result.spec) {
+        populateFormFromSpec(result.spec);
+      }
+    }
+    setFormMode(value);
   };
 
   const loadProviderInstrumentSymbols = useCallback(async (providerName: string) => {
@@ -609,123 +885,53 @@ export default function InstancesPage() {
   };
 
   const handleSubmit = async () => {
-    if (!newInstance.id.trim()) {
-      setFormError('Instance ID is required');
-      return;
-    }
-    if (!newInstance.strategyIdentifier) {
-      setFormError('Strategy selection is required');
-      return;
-    }
-    if (selectedProviders.length === 0) {
-      setFormError('Select at least one provider');
-      return;
-    }
+    let payload: InstanceSpec | undefined;
 
-    const selectorCandidate = strategySelectorInput.trim() || newInstance.strategyIdentifier.trim();
-    const parsedSelector = parseStrategySelector(selectorCandidate);
-    let identifier = parsedSelector.identifier || newInstance.strategyIdentifier.trim();
-    if (!identifier) {
-      setFormError('Strategy identifier is required');
-      return;
-    }
-    if (
-      dialogMode === 'edit' &&
-      identifier.toLowerCase() !== newInstance.strategyIdentifier.trim().toLowerCase()
-    ) {
-      setFormError('Strategy identifier cannot be changed after creation.');
-      return;
-    }
-    if (dialogMode === 'edit') {
-      identifier = newInstance.strategyIdentifier.trim();
-    }
-    const tag = parsedSelector.tag?.trim() ? parsedSelector.tag.trim() : undefined;
-    const hash = parsedSelector.hash?.trim() ? parsedSelector.hash.trim() : undefined;
-    const selectorValue = hash
-      ? `${identifier}@${hash}`
-      : tag
-        ? `${identifier}:${tag}`
-        : identifier;
-
-    const strategyMeta = strategies.find((strategy) => strategy.name === identifier);
-    if (!strategyMeta) {
-      setFormError('Strategy metadata is unavailable');
-      return;
-    }
-
-    const scope: Record<string, { symbols: string[] }> = {};
-    const allSymbols = new Set<string>();
-    for (const providerName of selectedProviders) {
-      const selectedSymbols = providerSymbols[providerName] ?? [];
-      const parsed = Array.from(
-        new Set(
-          selectedSymbols
-            .map((symbol) => symbol.trim().toUpperCase())
-            .filter((symbol) => symbol.length > 0),
-        ),
-      );
-      if (parsed.length === 0) {
-        setFormError(`Provider "${providerName}" requires at least one symbol`);
+    if (formMode === 'json') {
+      const result = parseInstanceSpecDraft(instanceJsonDraft, { strict: true });
+      if (!result.spec) {
+        setFormError(result.error ?? 'Invalid instance specification');
         return;
       }
-      parsed.forEach((symbol) => allSymbols.add(symbol));
-      scope[providerName] = { symbols: parsed };
+      if (dialogMode === 'edit') {
+        if (!editingInstanceId) {
+          setFormError('No instance selected for update');
+          return;
+        }
+        const submittedId = result.spec.id.trim();
+        if (submittedId && submittedId !== editingInstanceId.trim()) {
+          setFormError('Instance ID cannot be changed during update.');
+          return;
+        }
+      }
+      if (!result.spec.id.trim()) {
+        setFormError('Instance ID is required.');
+        return;
+      }
+      payload = result.spec;
+      populateFormFromSpec(result.spec);
+    } else {
+      const builderResult = buildPayloadFromBuilder(true);
+      if (!builderResult.spec) {
+        setFormError(builderResult.error ?? 'Invalid instance specification');
+        return;
+      }
+      payload = builderResult.spec;
+      setInstanceJsonDraft(formatInstanceSpec(builderResult.spec));
     }
 
-    if (allSymbols.size === 0) {
-      setFormError('At least one instrument symbol is required');
+    if (!payload) {
+      setFormError('Instance specification is required.');
       return;
     }
 
-    const configPayload: Record<string, unknown> = {};
-    for (const field of strategyMeta.config) {
-      const rawValue = configValues[field.name] ?? '';
-      if (field.type === 'bool') {
-        configPayload[field.name] = rawValue === 'true';
-        continue;
-      }
-      if (rawValue === '') {
-        if (field.required) {
-          setFormError(`Configuration field "${field.name}" is required`);
-          return;
-        }
-        continue;
-      }
-      if (field.type === 'int') {
-        const parsed = parseInt(rawValue, 10);
-        if (Number.isNaN(parsed)) {
-          setFormError(`Configuration field "${field.name}" must be an integer`);
-          return;
-        }
-        configPayload[field.name] = parsed;
-        continue;
-      }
-      if (field.type === 'float') {
-        const parsed = parseFloat(rawValue);
-        if (Number.isNaN(parsed)) {
-          setFormError(`Configuration field "${field.name}" must be a number`);
-          return;
-        }
-        configPayload[field.name] = parsed;
-        continue;
-      }
-      configPayload[field.name] = rawValue;
+    const mode = dialogMode;
+    const targetId = payload.id.trim();
+    if (!targetId) {
+      setFormError('Instance ID is required.');
+      return;
     }
 
-    const payload = {
-      id: newInstance.id.trim(),
-      strategy: {
-        identifier,
-        selector: selectorValue,
-        tag,
-        hash,
-        config: configPayload,
-      },
-      scope,
-    };
-
-    const mode = dialogMode;
-    const targetId = newInstance.id.trim();
     try {
       setFormError(null);
       setDialogSaving(true);
@@ -749,13 +955,17 @@ export default function InstancesPage() {
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '';
+      const providerNames =
+        payload.providers && payload.providers.length > 0
+          ? payload.providers
+          : Object.keys(payload.scope ?? {});
       if (errorMessage.includes('provider') && errorMessage.includes('unavailable')) {
         const matchedProvider =
-          selectedProviders.find((name) =>
+          providerNames.find((name) =>
             errorMessage.toLowerCase().includes(name.toLowerCase()),
-          ) ?? selectedProviders[0] ?? 'selected provider';
+          ) ?? providerNames[0] ?? 'selected provider';
         setFormError(
-          `Provider "${matchedProvider}" is not running. Start the provider and try creating the instance again.`,
+          `Provider "${matchedProvider}" is not running. Start the provider and try again.`,
         );
       } else if (errorMessage.includes('scope assignments are immutable')) {
         setFormError(
@@ -899,61 +1109,9 @@ export default function InstancesPage() {
     setCreateDialogOpen(true);
     try {
       const instance = await apiClient.getInstance(id);
-      const scopeEntries = Object.entries(instance.scope ?? {});
-      const providerList = scopeEntries.map(([name]) => name);
-      const symbolMap: Record<string, string[]> = {};
-      scopeEntries.forEach(([name, assignment]) => {
-        const symbols = Array.isArray(assignment?.symbols) ? assignment.symbols : [];
-        const normalised = Array.from(
-          new Set(
-            symbols
-              .map((symbol) => (typeof symbol === 'string' ? symbol : String(symbol ?? '')))
-              .map((symbol) => symbol.trim().toUpperCase())
-              .filter((symbol) => symbol.length > 0),
-          ),
-        );
-        symbolMap[name] = normalised;
-      });
-
-      setNewInstance({
-        id: instance.id,
-        strategyIdentifier: instance.strategy.identifier,
-      });
-      const selectorRaw =
-        (instance.strategy.selector && instance.strategy.selector.trim()) ||
-        (instance.strategy.hash
-          ? `${instance.strategy.identifier}@${instance.strategy.hash}`
-          : instance.strategy.tag
-            ? `${instance.strategy.identifier}:${instance.strategy.tag}`
-            : instance.strategy.identifier);
-      setStrategySelectorInput(selectorRaw);
-      setSelectedProviders(providerList);
-      setProviderSymbols(symbolMap);
-
-      const strategyMeta = strategies.find(
-        (strategy) => strategy.name === instance.strategy.identifier,
-      );
-      if (strategyMeta) {
-        const values: Record<string, string> = {};
-        strategyMeta.config.forEach((field) => {
-          const raw = instance.strategy.config[field.name];
-          if (raw === undefined || raw === null) {
-            values[field.name] = field.type === 'bool' ? 'false' : '';
-            return;
-          }
-          if (field.type === 'bool') {
-            values[field.name] = raw === true ? 'true' : 'false';
-            return;
-          }
-          values[field.name] = String(raw);
-        });
-        setConfigValues(values);
-      } else {
-        const values = Object.fromEntries(
-          Object.entries(instance.strategy.config).map(([key, value]) => [key, String(value)]),
-        );
-        setConfigValues(values);
-      }
+      populateFormFromSpec(instance, { setPrefilled: true });
+      setInstanceJsonDraft(formatInstanceSpec(instance));
+      setFormMode('json');
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to load instance');
       setPrefilledConfig(false);
@@ -1233,7 +1391,60 @@ export default function InstancesPage() {
                 </div>
               ) : (
                 <div className="grid gap-4 py-4">
-                  <div className="grid gap-2">
+                  <Tabs value={formMode} onValueChange={handleFormModeChange}>
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="json">JSON spec</TabsTrigger>
+                      <TabsTrigger value="guided">Guided form</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="json" className="space-y-4 pt-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="instance-json-editor">Instance specification</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Provide the persisted strategy instance payload, including strategy selector, configuration values, and provider scope assignments.
+                        </p>
+                        <CodeEditor
+                          id="instance-json-editor"
+                          value={instanceJsonDraft}
+                          onChange={(value) => {
+                            setInstanceJsonDraft(value);
+                            setFormError(null);
+                          }}
+                          mode="json"
+                          allowHorizontalScroll
+                          wrapEnabled={false}
+                          height="18rem"
+                          className="rounded-md border"
+                        />
+                        <p className={jsonDiagnosticClass}>{jsonDiagnostics.message}</p>
+                      </div>
+                      <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+                        <p className="font-medium text-foreground">Helpful context</p>
+                        {providers.length === 0 ? (
+                          <p>No providers are configured. Create and start a provider before assigning scope.</p>
+                        ) : (
+                          <ul className="list-disc space-y-1 pl-5">
+                            {providers.map((provider) => (
+                              <li key={provider.name}>
+                                <span className="font-medium text-foreground">{provider.name}</span>{' '}
+                                {provider.running ? '(running)' : '(stopped)'}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="text-xs">
+                          Scope entries map providers to uppercase instrument symbols, for example:
+                        </p>
+                        <pre className="overflow-x-auto rounded bg-background/70 p-2 text-xs font-mono text-foreground">
+{`"scope": {
+  "binance-demo": {
+    "symbols": ["BTC-USDT"]
+  }
+}`}
+                        </pre>
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="guided" className="space-y-4 pt-4">
+                      <div className="grid gap-2">
                     <Label htmlFor="id">Instance ID</Label>
                     <Input
                       id="id"
@@ -1569,6 +1780,8 @@ export default function InstancesPage() {
                       </div>
                     </div>
                   )}
+                    </TabsContent>
+                  </Tabs>
                 </div>
               )}
             </div>
