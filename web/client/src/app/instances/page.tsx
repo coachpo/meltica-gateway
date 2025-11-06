@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CircleStopIcon, Clock3Icon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon, Copy, RotateCcwIcon } from 'lucide-react';
 import { useToast } from '@/components/ui/toast-provider';
@@ -234,6 +235,9 @@ export default function InstancesPage() {
       : jsonDiagnostics.status === 'error'
         ? 'text-xs text-destructive'
         : 'text-xs text-muted-foreground';
+
+  const submitDisabled =
+    dialogSaving || instanceLoading || (formMode === 'json' && jsonDiagnostics.status !== 'success');
 
   const ensureHistoryEntry = useCallback((id: string) => {
     if (!id) {
@@ -1367,7 +1371,7 @@ export default function InstancesPage() {
               Create Instance
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl sm:max-w-3xl sm:max-h-[85vh] flex flex-col">
+          <DialogContent className="max-w-2xl sm:max-w-3xl max-h-[85vh] flex min-h-0 flex-col">
             <DialogHeader>
               <DialogTitle>
                 {dialogMode === 'create' ? 'Create Strategy Instance' : 'Edit Strategy Instance'}
@@ -1383,14 +1387,14 @@ export default function InstancesPage() {
                 <AlertDescription>{formError}</AlertDescription>
               </Alert>
             )}
-            <div className="flex-1 overflow-y-auto pr-1">
+            <ScrollArea className="flex-1 min-h-0" type="auto">
               {instanceLoading ? (
                 <div className="flex items-center justify-center py-10 text-muted-foreground">
                   <Loader2Icon className="mr-2 h-5 w-5 animate-spin" />
                   Loading instance...
                 </div>
               ) : (
-                <div className="grid gap-4 py-4">
+                <div className="grid gap-4 py-4 pr-1">
                   <Tabs value={formMode} onValueChange={handleFormModeChange}>
                     <TabsList className="grid w-full grid-cols-2">
                       <TabsTrigger value="json">JSON spec</TabsTrigger>
@@ -1665,46 +1669,53 @@ export default function InstancesPage() {
                                           }}
                                           placeholder="Search symbols"
                                         />
-                                        <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
-                                          {filteredSymbols.length === 0 ? (
-                                            <p className="text-xs text-muted-foreground">
-                                              No matching symbols found.
-                                            </p>
-                                          ) : (
-                                            filteredSymbols.map((symbol) => {
-                                              const checked = selectedSymbols.includes(symbol);
-                                              return (
-                                                <label
-                                                  key={symbol}
-                                                  className="flex items-center gap-2 text-sm text-foreground"
-                                                >
-                                                  <Checkbox
-                                                    checked={checked}
-                                                    onChange={(event) => {
-                                                      const { checked: symbolChecked } = event.target;
-                                                      setFormError(null);
-                                                      setProviderSymbols((prev) => {
-                                                        const current = new Set(prev[providerName] ?? []);
-                                                        if (symbolChecked) {
-                                                          current.add(symbol);
-                                                        } else {
-                                                          current.delete(symbol);
-                                                        }
-                                                        return {
-                                                          ...prev,
-                                                          [providerName]: Array.from(current).sort((a, b) =>
-                                                            a.localeCompare(b),
-                                                          ),
-                                                        };
-                                                      });
-                                                    }}
-                                                  />
-                                                  <span>{symbol}</span>
-                                                </label>
-                                              );
-                                            })
-                                          )}
-                                        </div>
+                                        <ScrollArea
+                                          className="pr-1"
+                                          type="auto"
+                                          aria-label={`${providerName} available symbols`}
+                                          viewportClassName="max-h-48"
+                                        >
+                                          <div className="space-y-1">
+                                            {filteredSymbols.length === 0 ? (
+                                              <p className="text-xs text-muted-foreground">
+                                                No matching symbols found.
+                                              </p>
+                                            ) : (
+                                              filteredSymbols.map((symbol) => {
+                                                const checked = selectedSymbols.includes(symbol);
+                                                return (
+                                                  <label
+                                                    key={symbol}
+                                                    className="flex items-center gap-2 text-sm text-foreground"
+                                                  >
+                                                    <Checkbox
+                                                      checked={checked}
+                                                      onChange={(event) => {
+                                                        const { checked: symbolChecked } = event.target;
+                                                        setFormError(null);
+                                                        setProviderSymbols((prev) => {
+                                                          const current = new Set(prev[providerName] ?? []);
+                                                          if (symbolChecked) {
+                                                            current.add(symbol);
+                                                          } else {
+                                                            current.delete(symbol);
+                                                          }
+                                                          return {
+                                                            ...prev,
+                                                            [providerName]: Array.from(current).sort((a, b) =>
+                                                              a.localeCompare(b)
+                                                            ),
+                                                          };
+                                                        });
+                                                      }}
+                                                    />
+                                                    <span>{symbol}</span>
+                                                  </label>
+                                                );
+                                              })
+                                            )}
+                                          </div>
+                                        </ScrollArea>
                                         {selectedSymbols.length > 0 ? (
                                           <div className="flex flex-wrap gap-1 pt-1">
                                             {selectedSymbols.map((symbol) => (
@@ -1784,7 +1795,7 @@ export default function InstancesPage() {
                   </Tabs>
                 </div>
               )}
-            </div>
+            </ScrollArea>
             <DialogFooter>
               <Button
                 variant="outline"
@@ -1796,7 +1807,7 @@ export default function InstancesPage() {
               >
                 Cancel
               </Button>
-              <Button onClick={handleSubmit} disabled={dialogSaving || instanceLoading}>
+              <Button onClick={handleSubmit} disabled={submitDisabled} aria-disabled={submitDisabled}>
                 {dialogSaving ? (
                   <>
                     <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />

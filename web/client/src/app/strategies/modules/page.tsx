@@ -906,8 +906,14 @@ export default function StrategyModulesPage() {
       .split(',')
       .map((alias) => alias.trim())
       .filter((alias) => alias.length > 0);
+    let finalSource = formData.source;
+    if (formMode === 'create' && trimmedName) {
+      const metadataNameRegex = /(metadata\s*:\s*{\s*name\s*:\s*['"])([^'"]*)(['"])/;
+      finalSource = finalSource.replace(metadataNameRegex, `$1${trimmedName}$3`);
+    }
+
     const payload = {
-      source: formData.source,
+      source: finalSource,
       promoteLatest: formData.promoteLatest,
       ...(trimmedName ? { name: trimmedName } : {}),
       ...(trimmedFilename ? { filename: trimmedFilename } : {}),
@@ -1471,7 +1477,9 @@ export default function StrategyModulesPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
+            <ScrollArea className="-mx-6" type="auto" aria-label="Strategy modules table">
+              <div className="min-w-[1450px] px-6 [&_[data-slot=table-container]]:overflow-visible">
+                <Table containerClassName="overflow-visible">
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
@@ -1663,7 +1671,9 @@ export default function StrategyModulesPage() {
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+                </Table>
+              </div>
+            </ScrollArea>
           </CardContent>
         </Card>
       )}
@@ -1682,7 +1692,7 @@ export default function StrategyModulesPage() {
           }
         }}
       >
-        <DialogContent className="w-[min(96vw,1440px)] max-h-[94vh] overflow-y-auto sm:max-w-[76rem] lg:max-w-[86rem]">
+        <DialogContent className="w-[min(96vw,1440px)] max-h-[94vh] sm:max-w-[76rem] lg:max-w-[86rem] flex flex-col">
           <DialogHeader>
             <DialogTitle>
               {formMode === 'create' ? 'Upload strategy module' : `Edit ${formTarget?.name ?? ''}`}
@@ -1693,7 +1703,8 @@ export default function StrategyModulesPage() {
                 : 'Update the JavaScript source for this strategy module.'}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-6 py-2 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+          <ScrollArea className="flex-1 pr-1" type="auto">
+            <div className="grid gap-6 py-2 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
             <div className="space-y-4">
               <div className="grid gap-2">
                 <Label htmlFor="strategy-name">Strategy name</Label>
@@ -1845,7 +1856,6 @@ export default function StrategyModulesPage() {
                 readOnly={sourceEditorReadOnly}
                 enableBasicAutocompletion
                 enableLiveAutocompletion
-                enableSnippets
                 editorProps={{ $blockScrolling: true }}
                 annotations={sourceEditorAnnotations}
                 onSubmitShortcut={() => void handleFormSubmit()}
@@ -1903,6 +1913,7 @@ export default function StrategyModulesPage() {
               <AlertDescription>{formError}</AlertDescription>
             </Alert>
           ) : null}
+          </ScrollArea>
           <DialogFooter className="gap-2 sm:gap-2">
             <Button
               type="button"
@@ -2153,14 +2164,15 @@ export default function StrategyModulesPage() {
           }
         }}
       >
-        <DialogContent className="w-full max-w-3xl md:w-[90vw] max-h-[80vh] overflow-y-auto">
+        <DialogContent className="w-full max-w-3xl md:w-[90vw] max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Targeted refresh</DialogTitle>
             <DialogDescription>
               Refresh specific strategy selectors or exact hashes without reloading the entire catalogue.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <ScrollArea className="flex-1 pr-1" type="auto">
+            <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="refresh-strategies">Selectors</Label>
@@ -2263,7 +2275,8 @@ sha256:def...`}
                 </Table>
               </div>
             ) : null}
-          </div>
+            </div>
+          </ScrollArea>
           <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <Button variant="ghost" onClick={closeRefreshDialog} disabled={refreshProcessing}>
               Close
@@ -2300,15 +2313,16 @@ sha256:def...`}
           }
         }}
       >
-        <DialogContent className="max-w-3xl sm:max-w-4xl lg:max-w-5xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl sm:max-w-4xl lg:max-w-5xl max-h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>{detailModule?.metadata.displayName ?? detailModule?.name ?? 'Strategy'}</DialogTitle>
             <DialogDescription>
               Runtime metadata exported by the JavaScript module.
             </DialogDescription>
           </DialogHeader>
-          {detailModule ? (
-            <div className="space-y-6">
+          <ScrollArea className="flex-1 pr-1" type="auto">
+            {detailModule ? (
+              <div className="space-y-6">
               <div>
                 <h4 className="text-sm font-semibold">Identifiers</h4>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -2385,8 +2399,13 @@ sha256:def...`}
               <div>
                 <h4 className="text-sm font-semibold">Revision history</h4>
                 {detailModule.revisions && detailModule.revisions.length > 0 ? (
-                  <div className="mt-2 overflow-x-auto rounded-md border">
-                    <Table>
+                  <ScrollArea
+                    className="mt-2 rounded-md border"
+                    type="auto"
+                    aria-label="Revision history table"
+                  >
+                    <div className="min-w-[720px] [&_[data-slot=table-container]]:overflow-visible">
+                      <Table containerClassName="overflow-visible">
                       <TableHeader>
                         <TableRow>
                           <TableHead>Tag / version</TableHead>
@@ -2493,6 +2512,7 @@ sha256:def...`}
                       </TableBody>
                     </Table>
                   </div>
+                  </ScrollArea>
                 ) : (
                   <p className="mt-2 text-sm text-muted-foreground">
                     No revision history available for this strategy yet.
@@ -2555,8 +2575,9 @@ sha256:def...`}
                   )}
                 </div>
               </div>
-            </div>
-          ) : null}
+              </div>
+            ) : null}
+          </ScrollArea>
         </DialogContent>
       </Dialog>
 
@@ -2570,35 +2591,37 @@ sha256:def...`}
           }
         }}
       >
-        <DialogContent className="w-[min(96vw,1440px)] max-h-[94vh] sm:max-w-[76rem] lg:max-w-[86rem]">
+        <DialogContent className="w-[min(96vw,1440px)] max-h-[94vh] sm:max-w-[76rem] lg:max-w-[86rem] flex flex-col">
           <DialogHeader>
             <DialogTitle>
               {sourceModule ? `Source: ${sourceModule.file || sourceModule.name}` : 'Source'}
             </DialogTitle>
             <DialogDescription>Read-only view of the on-disk JavaScript module.</DialogDescription>
           </DialogHeader>
-          {sourceLoading ? (
-            <div className="flex items-center gap-2 py-8 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading strategy source…
-            </div>
-          ) : sourceError ? (
-            <Alert variant="destructive">
-              <AlertDescription>{sourceError}</AlertDescription>
-            </Alert>
-          ) : (
-            <div className="rounded-md border h-[60vh]">
-              <CodeViewer
-                value={sourceContent}
-                mode="javascript"
-                allowHorizontalScroll
-                wrapEnabled={false}
-                height="100%"
-                className="h-full w-full"
-                editorClassName={STRATEGY_SOURCE_EDITOR_CLASS}
-              />
-            </div>
-          )}
+          <ScrollArea className="flex-1 pr-1" type="auto">
+            {sourceLoading ? (
+              <div className="flex items-center gap-2 py-8 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading strategy source…
+              </div>
+            ) : sourceError ? (
+              <Alert variant="destructive">
+                <AlertDescription>{sourceError}</AlertDescription>
+              </Alert>
+            ) : (
+              <div className="h-[60vh] rounded-md border">
+                <CodeViewer
+                  value={sourceContent}
+                  mode="javascript"
+                  allowHorizontalScroll
+                  wrapEnabled={false}
+                  height="100%"
+                  className="h-full w-full"
+                  editorClassName={STRATEGY_SOURCE_EDITOR_CLASS}
+                />
+              </div>
+            )}
+          </ScrollArea>
           <DialogFooter>
             <Button
               type="button"

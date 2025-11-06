@@ -1,6 +1,14 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type AriaAttributes,
+} from 'react';
 import dynamic from 'next/dynamic';
 import type { IAceEditorProps, ICommand } from 'react-ace';
 
@@ -70,7 +78,10 @@ export interface CodeEditorProps
 }
 
 export const CodeEditor = forwardRef<unknown, CodeEditorProps>(function CodeEditor(
-  {
+  props,
+  ref,
+) {
+  const {
     value,
     onChange,
     mode = 'javascript',
@@ -91,9 +102,11 @@ export const CodeEditor = forwardRef<unknown, CodeEditorProps>(function CodeEdit
     onLoad: onEditorLoad,
     id,
     ...rest
-  },
-  ref,
-) {
+  } = props;
+  const ariaProps = props as CodeEditorProps & AriaAttributes;
+  const ariaLabel = ariaProps['aria-label'];
+  const ariaLabelledBy = ariaProps['aria-labelledby'];
+  const ariaDescribedBy = ariaProps['aria-describedby'];
   const { theme: appTheme } = useTheme();
   const [isReady, setIsReady] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -164,9 +177,30 @@ export const CodeEditor = forwardRef<unknown, CodeEditorProps>(function CodeEdit
   const handleLoad = useCallback<NonNullable<IAceEditorProps['onLoad']>>(
     (editor) => {
       editorRef.current = editor;
+      const textInput = editor.textInput?.getElement?.();
+      if (textInput) {
+        if (id) {
+          textInput.setAttribute('id', id);
+        }
+        if (ariaLabel) {
+          textInput.setAttribute('aria-label', ariaLabel);
+        } else {
+          textInput.removeAttribute('aria-label');
+        }
+        if (ariaLabelledBy) {
+          textInput.setAttribute('aria-labelledby', ariaLabelledBy);
+        } else {
+          textInput.removeAttribute('aria-labelledby');
+        }
+        if (ariaDescribedBy) {
+          textInput.setAttribute('aria-describedby', ariaDescribedBy);
+        } else {
+          textInput.removeAttribute('aria-describedby');
+        }
+      }
       onEditorLoad?.(editor);
     },
-    [onEditorLoad],
+    [ariaDescribedBy, ariaLabel, ariaLabelledBy, id, onEditorLoad],
   );
 
   const containerClassName = cn('relative w-full', className);
@@ -218,12 +252,13 @@ export const CodeEditor = forwardRef<unknown, CodeEditorProps>(function CodeEdit
   return (
     <div
       ref={containerRef}
-      id={id}
+      id={id ? `${id}-container` : undefined}
       className={cn('relative w-full', className)}
       data-slot="code-editor"
     >
       <AceEditor
         ref={ref}
+        id={id}
         mode={mode}
         theme={resolvedTheme}
         value={value}

@@ -32,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -927,11 +928,11 @@ export default function ProvidersPage() {
             </Alert>
           )}
 
-          <div className="flex-1 overflow-y-auto pr-1">
+          <ScrollArea className="flex-1" type="auto">
             {formLoading ? (
               <div className="py-10 text-sm text-muted-foreground">Loading provider…</div>
             ) : (
-              <div className="space-y-4 pb-4">
+              <div className="space-y-4 pb-4 pr-1">
                 <div className="space-y-2">
                   <Label htmlFor="provider-name">Name</Label>
                   <Input
@@ -1024,7 +1025,7 @@ export default function ProvidersPage() {
                 </div>
               </div>
             )}
-          </div>
+          </ScrollArea>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => handleFormOpenChange(false)} disabled={submitting}>
@@ -1050,11 +1051,11 @@ export default function ProvidersPage() {
             </Alert>
           )}
 
-          <div className="flex-1 overflow-y-auto pr-1">
-          {detailLoading ? (
-            <div>Loading provider…</div>
-          ) : detail ? (
-            <div className="space-y-4 text-sm">
+          <ScrollArea className="flex-1" type="auto">
+            {detailLoading ? (
+              <div>Loading provider…</div>
+            ) : detail ? (
+              <div className="space-y-4 pr-1 text-sm">
               {(() => {
                 const dependentInstances = detail.dependentInstances ?? [];
                 const { visible: dynamicDependents, hidden: baselineDependents } = partitionDependents(
@@ -1157,29 +1158,36 @@ export default function ProvidersPage() {
                       </p>
                     ) : (
                       <>
-                        <div className="max-h-56 overflow-y-auto space-y-1">
-                          {currentPageInstruments.map((instrument) => {
-                            const isSelected = selectedInstrument?.symbol === instrument.symbol;
-                            const baseLabel = instrumentBaseValue(instrument) || '—';
-                            const quoteLabel = instrumentQuoteValue(instrument) || '—';
-                            return (
-                              <button
-                                key={instrument.symbol}
-                                type="button"
-                                onClick={() => setSelectedInstrument(instrument)}
-                                className={cn(
-                                  'w-full rounded-md px-2 py-1 text-left text-sm transition-colors',
-                                  isSelected
-                                    ? 'bg-primary/10 text-primary'
-                                    : 'text-muted-foreground hover:bg-muted'
-                                )}
-                              >
-                                <span className="font-medium">{instrument.symbol ?? '—'}</span>{' '}
-                                ({baseLabel}/{quoteLabel})
-                              </button>
-                            );
-                          })}
-                        </div>
+                        <ScrollArea
+                          className="pr-1"
+                          type="auto"
+                          aria-label="Provider instruments"
+                          viewportClassName="max-h-56"
+                        >
+                          <div className="space-y-1">
+                            {currentPageInstruments.map((instrument) => {
+                              const isSelected = selectedInstrument?.symbol === instrument.symbol;
+                              const baseLabel = instrumentBaseValue(instrument) || '—';
+                              const quoteLabel = instrumentQuoteValue(instrument) || '—';
+                              return (
+                                <button
+                                  key={instrument.symbol}
+                                  type="button"
+                                  onClick={() => setSelectedInstrument(instrument)}
+                                  className={cn(
+                                    'w-full rounded-md px-2 py-1 text-left text-sm transition-colors',
+                                    isSelected
+                                      ? 'bg-primary/10 text-primary'
+                                      : 'text-muted-foreground hover:bg-muted'
+                                  )}
+                                >
+                                  <span className="font-medium">{instrument.symbol ?? '—'}</span>{' '}
+                                  ({baseLabel}/{quoteLabel})
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </ScrollArea>
                         {totalInstrumentPages > 1 && (
                           <div className="flex flex-col gap-2 pt-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
                             <span>
@@ -1274,11 +1282,11 @@ export default function ProvidersPage() {
                   </div>
                 </div>
               )}
-            </div>
-          ) : (
-            <div className="text-muted-foreground">Select a provider to view details.</div>
-          )}
-          </div>
+              </div>
+            ) : (
+              <div className="text-muted-foreground">Select a provider to view details.</div>
+            )}
+          </ScrollArea>
         </DialogContent>
       </Dialog>
       </div>
