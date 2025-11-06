@@ -599,33 +599,6 @@ func parseUUID(value string) (pgtype.UUID, error) {
 	return pgtype.UUID{Bytes: parsed, Valid: true}, nil
 }
 
-func numericFromString(value string) (pgtype.Numeric, error) {
-	var out pgtype.Numeric
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return out, fmt.Errorf("order store: numeric value required")
-	}
-	if err := out.Scan(trimmed); err != nil {
-		return out, fmt.Errorf("order store: parse numeric %q: %w", trimmed, err)
-	}
-	return out, nil
-}
-
-func numericFromOptional(ptr *string) (pgtype.Numeric, error) {
-	var out pgtype.Numeric
-	if ptr == nil {
-		return out, nil
-	}
-	trimmed := strings.TrimSpace(*ptr)
-	if trimmed == "" {
-		return out, nil
-	}
-	if err := out.Scan(trimmed); err != nil {
-		return out, fmt.Errorf("order store: parse numeric %q: %w", trimmed, err)
-	}
-	return out, nil
-}
-
 func textFromString(value string) pgtype.Text {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {

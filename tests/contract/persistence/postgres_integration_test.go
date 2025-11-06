@@ -209,6 +209,9 @@ func TestPostgresPersistenceStores(t *testing.T) {
 	filledAt := time.Now().Add(2 * time.Minute).Unix()
 	ackAt := time.Now().Add(30 * time.Second).Unix()
 	doneAt := time.Now().Add(4 * time.Minute).Unix()
+	secondOrderID := uuid.NewString()
+	secondClientID := "cli-" + uuid.NewString()
+	secondQuantity := "  2.5000  "
 
 	err := orderStore.WithTransaction(ctx, func(ctx context.Context, tx orderstore.Tx) error {
 		if err := tx.CreateOrder(ctx, orderstore.Order{
@@ -275,6 +278,26 @@ func TestPostgresPersistenceStores(t *testing.T) {
 		t.Fatalf("order transaction: %v", err)
 	}
 
+	if err := orderStore.WithTransaction(ctx, func(ctx context.Context, tx orderstore.Tx) error {
+		return tx.CreateOrder(ctx, orderstore.Order{
+			ID:               secondOrderID,
+			Provider:         providerSnapshot.Name,
+			StrategyInstance: strategySnapshot.ID,
+			ClientOrderID:    secondClientID,
+			Symbol:           "ETHUSDT",
+			Side:             "SELL",
+			Type:             "MARKET",
+			Quantity:         secondQuantity,
+			State:            "NEW",
+			PlacedAt:         time.Now().Add(90 * time.Second).Unix(),
+			Metadata: map[string]any{
+				"source": "integration-test-secondary",
+			},
+		})
+	}); err != nil {
+		t.Fatalf("second order create: %v", err)
+	}
+
 	orders, err := orderStore.ListOrders(ctx, orderstore.OrderQuery{
 		StrategyInstance: strategySnapshot.ID,
 		Provider:         providerSnapshot.Name,
@@ -282,18 +305,55 @@ func TestPostgresPersistenceStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list orders: %v", err)
 	}
-	if len(orders) != 1 {
-		t.Fatalf("expected 1 order, got %d", len(orders))
+	if len(orders) != 2 {
+		t.Fatalf("expected 2 orders, got %d", len(orders))
 	}
-	gotOrder := orders[0]
-	if gotOrder.Order.ID != orderID {
-		t.Fatalf("unexpected order id %s", gotOrder.Order.ID)
+	var filledOrder, pendingOrder *orderstore.OrderRecord
+	for i := range orders {
+		switch orders[i].Order.ID {
+		case orderID:
+			filledOrder = &orders[i]
+		case secondOrderID:
+			pendingOrder = &orders[i]
+		}
 	}
-	if gotOrder.Order.Price == nil || !numericEqual(*gotOrder.Order.Price, price) {
-		t.Fatalf("expected price %s, got %v", price, gotOrder.Order.Price)
+	if filledOrder == nil || pendingOrder == nil {
+		t.Fatalf("orders missing primary (%v) or secondary (%v)", filledOrder != nil, pendingOrder != nil)
 	}
-	if gotOrder.CompletedAt == nil || *gotOrder.CompletedAt != doneAt {
-		t.Fatalf("expected completedAt %d, got %v", doneAt, gotOrder.CompletedAt)
+	if filledOrder.Order.Price == nil || !numericEqual(*filledOrder.Order.Price, price) {
+		t.Fatalf("expected price %s, got %v", price, filledOrder.Order.Price)
+	}
+	if filledOrder.CompletedAt == nil || *filledOrder.CompletedAt != doneAt {
+		t.Fatalf("expected completedAt %d, got %v", doneAt, filledOrder.CompletedAt)
+	}
+	if pendingOrder.Order.Price != nil {
+		t.Fatalf("expected pending order price to be nil, got %v", pendingOrder.Order.Price)
+	}
+	if !numericEqual(pendingOrder.Order.Quantity, strings.TrimSpace(secondQuantity)) {
+		t.Fatalf("pending order quantity mismatch, got %s", pendingOrder.Order.Quantity)
+	}
+
+	stateFiltered, err := orderStore.ListOrders(ctx, orderstore.OrderQuery{
+		StrategyInstance: strategySnapshot.ID,
+		Provider:         providerSnapshot.Name,
+		States:           []string{"FILLED"},
+	})
+	if err != nil {
+		t.Fatalf("list orders with state filter: %v", err)
+	}
+	if len(stateFiltered) != 1 || stateFiltered[0].Order.ID != orderID {
+		t.Fatalf("expected only filled order in filter results")
+	}
+	cancelledFiltered, err := orderStore.ListOrders(ctx, orderstore.OrderQuery{
+		StrategyInstance: strategySnapshot.ID,
+		Provider:         providerSnapshot.Name,
+		States:           []string{"CANCELLED"},
+	})
+	if err != nil {
+		t.Fatalf("list cancelled orders: %v", err)
+	}
+	if len(cancelledFiltered) != 0 {
+		t.Fatalf("expected zero cancelled orders, got %d", len(cancelledFiltered))
 	}
 
 	executions, err := orderStore.ListExecutions(ctx, orderstore.ExecutionQuery{
@@ -310,6 +370,9 @@ func TestPostgresPersistenceStores(t *testing.T) {
 	if executions[0].Execution.Fee == nil || !numericEqual(*executions[0].Execution.Fee, fee) {
 		t.Fatalf("expected fee %s, got %v", fee, executions[0].Execution.Fee)
 	}
+	if executions[0].Execution.Price == "" || !numericEqual(executions[0].Execution.Price, "27499.99") {
+		t.Fatalf("unexpected execution price %s", executions[0].Execution.Price)
+	}
 
 	balances, err := orderStore.ListBalances(ctx, orderstore.BalanceQuery{
 		Provider: providerSnapshot.Name,
@@ -323,6 +386,33 @@ func TestPostgresPersistenceStores(t *testing.T) {
 	}
 	if balances[0].BalanceSnapshot.Asset != "USDT" {
 		t.Fatalf("unexpected balance asset %s", balances[0].BalanceSnapshot.Asset)
+	}
+	latestBalance := orderstore.BalanceSnapshot{
+		Provider:   providerSnapshot.Name,
+		Asset:      "USDT",
+		Total:      "900.75",
+		Available:  "640.10",
+		SnapshotAt: time.Now().Add(5 * time.Minute).Unix(),
+		Metadata: map[string]any{
+			"account": "primary",
+			"marker":  "latest",
+		},
+	}
+	if err := orderStore.UpsertBalance(ctx, latestBalance); err != nil {
+		t.Fatalf("upsert latest balance: %v", err)
+	}
+	limitedBalances, err := orderStore.ListBalances(ctx, orderstore.BalanceQuery{
+		Provider: providerSnapshot.Name,
+		Limit:    1,
+	})
+	if err != nil {
+		t.Fatalf("list balances limit: %v", err)
+	}
+	if len(limitedBalances) != 1 {
+		t.Fatalf("expected 1 limited balance, got %d", len(limitedBalances))
+	}
+	if !numericEqual(limitedBalances[0].BalanceSnapshot.Total, latestBalance.Total) {
+		t.Fatalf("expected limited balance total %s, got %s", latestBalance.Total, limitedBalances[0].BalanceSnapshot.Total)
 	}
 
 	loadedProviders, err := providerStore.LoadProviders(ctx)
