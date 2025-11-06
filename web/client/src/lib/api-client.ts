@@ -73,9 +73,7 @@ const normaliseRuntimeConfigSnapshot = (payload: unknown): RuntimeConfigSnapshot
   const persistedAt =
     typeof data.persistedAt === 'string'
       ? (data.persistedAt as string)
-      : typeof data.persisted_at === 'string'
-        ? (data.persisted_at as string)
-        : null;
+      : null;
 
   const filePath =
     typeof data.filePath === 'string'
