@@ -25,22 +25,22 @@ const (
 type Instrument struct {
 	Symbol            string         `json:"symbol"`
 	Type              InstrumentType `json:"type"`
-	BaseCurrency      string         `json:"base_currency"`
-	QuoteCurrency     string         `json:"quote_currency"`
+	BaseCurrency      string         `json:"baseCurrency"`
+	QuoteCurrency     string         `json:"quoteCurrency"`
 	Venue             string         `json:"venue"`
 	Expiry            string         `json:"expiry,omitempty"`
-	ContractValue     *float64       `json:"contract_value,omitempty"`
-	ContractCurrency  string         `json:"contract_currency,omitempty"`
+	ContractValue     *float64       `json:"contractValue,omitempty"`
+	ContractCurrency  string         `json:"contractCurrency,omitempty"`
 	Strike            *float64       `json:"strike,omitempty"`
-	OptionType        OptionType     `json:"option_type,omitempty"`
-	PriceIncrement    string         `json:"price_increment,omitempty"`
-	QuantityIncrement string         `json:"quantity_increment,omitempty"`
-	PricePrecision    *int           `json:"price_precision,omitempty"`
-	QuantityPrecision *int           `json:"quantity_precision,omitempty"`
-	NotionalPrecision *int           `json:"notional_precision,omitempty"`
-	MinNotional       string         `json:"min_notional,omitempty"`
-	MinQuantity       string         `json:"min_quantity,omitempty"`
-	MaxQuantity       string         `json:"max_quantity,omitempty"`
+	OptionType        OptionType     `json:"optionType,omitempty"`
+	PriceIncrement    string         `json:"priceIncrement,omitempty"`
+	QuantityIncrement string         `json:"quantityIncrement,omitempty"`
+	PricePrecision    *int           `json:"pricePrecision,omitempty"`
+	QuantityPrecision *int           `json:"quantityPrecision,omitempty"`
+	NotionalPrecision *int           `json:"notionalPrecision,omitempty"`
+	MinNotional       string         `json:"minNotional,omitempty"`
+	MinQuantity       string         `json:"minQuantity,omitempty"`
+	MaxQuantity       string         `json:"maxQuantity,omitempty"`
 }
 
 // InstrumentType identifies the market structure for an instrument.
