@@ -1371,7 +1371,10 @@ export default function InstancesPage() {
               Create Instance
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl sm:max-w-3xl max-h-[85vh] flex min-h-0 flex-col">
+          <DialogContent
+            className="max-w-2xl sm:max-w-3xl flex min-h-0 flex-col"
+            style={{ height: 'min(85vh, 720px)' }}
+          >
             <DialogHeader>
               <DialogTitle>
                 {dialogMode === 'create' ? 'Create Strategy Instance' : 'Edit Strategy Instance'}
@@ -1387,7 +1390,7 @@ export default function InstancesPage() {
                 <AlertDescription>{formError}</AlertDescription>
               </Alert>
             )}
-            <ScrollArea className="flex-1 min-h-0" type="auto">
+            <ScrollArea className="flex-1 min-h-0 h-full" type="auto">
               {instanceLoading ? (
                 <div className="flex items-center justify-center py-10 text-muted-foreground">
                   <Loader2Icon className="mr-2 h-5 w-5 animate-spin" />
