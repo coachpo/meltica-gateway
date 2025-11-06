@@ -8,53 +8,43 @@ import (
 	"strings"
 
 	"github.com/coachpo/meltica/internal/domain/strategystore"
+	"github.com/coachpo/meltica/internal/infra/persistence/postgres/sqlc"
 	json "github.com/goccy/go-json"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // StrategyStore persists lambda strategy instance metadata.
 type StrategyStore struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	queries *sqlc.Queries
 }
 
 // NewStrategyStore constructs a StrategyStore backed by the provided pgx pool.
 func NewStrategyStore(pool *pgxpool.Pool) *StrategyStore {
-	return &StrategyStore{pool: pool}
+	if pool == nil {
+		return &StrategyStore{
+			pool:    nil,
+			queries: nil,
+		}
+	}
+	return &StrategyStore{
+		pool:    pool,
+		queries: sqlc.New(pool),
+	}
 }
 
-const (
-	strategyUpsertSQL = `
-INSERT INTO strategy_instances (
-    instance_id,
-    strategy_identifier,
-    version,
-    status,
-    config_hash,
-    metadata,
-    updated_at
-)
-VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
-ON CONFLICT (instance_id) DO UPDATE SET
-    strategy_identifier = EXCLUDED.strategy_identifier,
-    version = EXCLUDED.version,
-    status = EXCLUDED.status,
-    config_hash = EXCLUDED.config_hash,
-    metadata = EXCLUDED.metadata,
-    updated_at = NOW();
-`
-	strategyDeleteSQL = `DELETE FROM strategy_instances WHERE instance_id = $1;`
-	strategySelectSQL = `
-SELECT instance_id, strategy_identifier, version, status, config_hash, metadata, updated_at
-FROM strategy_instances
-ORDER BY instance_id;
-`
-)
+func (s *StrategyStore) ensureQueries() (*sqlc.Queries, error) {
+	if s.pool == nil || s.queries == nil {
+		return nil, fmt.Errorf("strategy store: nil pool")
+	}
+	return s.queries, nil
+}
 
 // Save upserts the provided strategy snapshot.
 func (s *StrategyStore) Save(ctx context.Context, snapshot strategystore.Snapshot) error {
-	if s.pool == nil {
-		return fmt.Errorf("strategy store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return err
 	}
 	id := strings.TrimSpace(snapshot.ID)
 	if id == "" {
@@ -76,14 +66,16 @@ func (s *StrategyStore) Save(ctx context.Context, snapshot strategystore.Snapsho
 		return fmt.Errorf("strategy store: encode metadata: %w", err)
 	}
 
-	if _, err := s.pool.Exec(ctx, strategyUpsertSQL,
-		id,
-		strings.TrimSpace(snapshot.Strategy.Identifier),
-		strings.TrimSpace(snapshot.Strategy.Version),
-		status,
-		configHash,
-		metadataBytes,
-	); err != nil {
+	params := sqlc.UpsertStrategyInstanceParams{
+		InstanceID:         id,
+		StrategyIdentifier: strings.TrimSpace(snapshot.Strategy.Identifier),
+		Version:            strings.TrimSpace(snapshot.Strategy.Version),
+		Status:             status,
+		ConfigHash:         configHash,
+		Description:        "",
+		Metadata:           metadataBytes,
+	}
+	if _, err := q.UpsertStrategyInstance(ctx, params); err != nil {
 		return fmt.Errorf("strategy store: upsert snapshot: %w", err)
 	}
 	return nil
@@ -91,14 +83,15 @@ func (s *StrategyStore) Save(ctx context.Context, snapshot strategystore.Snapsho
 
 // Delete removes a strategy snapshot.
 func (s *StrategyStore) Delete(ctx context.Context, id string) error {
-	if s.pool == nil {
-		return fmt.Errorf("strategy store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return err
 	}
 	trimmed := strings.TrimSpace(id)
 	if trimmed == "" {
 		return fmt.Errorf("strategy store: instance id required")
 	}
-	if _, err := s.pool.Exec(ctx, strategyDeleteSQL, trimmed); err != nil {
+	if err := q.DeleteStrategyInstance(ctx, trimmed); err != nil {
 		return fmt.Errorf("strategy store: delete snapshot: %w", err)
 	}
 	return nil
@@ -106,54 +99,38 @@ func (s *StrategyStore) Delete(ctx context.Context, id string) error {
 
 // Load retrieves all strategy snapshots.
 func (s *StrategyStore) Load(ctx context.Context) ([]strategystore.Snapshot, error) {
-	if s.pool == nil {
-		return nil, fmt.Errorf("strategy store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, strategySelectSQL)
+	rows, err := q.ListStrategyInstances(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("strategy store: select snapshots: %w", err)
 	}
-	defer rows.Close()
-
 	var snapshots []strategystore.Snapshot
-	for rows.Next() {
-		var (
-			instanceID string
-			identifier string
-			version    string
-			status     string
-			configHash string
-			metadata   []byte
-			updatedAt  pgtype.Timestamptz
-		)
-		if err := rows.Scan(&instanceID, &identifier, &version, &status, &configHash, &metadata, &updatedAt); err != nil {
-			return nil, fmt.Errorf("strategy store: scan snapshot: %w", err)
-		}
-		decoded, err := decodeStrategyMetadata(metadata)
+	for _, row := range rows {
+		decoded, err := decodeStrategyMetadata(row.Metadata)
 		if err != nil {
 			return nil, err
 		}
 		snapshot := strategystore.Snapshot{
-			ID:              instanceID,
+			ID:              row.InstanceID,
 			Strategy:        decoded.Strategy,
 			Providers:       decoded.Providers,
 			ProviderSymbols: decoded.ProviderSymbols,
-			Running:         status == "running",
+			Running:         strings.EqualFold(strings.TrimSpace(row.Status), "running"),
 			Dynamic:         decoded.Dynamic,
 			Baseline:        decoded.Baseline,
 			Metadata:        decoded.Metadata,
-			UpdatedAt:       updatedAt.Time,
+			UpdatedAt:       row.UpdatedAt.Time,
 		}
 		if snapshot.Strategy.Identifier == "" {
-			snapshot.Strategy.Identifier = identifier
+			snapshot.Strategy.Identifier = row.StrategyIdentifier
 		}
 		if snapshot.Strategy.Version == "" {
-			snapshot.Strategy.Version = version
+			snapshot.Strategy.Version = row.Version
 		}
 		snapshots = append(snapshots, snapshot)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("strategy store: iterate snapshots: %w", err)
 	}
 	return snapshots, nil
 }

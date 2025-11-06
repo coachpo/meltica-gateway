@@ -77,6 +77,12 @@
    - Record execution reports and balance updates to `executions` and `balances`, respectively, ensuring idempotency by keying on exchange IDs.
    - Provide read APIs for historical queries through the HTTP control plane.
 
+### Write-Through Cache Status (Updated 2025-02-14)
+
+- Provider specs and dispatcher routes are cached in-memory by `internal/app/provider/manager.go` and synchronously written through to Postgres via `providerstore.Store` (`persistSnapshot` / `persistRoutes`). On bootstrap the cache is rehydrated from persistence before providers start.
+- Orders, executions, balances, and outbox flows rely entirely on database reads/writes via sqlc repositories—no additional caching exists today.
+- Future cache introductions must update `docs/development/write-through-cache.md` so operators know which datasets survive restarts and which require database queries.
+
 5. **Event Outbox and Replay**
    - Persist published events to `events_outbox` before dispatch, mark them delivered after successful fan-out.
   - Introduce a background worker to replay undelivered events on startup or after failures.
@@ -84,8 +90,8 @@
 
 6. **Rollout and Hardening**
    - Mandate PostgreSQL across all environments and remove the memory driver from runtime builds.
-   - Run performance benchmarks, tune indexes, and validate connection pooling.
-   - Update operational docs, runbooks, and dashboards to monitor DB metrics and replica lag (if applicable).
+   - Run performance benchmarks, tune indexes, and validate connection pooling. (Dashboards now include `meltica_db_pool_connections_*` and `meltica_db_migrations_total`.)
+   - Update operational docs, runbooks, and dashboards to monitor DB metrics and replica lag (if applicable). (See `docs/development/migrations.md` for the runbook.)
    - Remove reliance on `lambdaManifest` YAML; bootstrap instances from the database/control plane only.
 
 ## Testing and Quality Strategy

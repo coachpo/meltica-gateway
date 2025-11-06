@@ -2,220 +2,52 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"github.com/coachpo/meltica/internal/domain/orderstore"
+	"github.com/coachpo/meltica/internal/infra/persistence/postgres/sqlc"
 	json "github.com/goccy/go-json"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // OrderStore persists order lifecycle information.
 type OrderStore struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	queries *sqlc.Queries
 }
 
 // NewOrderStore constructs an OrderStore backed by the provided pool.
 func NewOrderStore(pool *pgxpool.Pool) *OrderStore {
-	return &OrderStore{pool: pool}
+	if pool == nil {
+		return &OrderStore{
+			pool:    nil,
+			queries: nil,
+		}
+	}
+	return &OrderStore{
+		pool:    pool,
+		queries: sqlc.New(pool),
+	}
 }
 
 const (
-	orderInsertSQL = `
-INSERT INTO orders (
-    id,
-    provider_id,
-    strategy_instance_id,
-    client_order_id,
-    instrument,
-    side,
-    order_type,
-    quantity,
-    price,
-    state,
-    external_order_ref,
-    placed_at,
-    acknowledged_at,
-    completed_at,
-    metadata,
-    created_at,
-    updated_at
-) 
-VALUES (
-    @id,
-    (SELECT id FROM providers WHERE alias = @provider),
-    (SELECT id FROM strategy_instances WHERE instance_id = @strategy_instance_id),
-    @client_order_id,
-    @instrument,
-    @side,
-    @order_type,
-    @quantity,
-    @price,
-    @state,
-    @external_ref,
-    to_timestamp(@placed_at),
-    NULL,
-    NULL,
-    @metadata::jsonb,
-    NOW(),
-    NOW()
-)
-ON CONFLICT (id) DO NOTHING;
-`
-
-	orderUpdateSQL = `
-UPDATE orders
-SET state = @state,
-    acknowledged_at = COALESCE(to_timestamp(@ack_at), acknowledged_at),
-    completed_at = COALESCE(to_timestamp(@done_at), completed_at),
-    metadata = COALESCE(@metadata::jsonb, metadata),
-    updated_at = NOW()
-WHERE id = @id;
-`
-
-	executionUpsertSQL = `
-INSERT INTO executions (
-    order_id,
-    provider_id,
-    execution_id,
-    fill_quantity,
-    fill_price,
-    fee,
-    fee_asset,
-    liquidity,
-    traded_at,
-    metadata,
-    created_at
-)
-VALUES (
-    @order_id,
-    (SELECT id FROM providers WHERE alias = @provider),
-    @execution_id,
-    @quantity,
-    @price,
-    @fee,
-    @fee_asset,
-    @liquidity,
-    to_timestamp(@traded_at),
-    @metadata::jsonb,
-    NOW()
-)
-ON CONFLICT (order_id, execution_id) DO UPDATE SET
-    fill_quantity = EXCLUDED.fill_quantity,
-    fill_price = EXCLUDED.fill_price,
-    fee = EXCLUDED.fee,
-    fee_asset = EXCLUDED.fee_asset,
-    liquidity = EXCLUDED.liquidity,
-    traded_at = EXCLUDED.traded_at,
-    metadata = EXCLUDED.metadata,
-    created_at = EXCLUDED.created_at;
-`
-
-	balanceUpsertSQL = `
-INSERT INTO balances (
-    provider_id,
-    asset,
-    total,
-    available,
-    snapshot_at,
-    metadata,
-    created_at,
-    updated_at
-)
-VALUES (
-    (SELECT id FROM providers WHERE alias = @provider),
-    @asset,
-    @total,
-    @available,
-    to_timestamp(@snapshot_at),
-    @metadata::jsonb,
-    NOW(),
-    NOW()
-)
-ON CONFLICT (provider_id, asset, snapshot_at) DO UPDATE SET
-    total = EXCLUDED.total,
-    available = EXCLUDED.available,
-    metadata = EXCLUDED.metadata,
-    updated_at = NOW();
-`
-
-	orderSelectBase = `
-SELECT
-    o.id::text,
-    p.alias,
-    COALESCE(si.instance_id, ''),
-    o.client_order_id,
-    o.instrument,
-    o.side,
-    o.order_type,
-    o.quantity::text,
-    o.price::text,
-    o.state,
-    o.external_order_ref,
-    o.placed_at,
-    o.acknowledged_at,
-    o.completed_at,
-    o.metadata,
-    o.created_at,
-    o.updated_at
-FROM orders o
-JOIN providers p ON p.id = o.provider_id
-LEFT JOIN strategy_instances si ON si.id = o.strategy_instance_id
-`
-
-	executionSelectBase = `
-SELECT
-    e.order_id::text,
-    p.alias,
-    COALESCE(si.instance_id, ''),
-    e.execution_id,
-    e.fill_quantity::text,
-    e.fill_price::text,
-    e.fee::text,
-    e.fee_asset,
-    e.liquidity,
-    e.traded_at,
-    e.metadata,
-    e.created_at
-FROM executions e
-JOIN orders o ON o.id = e.order_id
-JOIN providers p ON p.id = e.provider_id
-LEFT JOIN strategy_instances si ON si.id = o.strategy_instance_id
-`
-
-	balanceSelectBase = `
-SELECT
-    p.alias,
-    b.asset,
-    b.total::text,
-    b.available::text,
-    b.snapshot_at,
-    b.metadata,
-    b.created_at,
-    b.updated_at
-FROM balances b
-JOIN providers p ON p.id = b.provider_id
-`
-
 	defaultOrderLimit     = 50
 	maxOrderLimit         = 500
 	defaultExecutionLimit = 100
 	defaultBalanceLimit   = 100
 )
 
-type execer interface {
-	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
-}
-
 type orderTx struct {
-	tx    pgx.Tx
-	store *OrderStore
+	tx      pgx.Tx
+	store   *OrderStore
+	queries *sqlc.Queries
 }
 
 func (s *OrderStore) ensurePool() (*pgxpool.Pool, error) {
@@ -225,90 +57,175 @@ func (s *OrderStore) ensurePool() (*pgxpool.Pool, error) {
 	return s.pool, nil
 }
 
-func (s *OrderStore) createOrderWith(ctx context.Context, exec execer, order orderstore.Order) error {
-	if strings.TrimSpace(order.ID) == "" {
-		return fmt.Errorf("order store: order id required")
+func (s *OrderStore) ensureQueries() (*sqlc.Queries, error) {
+	if s.pool == nil || s.queries == nil {
+		return nil, fmt.Errorf("order store: nil pool")
+	}
+	return s.queries, nil
+}
+
+func (s *OrderStore) createOrderWith(ctx context.Context, queries *sqlc.Queries, order orderstore.Order) error {
+	if queries == nil {
+		return fmt.Errorf("order store: nil queries")
+	}
+	orderID, err := parseUUID(strings.TrimSpace(order.ID))
+	if err != nil {
+		return err
+	}
+	providerID, err := s.lookupProviderID(ctx, queries, order.Provider)
+	if err != nil {
+		return err
+	}
+	strategyID, err := s.lookupStrategyUUID(ctx, queries, order.StrategyInstance)
+	if err != nil {
+		return err
+	}
+	quantity, err := numericFromString(order.Quantity)
+	if err != nil {
+		return fmt.Errorf("order store: quantity: %w", err)
+	}
+	price, err := numericFromOptional(order.Price)
+	if err != nil {
+		return fmt.Errorf("order store: price: %w", err)
 	}
 	metadata, err := encodeMetadata(order.Metadata)
 	if err != nil {
 		return fmt.Errorf("order store: encode metadata: %w", err)
 	}
-	args := pgx.NamedArgs{
-		"id":                   order.ID,
-		"provider":             strings.TrimSpace(order.Provider),
-		"strategy_instance_id": strings.TrimSpace(order.StrategyInstance),
-		"client_order_id":      order.ClientOrderID,
-		"instrument":           order.Symbol,
-		"side":                 strings.TrimSpace(order.Side),
-		"order_type":           strings.TrimSpace(order.Type),
-		"quantity":             order.Quantity,
-		"price":                nullableText(order.Price),
-		"state":                strings.TrimSpace(order.State),
-		"external_ref":         nullableString(order.ExternalReference),
-		"placed_at":            order.PlacedAt,
-		"metadata":             metadata,
+	placedAt := order.PlacedAt
+	if placedAt == 0 {
+		placedAt = time.Now().Unix()
 	}
-	if _, err := exec.Exec(ctx, orderInsertSQL, args); err != nil {
+
+	params := sqlc.InsertOrderParams{
+		ID:                 orderID,
+		ProviderID:         providerID,
+		StrategyInstanceID: strategyID,
+		ClientOrderID:      strings.TrimSpace(order.ClientOrderID),
+		Instrument:         strings.TrimSpace(order.Symbol),
+		Side:               strings.TrimSpace(order.Side),
+		OrderType:          strings.TrimSpace(order.Type),
+		Quantity:           quantity,
+		Price:              price,
+		State:              strings.TrimSpace(order.State),
+		ExternalOrderRef:   textFromString(order.ExternalReference),
+		PlacedAt:           timestamptzFromUnix(placedAt),
+		AcknowledgedAt:     nullTimestamptz(),
+		CompletedAt:        nullTimestamptz(),
+		Metadata:           metadata,
+	}
+	if _, err := queries.InsertOrder(ctx, params); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
 		return fmt.Errorf("order store: insert order: %w", err)
 	}
 	return nil
 }
 
-func (s *OrderStore) updateOrderWith(ctx context.Context, exec execer, update orderstore.OrderUpdate) error {
+func (s *OrderStore) updateOrderWith(ctx context.Context, queries *sqlc.Queries, update orderstore.OrderUpdate) error {
+	if queries == nil {
+		return fmt.Errorf("order store: nil queries")
+	}
+	orderID, err := parseUUID(strings.TrimSpace(update.ID))
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(update.State) == "" {
+		return fmt.Errorf("order store: state required")
+	}
 	metadata, err := encodeMetadata(update.Metadata)
 	if err != nil {
 		return fmt.Errorf("order store: encode metadata: %w", err)
 	}
-	args := pgx.NamedArgs{
-		"id":       strings.TrimSpace(update.ID),
-		"state":    strings.TrimSpace(update.State),
-		"ack_at":   nullableInt64(update.AcknowledgedAt),
-		"done_at":  nullableInt64(update.CompletedAt),
-		"metadata": metadata,
+	params := sqlc.UpdateOrderStateParams{
+		State:          strings.TrimSpace(update.State),
+		AcknowledgedAt: timestamptzFromPtr(update.AcknowledgedAt),
+		CompletedAt:    timestamptzFromPtr(update.CompletedAt),
+		Metadata:       metadata,
+		ID:             orderID,
 	}
-	if _, err := exec.Exec(ctx, orderUpdateSQL, args); err != nil {
+	if _, err := queries.UpdateOrderState(ctx, params); err != nil {
 		return fmt.Errorf("order store: update order: %w", err)
 	}
 	return nil
 }
 
-func (s *OrderStore) recordExecutionWith(ctx context.Context, exec execer, execution orderstore.Execution) error {
+func (s *OrderStore) recordExecutionWith(ctx context.Context, queries *sqlc.Queries, execution orderstore.Execution) error {
+	if queries == nil {
+		return fmt.Errorf("order store: nil queries")
+	}
+	orderID, err := parseUUID(strings.TrimSpace(execution.OrderID))
+	if err != nil {
+		return err
+	}
+	providerID, err := s.lookupProviderID(ctx, queries, execution.Provider)
+	if err != nil {
+		return err
+	}
+	fillQty, err := numericFromString(execution.Quantity)
+	if err != nil {
+		return fmt.Errorf("order store: execution quantity: %w", err)
+	}
+	fillPrice, err := numericFromString(execution.Price)
+	if err != nil {
+		return fmt.Errorf("order store: execution price: %w", err)
+	}
+	fee, err := numericFromOptional(execution.Fee)
+	if err != nil {
+		return fmt.Errorf("order store: execution fee: %w", err)
+	}
 	metadata, err := encodeMetadata(execution.Metadata)
 	if err != nil {
 		return fmt.Errorf("order store: encode metadata: %w", err)
 	}
-	args := pgx.NamedArgs{
-		"order_id":     strings.TrimSpace(execution.OrderID),
-		"provider":     strings.TrimSpace(execution.Provider),
-		"execution_id": strings.TrimSpace(execution.ExecutionID),
-		"quantity":     execution.Quantity,
-		"price":        execution.Price,
-		"fee":          nullableText(execution.Fee),
-		"fee_asset":    nullableText(execution.FeeAsset),
-		"liquidity":    strings.TrimSpace(execution.Liquidity),
-		"traded_at":    execution.TradedAt,
-		"metadata":     metadata,
+	params := sqlc.InsertExecutionParams{
+		OrderID:      orderID,
+		ProviderID:   providerID,
+		ExecutionID:  strings.TrimSpace(execution.ExecutionID),
+		FillQuantity: fillQty,
+		FillPrice:    fillPrice,
+		Fee:          fee,
+		FeeAsset:     textFromPtr(execution.FeeAsset),
+		Liquidity:    strings.TrimSpace(execution.Liquidity),
+		TradedAt:     timestamptzFromUnix(execution.TradedAt),
+		Metadata:     metadata,
 	}
-	if _, err := exec.Exec(ctx, executionUpsertSQL, args); err != nil {
+	if _, err := queries.InsertExecution(ctx, params); err != nil {
 		return fmt.Errorf("order store: upsert execution: %w", err)
 	}
 	return nil
 }
 
-func (s *OrderStore) upsertBalanceWith(ctx context.Context, exec execer, balance orderstore.BalanceSnapshot) error {
+func (s *OrderStore) upsertBalanceWith(ctx context.Context, queries *sqlc.Queries, balance orderstore.BalanceSnapshot) error {
+	if queries == nil {
+		return fmt.Errorf("order store: nil queries")
+	}
+	providerID, err := s.lookupProviderID(ctx, queries, balance.Provider)
+	if err != nil {
+		return err
+	}
+	total, err := numericFromString(balance.Total)
+	if err != nil {
+		return fmt.Errorf("order store: balance total: %w", err)
+	}
+	available, err := numericFromString(balance.Available)
+	if err != nil {
+		return fmt.Errorf("order store: balance available: %w", err)
+	}
 	metadata, err := encodeMetadata(balance.Metadata)
 	if err != nil {
 		return fmt.Errorf("order store: encode metadata: %w", err)
 	}
-	args := pgx.NamedArgs{
-		"provider":    strings.TrimSpace(balance.Provider),
-		"asset":       strings.TrimSpace(balance.Asset),
-		"total":       balance.Total,
-		"available":   balance.Available,
-		"snapshot_at": balance.SnapshotAt,
-		"metadata":    metadata,
+	params := sqlc.UpsertBalanceSnapshotParams{
+		ProviderID: providerID,
+		Asset:      strings.ToUpper(strings.TrimSpace(balance.Asset)),
+		Total:      total,
+		Available:  available,
+		SnapshotAt: timestamptzFromUnix(balance.SnapshotAt),
+		Metadata:   metadata,
 	}
-	if _, err := exec.Exec(ctx, balanceUpsertSQL, args); err != nil {
+	if _, err := queries.UpsertBalanceSnapshot(ctx, params); err != nil {
 		return fmt.Errorf("order store: upsert balance: %w", err)
 	}
 	return nil
@@ -316,38 +233,38 @@ func (s *OrderStore) upsertBalanceWith(ctx context.Context, exec execer, balance
 
 // CreateOrder inserts a new order snapshot.
 func (s *OrderStore) CreateOrder(ctx context.Context, order orderstore.Order) error {
-	pool, err := s.ensurePool()
+	queries, err := s.ensureQueries()
 	if err != nil {
 		return err
 	}
-	return s.createOrderWith(ctx, pool, order)
+	return s.createOrderWith(ctx, queries, order)
 }
 
 // UpdateOrder updates order state details.
 func (s *OrderStore) UpdateOrder(ctx context.Context, update orderstore.OrderUpdate) error {
-	pool, err := s.ensurePool()
+	queries, err := s.ensureQueries()
 	if err != nil {
 		return err
 	}
-	return s.updateOrderWith(ctx, pool, update)
+	return s.updateOrderWith(ctx, queries, update)
 }
 
 // RecordExecution upserts an execution record.
 func (s *OrderStore) RecordExecution(ctx context.Context, execution orderstore.Execution) error {
-	pool, err := s.ensurePool()
+	queries, err := s.ensureQueries()
 	if err != nil {
 		return err
 	}
-	return s.recordExecutionWith(ctx, pool, execution)
+	return s.recordExecutionWith(ctx, queries, execution)
 }
 
 // UpsertBalance records balances snapshots.
 func (s *OrderStore) UpsertBalance(ctx context.Context, balance orderstore.BalanceSnapshot) error {
-	pool, err := s.ensurePool()
+	queries, err := s.ensureQueries()
 	if err != nil {
 		return err
 	}
-	return s.upsertBalanceWith(ctx, pool, balance)
+	return s.upsertBalanceWith(ctx, queries, balance)
 }
 
 // WithTransaction executes the supplied callback within a database transaction.
@@ -359,16 +276,22 @@ func (s *OrderStore) WithTransaction(ctx context.Context, fn func(context.Contex
 	if err != nil {
 		return err
 	}
+	baseQueries, err := s.ensureQueries()
+	if err != nil {
+		return err
+	}
 	var txOptions pgx.TxOptions
 	txOptions.IsoLevel = pgx.ReadCommitted
 	txOptions.AccessMode = pgx.ReadWrite
 	txOptions.DeferrableMode = pgx.NotDeferrable
+	txOptions.BeginQuery = ""
+	txOptions.CommitQuery = ""
 
 	tx, err := pool.BeginTx(ctx, txOptions)
 	if err != nil {
 		return fmt.Errorf("order store: begin tx: %w", err)
 	}
-	wrapped := &orderTx{tx: tx, store: s}
+	wrapped := &orderTx{tx: tx, store: s, queries: baseQueries.WithTx(tx)}
 	runErr := fn(ctx, wrapped)
 	if runErr != nil {
 		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
@@ -384,363 +307,205 @@ func (s *OrderStore) WithTransaction(ctx context.Context, fn func(context.Contex
 
 // ListOrders retrieves persisted orders matching the supplied query filters.
 func (s *OrderStore) ListOrders(ctx context.Context, query orderstore.OrderQuery) ([]orderstore.OrderRecord, error) {
-	pool, err := s.ensurePool()
+	queries, err := s.ensureQueries()
 	if err != nil {
 		return nil, err
 	}
 	limit := clampLimit(query.Limit, defaultOrderLimit, maxOrderLimit)
-
-	builder := strings.Builder{}
-	builder.WriteString(orderSelectBase)
-	builder.WriteString(" WHERE 1=1")
-
-	args := make([]any, 0, 4)
-	argPos := 1
-
-	if trimmed := strings.TrimSpace(query.StrategyInstance); trimmed != "" {
-		fmt.Fprintf(&builder, " AND COALESCE(si.instance_id, '') = $%d", argPos)
-		args = append(args, trimmed)
-		argPos++
+	params := sqlc.ListOrdersParams{
+		StrategyInstance: textFromString(query.StrategyInstance),
+		ProviderAlias:    textFromString(query.Provider),
+		States:           normalizedStates(query.States),
+		Limit:            safeInt32(limit),
 	}
-	if trimmed := strings.TrimSpace(query.Provider); trimmed != "" {
-		fmt.Fprintf(&builder, " AND p.alias = $%d", argPos)
-		args = append(args, trimmed)
-		argPos++
-	}
-	states := normalizedStates(query.States)
-	if len(states) > 0 {
-		fmt.Fprintf(&builder, " AND o.state = ANY($%d)", argPos)
-		args = append(args, states)
-		argPos++
-	}
-	fmt.Fprintf(&builder, " ORDER BY o.placed_at DESC LIMIT $%d", argPos)
-	args = append(args, limit)
-
-	rows, err := pool.Query(ctx, builder.String(), args...)
+	rows, err := queries.ListOrders(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("order store: list orders: %w", err)
 	}
-	defer rows.Close()
-
-	var records []orderstore.OrderRecord
-	for rows.Next() {
-		var (
-			id               string
-			providerAlias    string
-			instanceID       string
-			clientOrderID    string
-			instrument       string
-			side             string
-			orderType        string
-			quantity         string
-			priceValue       sql.NullString
-			state            string
-			externalRefValue sql.NullString
-			placedAt         time.Time
-			acknowledgedAt   pgtype.Timestamptz
-			completedAt      pgtype.Timestamptz
-			metadataBytes    []byte
-			createdAt        time.Time
-			updatedAt        time.Time
-		)
-		if err := rows.Scan(
-			&id,
-			&providerAlias,
-			&instanceID,
-			&clientOrderID,
-			&instrument,
-			&side,
-			&orderType,
-			&quantity,
-			&priceValue,
-			&state,
-			&externalRefValue,
-			&placedAt,
-			&acknowledgedAt,
-			&completedAt,
-			&metadataBytes,
-			&createdAt,
-			&updatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("order store: scan order: %w", err)
-		}
-		metadata, err := decodeMetadata(metadataBytes)
+	records := make([]orderstore.OrderRecord, 0, len(rows))
+	for _, row := range rows {
+		metadata, err := decodeMetadata(row.MetadataJson)
 		if err != nil {
 			return nil, err
 		}
+		order := orderstore.Order{
+			ID:                row.OrderID,
+			Provider:          row.ProviderAlias,
+			StrategyInstance:  row.StrategyInstanceID,
+			ClientOrderID:     row.ClientOrderID,
+			Symbol:            row.Instrument,
+			Side:              row.Side,
+			Type:              row.OrderType,
+			Quantity:          row.QuantityText,
+			Price:             nil,
+			State:             row.State,
+			ExternalReference: "",
+			PlacedAt:          timestamptzToUnix(row.PlacedAt),
+			Metadata:          metadata,
+		}
+		if len(order.Metadata) == 0 {
+			order.Metadata = nil
+		}
+		if price := strings.TrimSpace(row.PriceText); price != "" {
+			order.Price = &price
+		}
+		if ref, ok := textToString(row.ExternalOrderRef); ok {
+			order.ExternalReference = ref
+		}
 		record := orderstore.OrderRecord{
-			Order: orderstore.Order{
-				ID:                id,
-				Provider:          providerAlias,
-				StrategyInstance:  instanceID,
-				ClientOrderID:     clientOrderID,
-				Symbol:            instrument,
-				Side:              side,
-				Type:              orderType,
-				Quantity:          quantity,
-				Price:             nil,
-				State:             state,
-				ExternalReference: "",
-				PlacedAt:          placedAt.Unix(),
-				Metadata:          metadata,
-			},
-			AcknowledgedAt: nil,
-			CompletedAt:    nil,
-			CreatedAt:      createdAt.Unix(),
-			UpdatedAt:      updatedAt.Unix(),
-		}
-		if priceValue.Valid {
-			price := priceValue.String
-			record.Price = &price
-		}
-		if externalRefValue.Valid {
-			record.ExternalReference = externalRefValue.String
-		}
-		if acknowledgedAt.Valid {
-			ack := acknowledgedAt.Time.Unix()
-			record.AcknowledgedAt = &ack
-		}
-		if completedAt.Valid {
-			done := completedAt.Time.Unix()
-			record.CompletedAt = &done
+			Order:          order,
+			AcknowledgedAt: timestamptzToUnixPtr(row.AcknowledgedAt),
+			CompletedAt:    timestamptzToUnixPtr(row.CompletedAt),
+			CreatedAt:      row.CreatedAt.Time.Unix(),
+			UpdatedAt:      row.UpdatedAt.Time.Unix(),
 		}
 		if len(record.Metadata) == 0 {
 			record.Metadata = nil
 		}
 		records = append(records, record)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("order store: iterate orders: %w", err)
-	}
-
 	return records, nil
 }
 
 // ListExecutions retrieves execution records matching the supplied query filters.
 func (s *OrderStore) ListExecutions(ctx context.Context, query orderstore.ExecutionQuery) ([]orderstore.ExecutionRecord, error) {
-	pool, err := s.ensurePool()
+	queries, err := s.ensureQueries()
 	if err != nil {
 		return nil, err
 	}
 	limit := clampLimit(query.Limit, defaultExecutionLimit, maxOrderLimit)
-
-	builder := strings.Builder{}
-	builder.WriteString(executionSelectBase)
-	builder.WriteString(" WHERE 1=1")
-
-	args := make([]any, 0, 4)
-	argPos := 1
-
-	if trimmed := strings.TrimSpace(query.StrategyInstance); trimmed != "" {
-		fmt.Fprintf(&builder, " AND COALESCE(si.instance_id, '') = $%d", argPos)
-		args = append(args, trimmed)
-		argPos++
+	orderUUID, err := optionalUUID(query.OrderID)
+	if err != nil {
+		return nil, fmt.Errorf("order store: execution order id: %w", err)
 	}
-	if trimmed := strings.TrimSpace(query.Provider); trimmed != "" {
-		fmt.Fprintf(&builder, " AND p.alias = $%d", argPos)
-		args = append(args, trimmed)
-		argPos++
+	params := sqlc.ListExecutionsParams{
+		StrategyInstance: textFromString(query.StrategyInstance),
+		ProviderAlias:    textFromString(query.Provider),
+		OrderID:          orderUUID,
+		Limit:            safeInt32(limit),
 	}
-	if trimmed := strings.TrimSpace(query.OrderID); trimmed != "" {
-		fmt.Fprintf(&builder, " AND e.order_id::text = $%d", argPos)
-		args = append(args, trimmed)
-		argPos++
-	}
-	fmt.Fprintf(&builder, " ORDER BY e.traded_at DESC LIMIT $%d", argPos)
-	args = append(args, limit)
-
-	rows, err := pool.Query(ctx, builder.String(), args...)
+	rows, err := queries.ListExecutions(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("order store: list executions: %w", err)
 	}
-	defer rows.Close()
-
-	var records []orderstore.ExecutionRecord
-	for rows.Next() {
-		var (
-			orderID       string
-			providerAlias string
-			instanceID    string
-			executionID   string
-			quantity      string
-			price         string
-			feeValue      sql.NullString
-			feeAssetValue sql.NullString
-			liquidity     sql.NullString
-			tradedAt      time.Time
-			metadataBytes []byte
-			createdAt     time.Time
-		)
-		if err := rows.Scan(
-			&orderID,
-			&providerAlias,
-			&instanceID,
-			&executionID,
-			&quantity,
-			&price,
-			&feeValue,
-			&feeAssetValue,
-			&liquidity,
-			&tradedAt,
-			&metadataBytes,
-			&createdAt,
-		); err != nil {
-			return nil, fmt.Errorf("order store: scan execution: %w", err)
-		}
-		metadata, err := decodeMetadata(metadataBytes)
+	records := make([]orderstore.ExecutionRecord, 0, len(rows))
+	for _, row := range rows {
+		metadata, err := decodeMetadata(row.MetadataJson)
 		if err != nil {
 			return nil, err
 		}
+		exec := orderstore.Execution{
+			OrderID:     row.OrderID,
+			Provider:    row.ProviderAlias,
+			ExecutionID: row.ExecutionID,
+			Quantity:    row.FillQuantityText,
+			Price:       row.FillPriceText,
+			Fee:         nil,
+			FeeAsset:    nil,
+			Liquidity:   "",
+			TradedAt:    timestamptzToUnix(row.TradedAt),
+			Metadata:    metadata,
+		}
+		if len(exec.Metadata) == 0 {
+			exec.Metadata = nil
+		}
+		if fee := strings.TrimSpace(row.FeeText); fee != "" {
+			exec.Fee = &fee
+		}
+		if asset, ok := textToString(row.FeeAsset); ok {
+			exec.FeeAsset = &asset
+		}
+		if liquidity, ok := textToString(row.Liquidity); ok {
+			exec.Liquidity = liquidity
+		}
 		record := orderstore.ExecutionRecord{
-			Execution: orderstore.Execution{
-				OrderID:     orderID,
-				Provider:    providerAlias,
-				ExecutionID: executionID,
-				Quantity:    quantity,
-				Price:       price,
-				Fee:         nil,
-				FeeAsset:    nil,
-				Liquidity:   "",
-				TradedAt:    tradedAt.Unix(),
-				Metadata:    metadata,
-			},
-			StrategyInstance: instanceID,
-			CreatedAt:        createdAt.Unix(),
-		}
-		if feeValue.Valid {
-			fee := feeValue.String
-			record.Fee = &fee
-		}
-		if feeAssetValue.Valid {
-			asset := feeAssetValue.String
-			record.FeeAsset = &asset
-		}
-		if liquidity.Valid {
-			record.Liquidity = liquidity.String
+			Execution:        exec,
+			StrategyInstance: row.StrategyInstanceID,
+			CreatedAt:        row.CreatedAt.Time.Unix(),
 		}
 		if len(record.Metadata) == 0 {
 			record.Metadata = nil
 		}
 		records = append(records, record)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("order store: iterate executions: %w", err)
-	}
-
 	return records, nil
 }
 
 // ListBalances retrieves balance snapshots matching the supplied query filters.
 func (s *OrderStore) ListBalances(ctx context.Context, query orderstore.BalanceQuery) ([]orderstore.BalanceRecord, error) {
-	pool, err := s.ensurePool()
+	if strings.TrimSpace(query.Provider) == "" {
+		return nil, fmt.Errorf("order store: provider alias required")
+	}
+	queries, err := s.ensureQueries()
 	if err != nil {
 		return nil, err
 	}
-	provider := strings.TrimSpace(query.Provider)
-	if provider == "" {
-		return nil, fmt.Errorf("order store: provider alias required")
-	}
 	limit := clampLimit(query.Limit, defaultBalanceLimit, maxOrderLimit)
-
-	builder := strings.Builder{}
-	builder.WriteString(balanceSelectBase)
-	builder.WriteString(" WHERE p.alias = $1")
-
-	args := []any{provider}
-	argPos := 2
-
-	if trimmed := strings.TrimSpace(query.Asset); trimmed != "" {
-		fmt.Fprintf(&builder, " AND b.asset = $%d", argPos)
-		args = append(args, trimmed)
-		argPos++
+	assetFilter := strings.TrimSpace(query.Asset)
+	if assetFilter != "" {
+		assetFilter = strings.ToUpper(assetFilter)
 	}
-	fmt.Fprintf(&builder, " ORDER BY b.snapshot_at DESC LIMIT $%d", argPos)
-	args = append(args, limit)
-
-	rows, err := pool.Query(ctx, builder.String(), args...)
+	params := sqlc.ListBalancesParams{
+		ProviderAlias: textFromString(query.Provider),
+		Asset:         textFromString(assetFilter),
+		Limit:         safeInt32(limit),
+	}
+	rows, err := queries.ListBalances(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("order store: list balances: %w", err)
 	}
-	defer rows.Close()
-
-	var records []orderstore.BalanceRecord
-	for rows.Next() {
-		var (
-			providerAlias string
-			asset         string
-			total         string
-			available     string
-			snapshotAt    time.Time
-			metadataBytes []byte
-			createdAt     time.Time
-			updatedAt     time.Time
-		)
-		if err := rows.Scan(
-			&providerAlias,
-			&asset,
-			&total,
-			&available,
-			&snapshotAt,
-			&metadataBytes,
-			&createdAt,
-			&updatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("order store: scan balance: %w", err)
-		}
-		metadata, err := decodeMetadata(metadataBytes)
+	records := make([]orderstore.BalanceRecord, 0, len(rows))
+	for _, row := range rows {
+		metadata, err := decodeMetadata(row.MetadataJson)
 		if err != nil {
 			return nil, err
 		}
 		record := orderstore.BalanceRecord{
 			BalanceSnapshot: orderstore.BalanceSnapshot{
-				Provider:   providerAlias,
-				Asset:      asset,
-				Total:      total,
-				Available:  available,
-				SnapshotAt: snapshotAt.Unix(),
+				Provider:   row.ProviderAlias,
+				Asset:      row.Asset,
+				Total:      row.TotalText,
+				Available:  row.AvailableText,
+				SnapshotAt: row.SnapshotAt.Unix(),
 				Metadata:   metadata,
 			},
-			CreatedAt: createdAt.Unix(),
-			UpdatedAt: updatedAt.Unix(),
+			CreatedAt: row.CreatedAt.Time.Unix(),
+			UpdatedAt: row.UpdatedAt.Time.Unix(),
 		}
-		if len(record.Metadata) == 0 {
+		if len(record.Metadata) == 0 { // BalanceRecord.Metadata refers to snapshot Metadata
 			record.Metadata = nil
 		}
 		records = append(records, record)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("order store: iterate balances: %w", err)
-	}
-
 	return records, nil
 }
 
 func (t *orderTx) CreateOrder(ctx context.Context, order orderstore.Order) error {
-	if t == nil {
+	if t == nil || t.queries == nil {
 		return fmt.Errorf("order store: nil transaction")
 	}
-	return t.store.createOrderWith(ctx, t.tx, order)
+	return t.store.createOrderWith(ctx, t.queries, order)
 }
 
 func (t *orderTx) UpdateOrder(ctx context.Context, update orderstore.OrderUpdate) error {
-	if t == nil {
+	if t == nil || t.queries == nil {
 		return fmt.Errorf("order store: nil transaction")
 	}
-	return t.store.updateOrderWith(ctx, t.tx, update)
+	return t.store.updateOrderWith(ctx, t.queries, update)
 }
 
 func (t *orderTx) RecordExecution(ctx context.Context, execution orderstore.Execution) error {
-	if t == nil {
+	if t == nil || t.queries == nil {
 		return fmt.Errorf("order store: nil transaction")
 	}
-	return t.store.recordExecutionWith(ctx, t.tx, execution)
+	return t.store.recordExecutionWith(ctx, t.queries, execution)
 }
 
 func (t *orderTx) UpsertBalance(ctx context.Context, balance orderstore.BalanceSnapshot) error {
-	if t == nil {
+	if t == nil || t.queries == nil {
 		return fmt.Errorf("order store: nil transaction")
 	}
-	return t.store.upsertBalanceWith(ctx, t.tx, balance)
+	return t.store.upsertBalanceWith(ctx, t.queries, balance)
 }
 
 func encodeMetadata(meta map[string]any) ([]byte, error) {
@@ -752,28 +517,6 @@ func encodeMetadata(meta map[string]any) ([]byte, error) {
 		return nil, fmt.Errorf("order store: encode metadata: %w", err)
 	}
 	return data, nil
-}
-
-func nullableString(value string) any {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return nil
-	}
-	return trimmed
-}
-
-func nullableText(ptr *string) any {
-	if ptr == nil {
-		return nil
-	}
-	return nullableString(*ptr)
-}
-
-func nullableInt64(ptr *int64) any {
-	if ptr == nil {
-		return nil
-	}
-	return *ptr
 }
 
 func clampLimit(value, fallback, maximum int) int {
@@ -815,4 +558,169 @@ func decodeMetadata(raw []byte) (map[string]any, error) {
 		return nil, nil
 	}
 	return meta, nil
+}
+
+func (s *OrderStore) lookupProviderID(ctx context.Context, queries *sqlc.Queries, provider string) (int64, error) {
+	trimmed := strings.TrimSpace(provider)
+	if trimmed == "" {
+		return 0, fmt.Errorf("order store: provider required")
+	}
+	id, err := queries.GetProviderID(ctx, trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("order store: lookup provider %s: %w", trimmed, err)
+	}
+	return id, nil
+}
+
+func (s *OrderStore) lookupStrategyUUID(ctx context.Context, queries *sqlc.Queries, instance string) (pgtype.UUID, error) {
+	trimmed := strings.TrimSpace(instance)
+	if trimmed == "" {
+		return nullUUID(), nil
+	}
+	id, err := queries.GetStrategyInternalID(ctx, trimmed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nullUUID(), nil
+		}
+		return nullUUID(), fmt.Errorf("order store: lookup strategy %s: %w", trimmed, err)
+	}
+	return id, nil
+}
+
+func parseUUID(value string) (pgtype.UUID, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nullUUID(), fmt.Errorf("order store: id required")
+	}
+	parsed, err := uuid.Parse(trimmed)
+	if err != nil {
+		return nullUUID(), fmt.Errorf("order store: parse uuid: %w", err)
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}, nil
+}
+
+func numericFromString(value string) (pgtype.Numeric, error) {
+	var out pgtype.Numeric
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return out, fmt.Errorf("order store: numeric value required")
+	}
+	if err := out.Scan(trimmed); err != nil {
+		return out, fmt.Errorf("order store: parse numeric %q: %w", trimmed, err)
+	}
+	return out, nil
+}
+
+func numericFromOptional(ptr *string) (pgtype.Numeric, error) {
+	var out pgtype.Numeric
+	if ptr == nil {
+		return out, nil
+	}
+	trimmed := strings.TrimSpace(*ptr)
+	if trimmed == "" {
+		return out, nil
+	}
+	if err := out.Scan(trimmed); err != nil {
+		return out, fmt.Errorf("order store: parse numeric %q: %w", trimmed, err)
+	}
+	return out, nil
+}
+
+func textFromString(value string) pgtype.Text {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nullText()
+	}
+	return pgtype.Text{String: trimmed, Valid: true}
+}
+
+func textFromPtr(ptr *string) pgtype.Text {
+	if ptr == nil {
+		return nullText()
+	}
+	return textFromString(*ptr)
+}
+
+func timestamptzFromUnix(value int64) pgtype.Timestamptz {
+	if value == 0 {
+		return nullTimestamptz()
+	}
+	return pgtype.Timestamptz{
+		Time:             time.Unix(value, 0).UTC(),
+		InfinityModifier: pgtype.Finite,
+		Valid:            true,
+	}
+}
+
+func timestamptzFromPtr(ptr *int64) pgtype.Timestamptz {
+	if ptr == nil {
+		return nullTimestamptz()
+	}
+	return timestamptzFromUnix(*ptr)
+}
+
+func timestamptzToUnix(value pgtype.Timestamptz) int64 {
+	if !value.Valid {
+		return 0
+	}
+	return value.Time.Unix()
+}
+
+func timestamptzToUnixPtr(value pgtype.Timestamptz) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Time.Unix()
+	return &v
+}
+
+func textToString(value pgtype.Text) (string, bool) {
+	if !value.Valid {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(value.String)
+	if trimmed == "" {
+		return "", false
+	}
+	return trimmed, true
+}
+
+func optionalUUID(value string) (pgtype.UUID, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nullUUID(), nil
+	}
+	return parseUUID(trimmed)
+}
+
+func nullText() pgtype.Text {
+	return pgtype.Text{
+		String: "",
+		Valid:  false,
+	}
+}
+
+func nullTimestamptz() pgtype.Timestamptz {
+	return pgtype.Timestamptz{
+		Time:             time.Time{},
+		InfinityModifier: pgtype.Finite,
+		Valid:            false,
+	}
+}
+
+func nullUUID() pgtype.UUID {
+	return pgtype.UUID{
+		Bytes: [16]byte{},
+		Valid: false,
+	}
+}
+
+func safeInt32(value int) int32 {
+	if value > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if value < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(value)
 }

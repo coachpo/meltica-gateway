@@ -4,6 +4,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: meltica
+          POSTGRES_PASSWORD: root
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     permissions:
       contents: read
       pull-requests: read
@@ -14,6 +28,45 @@ jobs:
           go-version: '1.25'
       - run: go version
       - run: go mod download
+
+      - name: Expose Go bin on PATH
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Install tooling
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
+          go install github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.3
+
+      - name: Verify sqlc generation
+        run: |
+          make sqlc
+          git diff --quiet || (echo "::error::sqlc generated files are out-of-date"; git status -sb; exit 1)
+
+      - name: Install Postgres client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres service
+        run: |
+          for attempt in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U postgres; then
+              exit 0
+            fi
+            echo "Postgres not ready yet (attempt ${attempt}), sleeping..."
+            sleep 2
+          done
+          echo "::error::Postgres service did not become ready in time"
+          exit 1
+        env:
+          PGPASSWORD: root
+
+      - name: Run migrations up/down
+        env:
+          DATABASE_URL: postgresql://postgres:root@localhost:5432/meltica?sslmode=disable
+        run: |
+          make migrate
+          make migrate-down
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8

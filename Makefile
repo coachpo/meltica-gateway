@@ -2,7 +2,7 @@ GO111MODULE=on
 MIGRATE_BIN ?= migrate
 DATABASE_URL ?= postgresql://postgres:root@localhost:5432/meltica?sslmode=disable
 
-.PHONY: test bench lint vet tidy build build-linux-arm64 clean coverage run migrate migrate-down
+.PHONY: test bench lint vet tidy build build-linux-arm64 clean coverage run migrate migrate-down sqlc
 
 lint:
 	golangci-lint run --config .golangci.yml
@@ -60,3 +60,6 @@ migrate-down:
 		exit 1; \
 	fi
 	$(MIGRATE_BIN) -database "$(DATABASE_URL)" -path db/migrations down 1
+
+sqlc:
+	sqlc generate

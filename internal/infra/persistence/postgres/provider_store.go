@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/coachpo/meltica/internal/domain/providerstore"
+	"github.com/coachpo/meltica/internal/infra/persistence/postgres/sqlc"
 	json "github.com/goccy/go-json"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,65 +14,33 @@ import (
 
 // ProviderStore persists provider specifications and status metadata in PostgreSQL.
 type ProviderStore struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	queries *sqlc.Queries
 }
 
 // NewProviderStore constructs a ProviderStore backed by the provided pgx pool.
 func NewProviderStore(pool *pgxpool.Pool) *ProviderStore {
-	return &ProviderStore{pool: pool}
+	if pool == nil {
+		return &ProviderStore{pool: nil, queries: nil}
+	}
+	return &ProviderStore{
+		pool:    pool,
+		queries: sqlc.New(pool),
+	}
 }
 
-const (
-	providerUpsertSQL = `
-INSERT INTO providers (
-    alias,
-    display_name,
-    adapter_identifier,
-    connection,
-    status,
-    metadata,
-    updated_at
-)
-VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, NOW())
-ON CONFLICT (alias) DO UPDATE SET
-    display_name = EXCLUDED.display_name,
-    adapter_identifier = EXCLUDED.adapter_identifier,
-    connection = EXCLUDED.connection,
-    status = EXCLUDED.status,
-    metadata = EXCLUDED.metadata,
-    updated_at = NOW();
-`
-	providerDeleteSQL = `DELETE FROM providers WHERE alias = $1;`
-	providerListSQL   = `
-SELECT alias, display_name, adapter_identifier, connection, status, metadata
-FROM providers
-ORDER BY alias;
-`
-	providerLookupIDSQL = `SELECT id FROM providers WHERE alias = $1;`
-	providerRouteDelete = `DELETE FROM provider_routes WHERE provider_id = $1;`
-	providerRouteSelect = `SELECT route FROM provider_routes WHERE provider_id = $1 ORDER BY symbol;`
-	providerRouteUpsert = `
-INSERT INTO provider_routes (
-    provider_id,
-    symbol,
-    route,
-    version,
-    metadata,
-    updated_at
-)
-VALUES ($1, $2, $3::jsonb, 1, '{}'::jsonb, NOW())
-ON CONFLICT (provider_id, symbol) DO UPDATE SET
-    route = EXCLUDED.route,
-    version = EXCLUDED.version,
-    metadata = EXCLUDED.metadata,
-    updated_at = NOW();
-`
-)
+func (s *ProviderStore) ensureQueries() (*sqlc.Queries, error) {
+	if s.pool == nil || s.queries == nil {
+		return nil, fmt.Errorf("provider store: nil pool")
+	}
+	return s.queries, nil
+}
 
 // SaveProvider upserts a provider snapshot.
 func (s *ProviderStore) SaveProvider(ctx context.Context, snapshot providerstore.Snapshot) error {
-	if s.pool == nil {
-		return fmt.Errorf("provider store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return err
 	}
 	name := strings.TrimSpace(snapshot.Name)
 	if name == "" {
@@ -92,7 +61,15 @@ func (s *ProviderStore) SaveProvider(ctx context.Context, snapshot providerstore
 		return fmt.Errorf("marshal provider metadata: %w", err)
 	}
 
-	if _, err := s.pool.Exec(ctx, providerUpsertSQL, name, display, snapshot.Adapter, connection, snapshot.Status, metadata); err != nil {
+	params := sqlc.UpsertProviderParams{
+		Alias:             name,
+		DisplayName:       display,
+		AdapterIdentifier: strings.TrimSpace(snapshot.Adapter),
+		Connection:        connection,
+		Status:            strings.TrimSpace(snapshot.Status),
+		Metadata:          metadata,
+	}
+	if _, err := q.UpsertProvider(ctx, params); err != nil {
 		return fmt.Errorf("upsert provider: %w", err)
 	}
 	return nil
@@ -100,14 +77,15 @@ func (s *ProviderStore) SaveProvider(ctx context.Context, snapshot providerstore
 
 // DeleteProvider removes a provider snapshot.
 func (s *ProviderStore) DeleteProvider(ctx context.Context, name string) error {
-	if s.pool == nil {
-		return fmt.Errorf("provider store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return err
 	}
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return fmt.Errorf("provider store: provider name required")
 	}
-	if _, err := s.pool.Exec(ctx, providerDeleteSQL, trimmed); err != nil {
+	if err := q.DeleteProviderByAlias(ctx, trimmed); err != nil {
 		return fmt.Errorf("delete provider: %w", err)
 	}
 	return nil
@@ -115,49 +93,41 @@ func (s *ProviderStore) DeleteProvider(ctx context.Context, name string) error {
 
 // LoadProviders retrieves all provider snapshots.
 func (s *ProviderStore) LoadProviders(ctx context.Context) ([]providerstore.Snapshot, error) {
-	if s.pool == nil {
-		return nil, fmt.Errorf("provider store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, providerListSQL)
+	rows, err := q.ListProviders(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list providers: %w", err)
 	}
-	defer rows.Close()
-
 	var snapshots []providerstore.Snapshot
-	for rows.Next() {
-		var alias, display, adapter, status string
-		var connectionBytes, metadataBytes []byte
-		if err := rows.Scan(&alias, &display, &adapter, &connectionBytes, &status, &metadataBytes); err != nil {
-			return nil, fmt.Errorf("scan provider: %w", err)
-		}
-		configMap, err := decodeJSON(connectionBytes)
+	for _, row := range rows {
+		configMap, err := decodeJSON(row.Connection)
 		if err != nil {
 			return nil, fmt.Errorf("decode provider config: %w", err)
 		}
-		metadataMap, err := decodeJSON(metadataBytes)
+		metadataMap, err := decodeJSON(row.Metadata)
 		if err != nil {
 			return nil, fmt.Errorf("decode provider metadata: %w", err)
 		}
 		snapshots = append(snapshots, providerstore.Snapshot{
-			Name:        alias,
-			DisplayName: display,
-			Adapter:     adapter,
+			Name:        row.Alias,
+			DisplayName: row.DisplayName,
+			Adapter:     row.AdapterIdentifier,
 			Config:      configMap,
-			Status:      status,
+			Status:      row.Status,
 			Metadata:    metadataMap,
 		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate providers: %w", err)
 	}
 	return snapshots, nil
 }
 
 // SaveRoutes replaces all persisted routes for a provider.
 func (s *ProviderStore) SaveRoutes(ctx context.Context, provider string, routes []providerstore.RouteSnapshot) error {
-	if s.pool == nil {
-		return fmt.Errorf("provider store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return err
 	}
 	trimmed := strings.TrimSpace(provider)
 	if trimmed == "" {
@@ -170,17 +140,19 @@ func (s *ProviderStore) SaveRoutes(ctx context.Context, provider string, routes 
 	if err != nil {
 		return err
 	}
-	var txOptions pgx.TxOptions
-	txOptions.IsoLevel = pgx.ReadCommitted
-	txOptions.AccessMode = pgx.ReadWrite
-	txOptions.DeferrableMode = pgx.NotDeferrable
-
-	tx, err := s.pool.BeginTx(ctx, txOptions)
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:       pgx.ReadCommitted,
+		AccessMode:     pgx.ReadWrite,
+		DeferrableMode: pgx.NotDeferrable,
+		BeginQuery:     "",
+		CommitQuery:    "",
+	})
 	if err != nil {
 		return fmt.Errorf("begin route tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, providerRouteDelete, providerID); err != nil {
+	qtx := q.WithTx(tx)
+	if err := qtx.DeleteRoutesByProvider(ctx, providerID); err != nil {
 		return fmt.Errorf("clear routes: %w", err)
 	}
 	for idx, route := range routes {
@@ -192,7 +164,14 @@ func (s *ProviderStore) SaveRoutes(ctx context.Context, provider string, routes 
 		if symbol == "" {
 			symbol = fmt.Sprintf("ROUTE-%d", idx)
 		}
-		if _, err := tx.Exec(ctx, providerRouteUpsert, providerID, symbol, payload); err != nil {
+		params := sqlc.UpsertProviderRouteParams{
+			ProviderID: providerID,
+			Symbol:     symbol,
+			Route:      payload,
+			Version:    1,
+			Metadata:   []byte("{}"),
+		}
+		if _, err := qtx.UpsertProviderRoute(ctx, params); err != nil {
 			return fmt.Errorf("upsert route: %w", err)
 		}
 	}
@@ -204,8 +183,9 @@ func (s *ProviderStore) SaveRoutes(ctx context.Context, provider string, routes 
 
 // LoadRoutes retrieves persisted routes for a provider.
 func (s *ProviderStore) LoadRoutes(ctx context.Context, provider string) ([]providerstore.RouteSnapshot, error) {
-	if s.pool == nil {
-		return nil, fmt.Errorf("provider store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return nil, err
 	}
 	trimmed := strings.TrimSpace(provider)
 	if trimmed == "" {
@@ -215,33 +195,26 @@ func (s *ProviderStore) LoadRoutes(ctx context.Context, provider string) ([]prov
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, providerRouteSelect, providerID)
+	rows, err := q.ListProviderRoutes(ctx, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("select routes: %w", err)
 	}
-	defer rows.Close()
 	var routes []providerstore.RouteSnapshot
-	for rows.Next() {
-		var payload []byte
-		if err := rows.Scan(&payload); err != nil {
-			return nil, fmt.Errorf("scan route: %w", err)
-		}
+	for _, row := range rows {
 		var snapshot providerstore.RouteSnapshot
-		if err := json.Unmarshal(payload, &snapshot); err != nil {
+		if err := json.Unmarshal(row.Route, &snapshot); err != nil {
 			return nil, fmt.Errorf("unmarshal route: %w", err)
 		}
 		routes = append(routes, snapshot)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate routes: %w", err)
 	}
 	return routes, nil
 }
 
 // DeleteRoutes removes persisted routes for a provider.
 func (s *ProviderStore) DeleteRoutes(ctx context.Context, provider string) error {
-	if s.pool == nil {
-		return fmt.Errorf("provider store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return err
 	}
 	trimmed := strings.TrimSpace(provider)
 	if trimmed == "" {
@@ -251,16 +224,19 @@ func (s *ProviderStore) DeleteRoutes(ctx context.Context, provider string) error
 	if err != nil {
 		return err
 	}
-	if _, err := s.pool.Exec(ctx, providerRouteDelete, providerID); err != nil {
+	if err := q.DeleteRoutesByProvider(ctx, providerID); err != nil {
 		return fmt.Errorf("delete routes: %w", err)
 	}
 	return nil
 }
 
 func (s *ProviderStore) lookupProviderID(ctx context.Context, name string) (int64, error) {
-	row := s.pool.QueryRow(ctx, providerLookupIDSQL, name)
-	var id int64
-	if err := row.Scan(&id); err != nil {
+	q, err := s.ensureQueries()
+	if err != nil {
+		return 0, err
+	}
+	id, err := q.GetProviderID(ctx, strings.TrimSpace(name))
+	if err != nil {
 		return 0, fmt.Errorf("lookup provider id: %w", err)
 	}
 	return id, nil

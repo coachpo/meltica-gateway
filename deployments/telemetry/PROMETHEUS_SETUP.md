@@ -58,6 +58,12 @@ meltica_pool_objects_active
 
 # Processing latency (95th percentile)
 histogram_quantile(0.95, rate(meltica_dispatcher_processing_duration_bucket[5m]))
+
+# Database pool usage
+meltica_db_pool_connections_acquired
+
+# Migration executions in the last hour
+increase(meltica_db_migrations_total[1h])
 ```
 
 ## Alternative: Prometheus Remote Write
@@ -173,6 +179,14 @@ Once configured, you'll see these metric families:
 - `meltica_pool_borrow_duration` - Time to acquire objects
 - `meltica_pool_capacity` - Total pool capacity
 - `meltica_pool_available` - Available objects in pool
+
+### Database & Persistence Metrics
+- `meltica_db_pool_connections_total` - Total pgx connections (idle + acquired + constructing)
+- `meltica_db_pool_connections_idle` - Idle connections
+- `meltica_db_pool_connections_acquired` - In-use connections
+- `meltica_db_pool_connections_constructing` - Connections being created
+- `meltica_db_migrations_total` - Migration executions (attr `result`)
+- `meltica_provider_cache_hits` / `meltica_provider_cache_misses` - Provider metadata cache instrumentation
 
 ### Control Bus Metrics
 - `meltica_controlbus_send_duration` - Control command latency

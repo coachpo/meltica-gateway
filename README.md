@@ -47,15 +47,22 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
    # edit providers, telemetry endpoint, or lambda manifest as needed
    cp .env.example .env        # optional: provides DATABASE_URL for migrations
    ```
-3. **Run locally**:
+3. **Prepare persistence**:
+   ```bash
+   # Start (or connect to) PostgreSQL and apply schema
+   make migrate    # uses DATABASE_URL or config database.dsn
+   ```
+   Meltica requires PostgreSQL before the gateway will boot; the in-memory driver has been removed.
+
+4. **Run locally**:
    ```bash
    make run              # shorthand for go run ./cmd/gateway
    # or build & execute
    make build
    ./bin/gateway -config config/app.yaml
    ```
-4. **Control the runtime**: Use the REST surface on `:8880` (see [`docs/lambdas-api.md`](docs/lambdas-api.md)) to list or mutate running strategies.
-5. **Inspect telemetry**: Point OTLP endpoints at your collector and import the dashboards from `docs/dashboards/` into Grafana.
+5. **Control the runtime**: Use the REST surface on `:8880` (see [`docs/lambdas-api.md`](docs/lambdas-api.md)) to list or mutate running strategies.
+6. **Inspect telemetry**: Point OTLP endpoints at your collector and import the dashboards from `docs/dashboards/` into Grafana.
 
 ## Development Workflow
 
@@ -84,6 +91,8 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
 - [`GEMINI.md`](GEMINI.md): Additional context for Gemini AI agents working inside the repo.
 - [`CLAUDE.md`](CLAUDE.md): Additional context for Claude AI agents working inside the repo.
 - [`docs/development/migrations.md`](docs/development/migrations.md): How to run and create database migrations.
+- [`docs/development/contract-tests.md`](docs/development/contract-tests.md): Running the Docker-backed persistence contract suite.
+- [`docs/development/write-through-cache.md`](docs/development/write-through-cache.md): Current write-through cache boundaries and invariants.
 
 ## License
 

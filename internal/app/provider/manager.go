@@ -18,6 +18,10 @@ import (
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
+	"github.com/coachpo/meltica/internal/infra/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Manager owns provider instances materialised from the manifest.
@@ -34,6 +38,9 @@ type Manager struct {
 
 	persistence providerstore.Store
 	states      map[string]*providerState
+
+	cacheHitCounter  metric.Int64Counter
+	cacheMissCounter metric.Int64Counter
 }
 
 // Option configures optional manager behaviour.
@@ -90,6 +97,8 @@ const (
 	StatusFailed Status = "failed"
 )
 
+const providerMetadataCacheName = "provider_metadata"
+
 var (
 	// ErrProviderExists indicates that a provider with the given name already exists.
 	ErrProviderExists = errors.New("provider already exists")
@@ -115,17 +124,20 @@ func NewManager(reg *Registry, pools *pool.PoolManager, bus eventbus.Bus, table 
 		table = dispatcher.NewTable()
 	}
 	manager := &Manager{
-		mu:           sync.RWMutex{},
-		registry:     reg,
-		pools:        pools,
-		bus:          bus,
-		table:        table,
-		logger:       logger,
-		lifecycleMu:  sync.RWMutex{},
-		lifecycleCtx: context.Background(),
-		states:       make(map[string]*providerState),
-		persistence:  nil,
+		mu:               sync.RWMutex{},
+		registry:         reg,
+		pools:            pools,
+		bus:              bus,
+		table:            table,
+		logger:           logger,
+		lifecycleMu:      sync.RWMutex{},
+		lifecycleCtx:     context.Background(),
+		states:           make(map[string]*providerState),
+		persistence:      nil,
+		cacheHitCounter:  nil,
+		cacheMissCounter: nil,
 	}
+	manager.initCacheMetrics()
 	for _, opt := range opts {
 		if opt != nil {
 			opt(manager)
@@ -866,6 +878,7 @@ func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 	}
 	m.mu.RUnlock()
 	if !ok {
+		m.recordCacheMiss(trimmed, providerMetadataCacheName)
 		var empty RuntimeDetail
 		return empty, false
 	}
@@ -885,6 +898,7 @@ func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 	if !running {
 		detail.Instruments = nil
 	}
+	m.recordCacheHit(trimmed, providerMetadataCacheName)
 	return CloneRuntimeDetail(detail), true
 }
 
@@ -938,6 +952,43 @@ func extractProviderSettings(cfg map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+func (m *Manager) initCacheMetrics() {
+	meter := otel.Meter("provider.manager.cache")
+	if counter, err := meter.Int64Counter("meltica_provider_cache_hits",
+		metric.WithDescription("Provider cache hits by cache name"),
+		metric.WithUnit("{request}")); err == nil {
+		m.cacheHitCounter = counter
+	}
+	if counter, err := meter.Int64Counter("meltica_provider_cache_misses",
+		metric.WithDescription("Provider cache misses by cache name"),
+		metric.WithUnit("{request}")); err == nil {
+		m.cacheMissCounter = counter
+	}
+}
+
+func (m *Manager) recordCacheHit(provider, cache string) {
+	m.recordCacheMetric(m.cacheHitCounter, provider, cache)
+}
+
+func (m *Manager) recordCacheMiss(provider, cache string) {
+	m.recordCacheMetric(m.cacheMissCounter, provider, cache)
+}
+
+func (m *Manager) recordCacheMetric(counter metric.Int64Counter, provider, cache string) {
+	if counter == nil {
+		return
+	}
+	attrs := []attribute.KeyValue{
+		attribute.String("environment", telemetry.Environment()),
+		attribute.String("cache", cache),
+	}
+	trimmed := strings.TrimSpace(provider)
+	if trimmed != "" {
+		attrs = append(attrs, attribute.String("provider", trimmed))
+	}
+	counter.Add(context.Background(), 1, metric.WithAttributes(attrs...))
 }
 
 // SanitizedProviderSpecs returns provider specifications with sensitive fields removed.

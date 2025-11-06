@@ -3,105 +3,55 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	json "github.com/goccy/go-json"
 
 	"github.com/coachpo/meltica/internal/domain/outboxstore"
+	"github.com/coachpo/meltica/internal/infra/persistence/postgres/sqlc"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // OutboxStore persists events destined for the event bus outbox.
 type OutboxStore struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	queries *sqlc.Queries
 }
 
 // NewOutboxStore constructs an OutboxStore backed by the provided pool.
 func NewOutboxStore(pool *pgxpool.Pool) *OutboxStore {
-	return &OutboxStore{pool: pool}
+	if pool == nil {
+		return &OutboxStore{
+			pool:    nil,
+			queries: nil,
+		}
+	}
+	return &OutboxStore{
+		pool:    pool,
+		queries: sqlc.New(pool),
+	}
 }
 
 const (
-	defaultOutboxLimit  = 128
-	maxOutboxLimit      = 1024
-	outboxRetryInterval = 30 * time.Second
+	defaultOutboxLimit = 128
+	maxOutboxLimit     = 1024
 )
 
-const (
-	outboxInsertSQL = `
-INSERT INTO events_outbox (
-    aggregate_type,
-    aggregate_id,
-    event_type,
-    payload,
-    headers,
-    available_at
-)
-VALUES ($1, $2, $3, COALESCE($4::jsonb, '{}'::jsonb), COALESCE($5::jsonb, '{}'::jsonb), $6)
-RETURNING
-    id,
-    aggregate_type,
-    aggregate_id,
-    event_type,
-    payload,
-    headers,
-    available_at,
-    published_at,
-    attempts,
-    last_error,
-    delivered,
-    created_at;
-`
-
-	outboxListPendingSQL = `
-SELECT
-    id,
-    aggregate_type,
-    aggregate_id,
-    event_type,
-    payload,
-    headers,
-    available_at,
-    published_at,
-    attempts,
-    last_error,
-    delivered,
-    created_at
-FROM events_outbox
-WHERE delivered = FALSE
-  AND available_at <= NOW()
-ORDER BY available_at ASC
-LIMIT $1;
-`
-
-	outboxMarkDeliveredSQL = `
-UPDATE events_outbox
-SET delivered = TRUE,
-    published_at = NOW(),
-    attempts = attempts + 1
-WHERE id = $1;
-`
-
-	outboxMarkFailedSQL = `
-UPDATE events_outbox
-SET attempts = attempts + 1,
-    last_error = $2,
-    available_at = $3
-WHERE id = $1;
-`
-
-	outboxDeleteSQL = `
-DELETE FROM events_outbox
-WHERE id = $1;
-`
-)
+func (s *OutboxStore) ensureQueries() (*sqlc.Queries, error) {
+	if s.pool == nil || s.queries == nil {
+		return nil, fmt.Errorf("outbox store: nil pool")
+	}
+	return s.queries, nil
+}
 
 // Enqueue inserts a new event into the outbox.
 func (s *OutboxStore) Enqueue(ctx context.Context, evt outboxstore.Event) (outboxstore.EventRecord, error) {
-	if s.pool == nil {
-		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return outboxstore.EventRecord{}, err
 	}
 	aggregateType := strings.TrimSpace(evt.AggregateType)
 	if aggregateType == "" {
@@ -119,7 +69,7 @@ func (s *OutboxStore) Enqueue(ctx context.Context, evt outboxstore.Event) (outbo
 	if payload == "" {
 		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: payload required")
 	}
-	headers, err := encodeJSON(evt.Headers)
+	headers, err := encodeMap(evt.Headers)
 	if err != nil {
 		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: encode headers: %w", err)
 	}
@@ -127,123 +77,113 @@ func (s *OutboxStore) Enqueue(ctx context.Context, evt outboxstore.Event) (outbo
 	if availableAt.IsZero() {
 		availableAt = time.Now()
 	}
-	row := s.pool.QueryRow(ctx, outboxInsertSQL, aggregateType, aggregateID, eventType, payload, headers, availableAt)
-	return scanOutboxRecord(row)
+	record, err := q.EnqueueEvent(ctx, sqlc.EnqueueEventParams{
+		AggregateType: aggregateType,
+		AggregateID:   aggregateID,
+		EventType:     eventType,
+		Payload:       []byte(payload),
+		Headers:       headers,
+		AvailableAt: pgtype.Timestamptz{
+			Time:             availableAt,
+			InfinityModifier: pgtype.Finite,
+			Valid:            true,
+		},
+	})
+	if err != nil {
+		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: enqueue: %w", err)
+	}
+	return convertOutboxRecord(record)
 }
 
 // ListPending returns undelivered events that are ready for replay.
 func (s *OutboxStore) ListPending(ctx context.Context, limit int) ([]outboxstore.EventRecord, error) {
-	if s.pool == nil {
-		return nil, fmt.Errorf("outbox store: nil pool")
+	q, err := s.ensureQueries()
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = defaultOutboxLimit
 	} else if limit > maxOutboxLimit {
 		limit = maxOutboxLimit
 	}
-	rows, err := s.pool.Query(ctx, outboxListPendingSQL, limit)
+	rows, err := q.DequeuePendingEvents(ctx, boundedInt32(limit))
 	if err != nil {
 		return nil, fmt.Errorf("outbox store: list pending: %w", err)
 	}
-	defer rows.Close()
 
-	var records []outboxstore.EventRecord
-	for rows.Next() {
-		record, err := scanOutboxRecord(rows)
+	records := make([]outboxstore.EventRecord, 0, len(rows))
+	for _, row := range rows {
+		record, err := convertOutboxRecord(row)
 		if err != nil {
 			return nil, err
 		}
 		records = append(records, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("outbox store: iterate pending: %w", err)
 	}
 	return records, nil
 }
 
 // MarkDelivered flags a stored event as successfully published.
 func (s *OutboxStore) MarkDelivered(ctx context.Context, id int64) error {
-	if s.pool == nil {
-		return fmt.Errorf("outbox store: nil pool")
-	}
-	tag, err := s.pool.Exec(ctx, outboxMarkDeliveredSQL, id)
+	q, err := s.ensureQueries()
 	if err != nil {
-		return fmt.Errorf("outbox store: mark delivered: %w", err)
+		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("outbox store: mark delivered: no rows updated")
+	if _, err := q.MarkEventDelivered(ctx, id); err != nil {
+		return fmt.Errorf("outbox store: mark delivered: %w", err)
 	}
 	return nil
 }
 
 // MarkFailed records a failed publish attempt and schedules a retry.
 func (s *OutboxStore) MarkFailed(ctx context.Context, id int64, lastError string) error {
-	if s.pool == nil {
-		return fmt.Errorf("outbox store: nil pool")
-	}
-	nextAttempt := time.Now().Add(outboxRetryInterval)
-	tag, err := s.pool.Exec(ctx, outboxMarkFailedSQL, id, strings.TrimSpace(lastError), nextAttempt)
+	q, err := s.ensureQueries()
 	if err != nil {
-		return fmt.Errorf("outbox store: mark failed: %w", err)
+		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("outbox store: mark failed: no rows updated")
+	if _, err := q.IncrementEventAttempt(ctx, sqlc.IncrementEventAttemptParams{
+		LastError: strings.TrimSpace(lastError),
+		ID:        id,
+	}); err != nil {
+		return fmt.Errorf("outbox store: mark failed: %w", err)
 	}
 	return nil
 }
 
 // Delete removes an outbox entry by identifier.
 func (s *OutboxStore) Delete(ctx context.Context, id int64) error {
-	if s.pool == nil {
-		return fmt.Errorf("outbox store: nil pool")
-	}
-	tag, err := s.pool.Exec(ctx, outboxDeleteSQL, id)
+	q, err := s.ensureQueries()
 	if err != nil {
-		return fmt.Errorf("outbox store: delete: %w", err)
+		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("outbox store: delete: no rows deleted")
+	if err := q.DeleteEvent(ctx, id); err != nil {
+		return fmt.Errorf("outbox store: delete: %w", err)
 	}
 	return nil
 }
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanOutboxRecord(row rowScanner) (outboxstore.EventRecord, error) {
+func convertOutboxRecord(row sqlc.EventsOutbox) (outboxstore.EventRecord, error) {
 	var (
-		record      outboxstore.EventRecord
-		payloadJSON []byte
-		headerJSON  []byte
-		publishedAt pgtype.Timestamptz
-		lastError   pgtype.Text
+		payloadJSON = append([]byte(nil), row.Payload...)
+		headerJSON  = append([]byte(nil), row.Headers...)
 	)
-	if err := row.Scan(
-		&record.ID,
-		&record.AggregateType,
-		&record.AggregateID,
-		&record.EventType,
-		&payloadJSON,
-		&headerJSON,
-		&record.AvailableAt,
-		&publishedAt,
-		&record.Attempts,
-		&lastError,
-		&record.Delivered,
-		&record.CreatedAt,
-	); err != nil {
-		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: scan record: %w", err)
-	}
-	record.Payload = json.RawMessage(append([]byte(nil), payloadJSON...))
-	if publishedAt.Valid {
-		t := publishedAt.Time
+	var record outboxstore.EventRecord
+	record.ID = row.ID
+	record.AggregateType = row.AggregateType
+	record.AggregateID = row.AggregateID
+	record.EventType = row.EventType
+	record.Payload = json.RawMessage(payloadJSON)
+	record.AvailableAt = row.AvailableAt.Time
+	record.Attempts = int(row.Attempts)
+	record.Delivered = row.Delivered
+	record.CreatedAt = row.CreatedAt.Time
+	if row.PublishedAt.Valid {
+		t := row.PublishedAt.Time
 		record.PublishedAt = &t
 	}
-	if lastError.Valid {
-		record.LastError = lastError.String
+	if row.LastError.Valid {
+		record.LastError = row.LastError.String
 	}
-	headers, err := decodeJSON(headerJSON)
+	headers, err := decodeMap(headerJSON)
 	if err != nil {
 		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: decode headers: %w", err)
 	}
@@ -251,4 +191,36 @@ func scanOutboxRecord(row rowScanner) (outboxstore.EventRecord, error) {
 	return record, nil
 }
 
+func encodeMap(value map[string]any) ([]byte, error) {
+	if len(value) == 0 {
+		return []byte("{}"), nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("json marshal: %w", err)
+	}
+	return data, nil
+}
+
+func decodeMap(raw []byte) (map[string]any, error) {
+	if len(raw) == 0 {
+		return map[string]any{}, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("json unmarshal: %w", err)
+	}
+	return out, nil
+}
+
 var _ outboxstore.Store = (*OutboxStore)(nil)
+
+func boundedInt32(value int) int32 {
+	if value > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if value < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(value)
+}

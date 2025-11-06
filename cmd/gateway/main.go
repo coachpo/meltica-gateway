@@ -203,6 +203,8 @@ func initDatabase(ctx context.Context, logger *log.Logger, dbCfg config.Database
 	logger.Printf("database connected: maxConns=%d minConns=%d runMigrations=%t",
 		poolCfg.MaxConns, poolCfg.MinConns, dbCfg.RunMigrations)
 
+	postgresstore.ObservePoolMetrics(pool, "primary")
+
 	return pool, nil
 }
 

@@ -48,6 +48,16 @@ Resource pool management:
 
 ---
 
+### meltica-database-health.json
+PostgreSQL and cache observability:
+- Connection totals/idle/acquired/constructing (`meltica_db_pool_connections_*`)
+- Migration run counts (`meltica_db_migrations_total`)
+- Provider metadata cache hit/miss counters
+
+**Recommended for:** Persistence troubleshooting, verifying migrations and cache behaviour.
+
+---
+
 ## 🔍 Specialized Dashboards
 
 ### meltica-orderbook-assembler.json
@@ -158,6 +168,14 @@ All dashboards use these verified metrics from `http://capy.lan:8889/metrics`:
 - `meltica_pool_available` - Available pool objects
 - `meltica_pool_objects_borrowed` - Currently borrowed objects
 - `meltica_pool_borrow_duration_bucket` - Borrow latency histogram
+
+### Database & Persistence
+- `meltica_db_pool_connections_total` - Total pgx connections (idle + acquired + constructing)
+- `meltica_db_pool_connections_idle` - Idle connections ready for checkout
+- `meltica_db_pool_connections_acquired` - Connections currently in use
+- `meltica_db_pool_connections_constructing` - Connections being established
+- `meltica_db_migrations_total` - Migrations executed (attr `result`: applied/noop/failed)
+- `meltica_provider_cache_hits` / `meltica_provider_cache_misses` - Provider metadata cache instrumentation
 
 ### Orderbook
 - `meltica_orderbook_buffer_size` - Buffer size per symbol

@@ -126,6 +126,12 @@ rate(meltica_dispatcher_events_duplicate_total[1m])
 
 # Fanout distribution (average subscribers per event)
 avg(meltica_eventbus_fanout_size)
+
+# Database pool usage
+meltica_db_pool_connections_acquired
+
+# Migration executions in the last 6h grouped by result
+sum(increase(meltica_db_migrations_total[6h])) by (result)
 ```
 
 ## Creating Dashboards
