@@ -912,7 +912,10 @@ export default function ProvidersPage() {
       </div>
 
       <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
-        <DialogContent className="max-w-2xl sm:max-w-3xl sm:max-h-[85vh] flex flex-col">
+        <DialogContent
+          className="max-w-2xl sm:max-w-3xl flex min-h-0 flex-col"
+          style={{ height: 'min(85vh, 720px)' }}
+        >
           <DialogHeader>
             <DialogTitle>
               {formMode === 'create' ? 'Create provider' : `Edit provider ${formState.name}`}
@@ -928,7 +931,7 @@ export default function ProvidersPage() {
             </Alert>
           )}
 
-          <ScrollArea className="flex-1" type="auto">
+          <ScrollArea className="flex-1 min-h-0 h-full" type="auto">
             {formLoading ? (
               <div className="py-10 text-sm text-muted-foreground">Loading provider…</div>
             ) : (
