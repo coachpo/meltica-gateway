@@ -1,0 +1,30 @@
+version: "2"
+sql:
+  - schema: "db/migrations"
+    queries: "internal/infra/persistence/postgres/sql"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/infra/persistence/postgres/sqlc"
+        emit_json_tags: true
+        emit_interface: false
+        emit_db_tags: true
+        sql_package: "pgx/v5"
+        overrides:
+          - column: "orders.quantity"
+            go_type: "github.com/jackc/pgx/v5/pgtype.Numeric"
+          - column: "orders.price"
+            go_type: "github.com/jackc/pgx/v5/pgtype.Numeric"
+          - column: "executions.fill_quantity"
+            go_type: "github.com/jackc/pgx/v5/pgtype.Numeric"
+          - column: "executions.fill_price"
+            go_type: "github.com/jackc/pgx/v5/pgtype.Numeric"
+          - column: "executions.fee"
+            go_type: "github.com/jackc/pgx/v5/pgtype.Numeric"
+          - column: "balances.total"
+            go_type: "github.com/jackc/pgx/v5/pgtype.Numeric"
+          - column: "balances.available"
+            go_type: "github.com/jackc/pgx/v5/pgtype.Numeric"
+          - column: "balances.snapshot_at"
+            go_type: "time.Time"

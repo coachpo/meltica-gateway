@@ -60,3 +60,5 @@ web/.next
 !strategies/**/*
 
 !db/**/*
+
+!sqlc.yaml
