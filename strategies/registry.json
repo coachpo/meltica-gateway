@@ -11,39 +11,15 @@
       }
     }
   },
-  "logging": {
+  "fixed-strategy-test": {
     "tags": {
-      "latest": "sha256:175e2ae2018813840af9ccb8eab74bed757dba38c3812cb4f1478a56c7099224",
-      "v1.0.0": "sha256:175e2ae2018813840af9ccb8eab74bed757dba38c3812cb4f1478a56c7099224"
+      "latest": "sha256:54bc6069ab953524e77859da7b63f44613f25568168120ccf29e8393446f8822",
+      "v1.0.0": "sha256:54bc6069ab953524e77859da7b63f44613f25568168120ccf29e8393446f8822"
     },
     "hashes": {
-      "sha256:175e2ae2018813840af9ccb8eab74bed757dba38c3812cb4f1478a56c7099224": {
+      "sha256:54bc6069ab953524e77859da7b63f44613f25568168120ccf29e8393446f8822": {
         "tag": "v1.0.0",
-        "path": "logging/v1.0.0/logging.js"
-      }
-    }
-  },
-  "momentum": {
-    "tags": {
-      "latest": "sha256:243dcc31ebfa98faafaa8098e5b2f676191ecdbf1f9dc2bb083abc4ee493b955",
-      "v1.0.0": "sha256:243dcc31ebfa98faafaa8098e5b2f676191ecdbf1f9dc2bb083abc4ee493b955"
-    },
-    "hashes": {
-      "sha256:243dcc31ebfa98faafaa8098e5b2f676191ecdbf1f9dc2bb083abc4ee493b955": {
-        "tag": "v1.0.0",
-        "path": "momentum/v1.0.0/momentum.js"
-      }
-    }
-  },
-  "meanreversion": {
-    "tags": {
-      "latest": "sha256:5f3966bec09c7115ac62645c16282d34f2ed53118e822080a3082b22e29891cf",
-      "v1.0.0": "sha256:5f3966bec09c7115ac62645c16282d34f2ed53118e822080a3082b22e29891cf"
-    },
-    "hashes": {
-      "sha256:5f3966bec09c7115ac62645c16282d34f2ed53118e822080a3082b22e29891cf": {
-        "tag": "v1.0.0",
-        "path": "meanreversion/v1.0.0/meanreversion.js"
+        "path": "fixed-strategy-test/v1.0.0/fixed-strategy-test.js"
       }
     }
   },
@@ -59,6 +35,18 @@
       }
     }
   },
+  "logging": {
+    "tags": {
+      "latest": "sha256:175e2ae2018813840af9ccb8eab74bed757dba38c3812cb4f1478a56c7099224",
+      "v1.0.0": "sha256:175e2ae2018813840af9ccb8eab74bed757dba38c3812cb4f1478a56c7099224"
+    },
+    "hashes": {
+      "sha256:175e2ae2018813840af9ccb8eab74bed757dba38c3812cb4f1478a56c7099224": {
+        "tag": "v1.0.0",
+        "path": "logging/v1.0.0/logging.js"
+      }
+    }
+  },
   "marketmaking": {
     "tags": {
       "latest": "sha256:0b14c66189bbd64a73d16f78e75b7eaedc319f4aa256e3e9b5457067fe22d467",
@@ -71,6 +59,30 @@
       }
     }
   },
+  "meanreversion": {
+    "tags": {
+      "latest": "sha256:5f3966bec09c7115ac62645c16282d34f2ed53118e822080a3082b22e29891cf",
+      "v1.0.0": "sha256:5f3966bec09c7115ac62645c16282d34f2ed53118e822080a3082b22e29891cf"
+    },
+    "hashes": {
+      "sha256:5f3966bec09c7115ac62645c16282d34f2ed53118e822080a3082b22e29891cf": {
+        "tag": "v1.0.0",
+        "path": "meanreversion/v1.0.0/meanreversion.js"
+      }
+    }
+  },
+  "momentum": {
+    "tags": {
+      "latest": "sha256:243dcc31ebfa98faafaa8098e5b2f676191ecdbf1f9dc2bb083abc4ee493b955",
+      "v1.0.0": "sha256:243dcc31ebfa98faafaa8098e5b2f676191ecdbf1f9dc2bb083abc4ee493b955"
+    },
+    "hashes": {
+      "sha256:243dcc31ebfa98faafaa8098e5b2f676191ecdbf1f9dc2bb083abc4ee493b955": {
+        "tag": "v1.0.0",
+        "path": "momentum/v1.0.0/momentum.js"
+      }
+    }
+  },
   "noop": {
     "tags": {
       "latest": "sha256:f14c7cdb4239ad27dd83cb06fc03f589b2aaed4a2875c4314922cfb87d0b5b42",
@@ -80,6 +92,18 @@
       "sha256:f14c7cdb4239ad27dd83cb06fc03f589b2aaed4a2875c4314922cfb87d0b5b42": {
         "tag": "v1.0.0",
         "path": "noop/v1.0.0/noop.js"
+      }
+    }
+  },
+  "strategy-name": {
+    "tags": {
+      "latest": "sha256:2c1f3698ab363b1c69255ed605b83a6b2e3f94e15783b2e4408c45a8bae7753d",
+      "v1.0.0": "sha256:2c1f3698ab363b1c69255ed605b83a6b2e3f94e15783b2e4408c45a8bae7753d"
+    },
+    "hashes": {
+      "sha256:2c1f3698ab363b1c69255ed605b83a6b2e3f94e15783b2e4408c45a8bae7753d": {
+        "tag": "v1.0.0",
+        "path": "strategy-name/v1.0.0/strategy-name.js"
       }
     }
   }
