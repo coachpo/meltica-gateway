@@ -51,6 +51,7 @@ type ProviderInstrumentStatus = {
 
 type ParsedSelector = {
   identifier: string;
+  selector: string;
   tag?: string;
   hash?: string;
 };
@@ -73,12 +74,13 @@ type HistoryEntry = {
 function parseStrategySelector(raw: string): ParsedSelector {
   const selector = raw.trim();
   if (!selector) {
-    return { identifier: '' };
+    return { identifier: '', selector: '' };
   }
   if (selector.includes('@')) {
     const [identifierPart, hashPart] = selector.split('@');
     return {
       identifier: identifierPart.trim(),
+      selector,
       hash: hashPart.trim(),
     };
   }
@@ -86,10 +88,11 @@ function parseStrategySelector(raw: string): ParsedSelector {
     const [identifierPart, ...rest] = selector.split(':');
     return {
       identifier: identifierPart.trim(),
+      selector,
       tag: rest.join(':').trim(),
     };
   }
-  return { identifier: selector };
+  return { identifier: selector, selector };
 }
 
 function formatHash(hash: string | undefined | null, length = 12): string {
