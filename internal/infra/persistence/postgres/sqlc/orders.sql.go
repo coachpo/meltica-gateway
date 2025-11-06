@@ -154,7 +154,10 @@ SELECT
     o.side,
     o.order_type,
     o.quantity::text AS quantity_text,
-    COALESCE(o.price::text, ''::text)::text AS price_text,
+    CASE
+        WHEN o.price IS NULL THEN ''::text
+        ELSE o.price::text
+    END AS price_text,
     o.state,
     o.external_order_ref,
     o.placed_at,

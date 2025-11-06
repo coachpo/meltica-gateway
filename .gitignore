@@ -60,5 +60,7 @@ web/.next
 !strategies/**/*
 
 !db/**/*
+# Allow sqlc query definitions to be committed
+!internal/infra/persistence/postgres/sql/**
 
 !sqlc.yaml
