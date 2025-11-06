@@ -895,7 +895,13 @@ func TestOutboxListRequiresStore(t *testing.T) {
 func TestOutboxListReturnsRecords(t *testing.T) {
 	store := &stubOutboxStore{
 		records: []outboxstore.EventRecord{
-			{ID: 1, AggregateType: "provider", AggregateID: "binance", EventType: "Trade"},
+			{
+				ID:            1,
+				AggregateType: "provider",
+				AggregateID:   "binance",
+				EventType:     "Trade",
+				Payload:       json.RawMessage(`{"event_id":"evt-1"}`),
+			},
 		},
 	}
 	handler := NewHandler(config.AppConfig{}, nil, nil, nil, store)

@@ -24,6 +24,7 @@ import (
 	"github.com/coachpo/meltica/internal/infra/adapters"
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/config"
+	"github.com/coachpo/meltica/internal/infra/persistence/migrations"
 	postgresstore "github.com/coachpo/meltica/internal/infra/persistence/postgres"
 	"github.com/coachpo/meltica/internal/infra/pool"
 	httpserver "github.com/coachpo/meltica/internal/infra/server/http"
@@ -34,6 +35,7 @@ import (
 
 const (
 	defaultConfigPath            = "config/app.yaml"
+	defaultMigrationsPath        = "db/migrations"
 	gatewayLoggerPrefix          = "gateway "
 	eventPoolName                = "Event"
 	orderRequestPoolName         = "OrderRequest"
@@ -63,6 +65,10 @@ func main() {
 		appCfg.Environment, len(appCfg.Providers))
 
 	logger.Printf("providers configured: %d", len(appCfg.Providers))
+
+	if err := runDatabaseMigrations(ctx, logger, appCfg.Database); err != nil {
+		logger.Fatalf("apply database migrations: %v", err)
+	}
 
 	dbPool, err := initDatabase(ctx, logger, appCfg.Database)
 	if err != nil {
@@ -219,7 +225,12 @@ func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager, outbox outb
 		FanoutWorkers: cfg.FanoutWorkerCount(),
 		Pools:         pools,
 	})
-	return eventbus.NewDurableBus(memoryBus, outbox, eventbus.WithDurableLogger(logger))
+	return eventbus.NewDurableBus(
+		memoryBus,
+		outbox,
+		eventbus.WithDurableLogger(logger),
+		eventbus.WithDurablePoolManager(pools),
+	)
 }
 
 func initProviders(ctx context.Context, logger *log.Logger, appCfg config.AppConfig, poolMgr *pool.PoolManager, table *dispatcher.Table, bus eventbus.Bus, store providerstore.Store) (*provider.Manager, error) {
@@ -438,4 +449,21 @@ func resolveConfigPath(flagValue string) string {
 	}
 
 	return filepath.Clean(defaultConfigPath)
+}
+
+func runDatabaseMigrations(ctx context.Context, logger *log.Logger, dbCfg config.DatabaseConfig) error {
+	if !dbCfg.RunMigrations {
+		logger.Printf("database migrations disabled; skipping")
+		return nil
+	}
+
+	path := resolveMigrationsPath()
+	if err := migrations.Apply(ctx, dbCfg.DSN, path, logger); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+	return nil
+}
+
+func resolveMigrationsPath() string {
+	return filepath.Clean(defaultMigrationsPath)
 }

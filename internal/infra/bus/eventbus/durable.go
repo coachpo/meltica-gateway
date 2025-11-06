@@ -11,6 +11,7 @@ import (
 
 	"github.com/coachpo/meltica/internal/domain/outboxstore"
 	"github.com/coachpo/meltica/internal/domain/schema"
+	"github.com/coachpo/meltica/internal/infra/pool"
 	json "github.com/goccy/go-json"
 )
 
@@ -51,6 +52,19 @@ func WithReplayDisabled() DurableOption {
 	}
 }
 
+// WithDurablePoolManager injects the pool manager used when reconstructing replay events.
+func WithDurablePoolManager(pools *pool.PoolManager) DurableOption {
+	return func(b *DurableBus) {
+		if pools != nil {
+			b.pools = pools
+		}
+	}
+}
+
+type poolAwareBus interface {
+	PoolManager() *pool.PoolManager
+}
+
 // DurableBus wraps an event bus with outbox-backed durability guarantees.
 type DurableBus struct {
 	inner Bus
@@ -60,6 +74,8 @@ type DurableBus struct {
 	replayInterval  time.Duration
 	replayBatchSize int
 	replayDisabled  bool
+
+	pools *pool.PoolManager
 
 	replayCtx    context.Context
 	replayCancel context.CancelFunc
@@ -87,6 +103,7 @@ func NewDurableBus(inner Bus, store outboxstore.Store, opts ...DurableOption) Bu
 		replayInterval:  defaultReplayInterval,
 		replayBatchSize: defaultReplayBatchSize,
 		replayDisabled:  false,
+		pools:           nil,
 		replayCtx:       nil,
 		replayCancel:    nil,
 		replayWG:        sync.WaitGroup{},
@@ -94,6 +111,11 @@ func NewDurableBus(inner Bus, store outboxstore.Store, opts ...DurableOption) Bu
 	for _, opt := range opts {
 		if opt != nil {
 			opt(durable)
+		}
+	}
+	if durable.pools == nil {
+		if aware, ok := inner.(poolAwareBus); ok {
+			durable.pools = aware.PoolManager()
 		}
 	}
 	if durable.replayBatchSize <= 0 {
@@ -206,7 +228,7 @@ func (b *DurableBus) replayPendingEvents() {
 		return
 	}
 	for _, record := range records {
-		event, err := mapToEvent(record.Payload)
+		event, err := b.prepareReplayEvent(ctx, record.Payload)
 		if err != nil {
 			b.logf("outbox replay decode failed (id=%d): %v", record.ID, err)
 			_ = b.store.MarkFailed(ctx, record.ID, err.Error())
@@ -223,11 +245,27 @@ func (b *DurableBus) replayPendingEvents() {
 	}
 }
 
+func (b *DurableBus) prepareReplayEvent(ctx context.Context, payload json.RawMessage) (*schema.Event, error) {
+	decoded, err := rawToEvent(payload)
+	if err != nil {
+		return nil, err
+	}
+	if b.pools == nil {
+		return decoded, nil
+	}
+	evt, borrowErr := b.pools.BorrowEventInst(ctx)
+	if borrowErr != nil {
+		return nil, fmt.Errorf("outbox replay borrow event: %w", borrowErr)
+	}
+	schema.CopyEvent(evt, decoded)
+	return evt, nil
+}
+
 func (b *DurableBus) enqueueEvent(ctx context.Context, evt *schema.Event) (int64, error) {
 	if evt == nil {
 		return 0, fmt.Errorf("durable bus: event required")
 	}
-	payload, err := eventToMap(evt)
+	payload, err := eventToJSON(evt)
 	if err != nil {
 		return 0, fmt.Errorf("durable bus: encode payload: %w", err)
 	}
@@ -276,7 +314,7 @@ func (b *DurableBus) logf(format string, args ...any) {
 	b.logger.Printf(format, args...)
 }
 
-func eventToMap(evt *schema.Event) (map[string]any, error) {
+func eventToJSON(evt *schema.Event) (json.RawMessage, error) {
 	if evt == nil {
 		return nil, fmt.Errorf("nil event")
 	}
@@ -284,25 +322,18 @@ func eventToMap(evt *schema.Event) (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal event: %w", err)
 	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("unmarshal event: %w", err)
-	}
-	return out, nil
+	return json.RawMessage(data), nil
 }
 
-func mapToEvent(payload map[string]any) (*schema.Event, error) {
+func rawToEvent(payload json.RawMessage) (*schema.Event, error) {
 	if len(payload) == 0 {
 		return nil, fmt.Errorf("empty payload")
 	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal payload: %w", err)
-	}
 	var evt schema.Event
-	if err := json.Unmarshal(data, &evt); err != nil {
+	if err := json.Unmarshal(payload, &evt); err != nil {
 		return nil, fmt.Errorf("unmarshal payload: %w", err)
 	}
+	rehydrateEventPayload(&evt)
 	return &evt, nil
 }
 
@@ -331,6 +362,62 @@ func safeContext(ctx context.Context) context.Context {
 		return ctx
 	}
 	return context.Background()
+}
+
+func rehydrateEventPayload(evt *schema.Event) {
+	if evt == nil {
+		return
+	}
+	rawMap, ok := evt.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	data, err := json.Marshal(rawMap)
+	if err != nil {
+		return
+	}
+	switch evt.Type {
+	case schema.EventTypeTrade:
+		var payload schema.TradePayload
+		if json.Unmarshal(data, &payload) == nil {
+			evt.Payload = payload
+		}
+	case schema.EventTypeTicker:
+		var payload schema.TickerPayload
+		if json.Unmarshal(data, &payload) == nil {
+			evt.Payload = payload
+		}
+	case schema.EventTypeBookSnapshot:
+		var payload schema.BookSnapshotPayload
+		if json.Unmarshal(data, &payload) == nil {
+			evt.Payload = payload
+		}
+	case schema.EventTypeExecReport:
+		var payload schema.ExecReportPayload
+		if json.Unmarshal(data, &payload) == nil {
+			evt.Payload = payload
+		}
+	case schema.EventTypeKlineSummary:
+		var payload schema.KlineSummaryPayload
+		if json.Unmarshal(data, &payload) == nil {
+			evt.Payload = payload
+		}
+	case schema.EventTypeInstrumentUpdate:
+		var payload schema.InstrumentUpdatePayload
+		if json.Unmarshal(data, &payload) == nil {
+			evt.Payload = payload
+		}
+	case schema.EventTypeBalanceUpdate:
+		var payload schema.BalanceUpdatePayload
+		if json.Unmarshal(data, &payload) == nil {
+			evt.Payload = payload
+		}
+	case schema.EventTypeRiskControl:
+		var payload schema.RiskControlPayload
+		if json.Unmarshal(data, &payload) == nil {
+			evt.Payload = payload
+		}
+	}
 }
 
 var _ Bus = (*DurableBus)(nil)

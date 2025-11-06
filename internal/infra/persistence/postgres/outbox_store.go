@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	json "github.com/goccy/go-json"
+
 	"github.com/coachpo/meltica/internal/domain/outboxstore"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -113,9 +115,9 @@ func (s *OutboxStore) Enqueue(ctx context.Context, evt outboxstore.Event) (outbo
 	if eventType == "" {
 		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: event type required")
 	}
-	payload, err := encodeJSON(evt.Payload)
-	if err != nil {
-		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: encode payload: %w", err)
+	payload := strings.TrimSpace(string(evt.Payload))
+	if payload == "" {
+		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: payload required")
 	}
 	headers, err := encodeJSON(evt.Headers)
 	if err != nil {
@@ -233,6 +235,7 @@ func scanOutboxRecord(row rowScanner) (outboxstore.EventRecord, error) {
 	); err != nil {
 		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: scan record: %w", err)
 	}
+	record.Payload = json.RawMessage(append([]byte(nil), payloadJSON...))
 	if publishedAt.Valid {
 		t := publishedAt.Time
 		record.PublishedAt = &t
@@ -240,15 +243,10 @@ func scanOutboxRecord(row rowScanner) (outboxstore.EventRecord, error) {
 	if lastError.Valid {
 		record.LastError = lastError.String
 	}
-	payload, err := decodeJSON(payloadJSON)
-	if err != nil {
-		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: decode payload: %w", err)
-	}
 	headers, err := decodeJSON(headerJSON)
 	if err != nil {
 		return outboxstore.EventRecord{}, fmt.Errorf("outbox store: decode headers: %w", err)
 	}
-	record.Payload = payload
 	record.Headers = headers
 	return record, nil
 }

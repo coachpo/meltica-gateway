@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	json "github.com/goccy/go-json"
+
 	"github.com/coachpo/meltica/internal/domain/outboxstore"
 )
 
@@ -14,6 +16,7 @@ func TestOutboxStoreNilPool(t *testing.T) {
 		AggregateType: "eventbus",
 		AggregateID:   "evt-1",
 		EventType:     "Trade",
+		Payload:       json.RawMessage(`{"event_id":"evt-1"}`),
 	}
 	if _, err := store.Enqueue(ctx, event); err == nil {
 		t.Fatalf("expected error when pool nil")

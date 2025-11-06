@@ -424,3 +424,11 @@ func (s *subscriber) close() {
 		close(s.ch)
 	})
 }
+
+// PoolManager exposes the underlying pool manager used for event allocations.
+func (b *MemoryBus) PoolManager() *pool.PoolManager {
+	if b == nil {
+		return nil
+	}
+	return b.pools
+}

@@ -4,6 +4,8 @@ package outboxstore
 import (
 	"context"
 	"time"
+
+	json "github.com/goccy/go-json"
 )
 
 // Event encapsulates a single outbox entry ready to be enqueued.
@@ -11,7 +13,7 @@ type Event struct {
 	AggregateType string
 	AggregateID   string
 	EventType     string
-	Payload       map[string]any
+	Payload       json.RawMessage
 	Headers       map[string]any
 	AvailableAt   time.Time
 }
@@ -22,7 +24,7 @@ type EventRecord struct {
 	AggregateType string
 	AggregateID   string
 	EventType     string
-	Payload       map[string]any
+	Payload       json.RawMessage
 	Headers       map[string]any
 	AvailableAt   time.Time
 	PublishedAt   *time.Time
