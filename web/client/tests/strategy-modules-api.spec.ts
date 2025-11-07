@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test';
-import { apiClient, StrategyValidationError } from '../src/lib/api-client';
+import {
+  createStrategyModule,
+  exportStrategyRegistry,
+  fetchStrategyModuleSource,
+  fetchStrategyModules,
+  fetchStrategyModuleUsage,
+  refreshStrategyCatalog,
+} from '../src/lib/api/strategies';
+import { StrategyValidationError } from '../src/lib/api/errors';
 
 const originalFetch = globalThis.fetch;
 
@@ -19,7 +27,7 @@ test('getStrategyModuleSource returns raw JavaScript content', async () => {
     } as unknown as Response;
   }) as typeof fetch;
 
-  const source = await apiClient.getStrategyModuleSource('alpha.js');
+  const source = await fetchStrategyModuleSource('alpha.js');
 
   expect(source).toBe('module.exports = {};');
   expect(String(calls[0].input)).toBe(
@@ -50,7 +58,7 @@ test('createStrategyModule issues POST with JSON payload', async () => {
     } as unknown as Response;
   }) as typeof fetch;
 
-  const response = await apiClient.createStrategyModule({
+  const response = await createStrategyModule({
     filename: 'alpha.js',
     source: 'module.exports = {};'
   });
@@ -73,7 +81,7 @@ test('refreshStrategies returns status payload', async () => {
     } as unknown as Response;
   }) as typeof fetch;
 
-  const response = await apiClient.refreshStrategies();
+  const response = await refreshStrategyCatalog();
 
   expect(response.status).toBe('refreshed');
 });
@@ -96,7 +104,7 @@ test('getStrategyModules applies query parameters', async () => {
     } as unknown as Response;
   }) as typeof fetch;
 
-  const response = await apiClient.getStrategyModules({
+  const response = await fetchStrategyModules({
     strategy: 'grid',
     hash: 'sha256:abc',
     runningOnly: true,
@@ -127,7 +135,7 @@ test('refreshStrategies sends payload when provided', async () => {
     } as unknown as Response;
   }) as typeof fetch;
 
-  const response = await apiClient.refreshStrategies({
+  const response = await refreshStrategyCatalog({
     strategies: ['grid:canary'],
     hashes: ['sha256:new'],
   });
@@ -160,7 +168,7 @@ test('getStrategyModuleUsage fetches usage endpoint', async () => {
     } as unknown as Response;
   }) as typeof fetch;
 
-  const result = await apiClient.getStrategyModuleUsage('grid@sha256:abc', {
+  const result = await fetchStrategyModuleUsage('grid@sha256:abc', {
     limit: 25,
     offset: 0,
     includeStopped: true,
@@ -191,14 +199,14 @@ test('createStrategyModule surfaces structured validation diagnostics', async ()
   }) as typeof fetch;
 
   await expect(
-    apiClient.createStrategyModule({
+    createStrategyModule({
       filename: 'alpha.js',
       source: 'module.exports = {}',
     }),
   ).rejects.toThrowError(StrategyValidationError);
 
   try {
-    await apiClient.createStrategyModule({
+    await createStrategyModule({
       filename: 'alpha.js',
       source: 'module.exports = {}',
     });
@@ -224,7 +232,7 @@ test('exportStrategyRegistry requests registry endpoint', async () => {
     } as unknown as Response;
   }) as typeof fetch;
 
-  const result = await apiClient.exportStrategyRegistry();
+  const result = await exportStrategyRegistry();
 
   expect(requestedUrl).toBe('http://localhost:8880/strategies/registry');
   expect(result).toEqual({ registry: {}, usage: [] });

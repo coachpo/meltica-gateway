@@ -3,12 +3,21 @@
 import Link from 'next/link';
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { apiClient, StrategyValidationError } from '@/lib/api-client';
+import {
+  useStrategyModulesQuery,
+  useStrategyModuleUsageQuery,
+  useCreateStrategyModuleMutation,
+  useUpdateStrategyModuleMutation,
+  useDeleteStrategyModuleMutation,
+  useRefreshStrategiesMutation,
+  useExportStrategyRegistryQuery,
+  useStrategyModuleSourceLoader,
+} from '@/lib/hooks';
+import { StrategyValidationError } from '@/lib/api';
 import type {
   StrategyDiagnostic,
   StrategyModuleRevision,
   StrategyModuleSummary,
-  StrategyModuleUsageResponse,
   StrategyRefreshRequest,
   StrategyRefreshResult,
 } from '@/lib/types';
@@ -65,10 +74,6 @@ import {
 } from 'lucide-react';
 
 type ModuleFormMode = 'create' | 'edit';
-
-type LoadOptions = {
-  silent?: boolean;
-};
 
 type RefreshOptions = {
   silent?: boolean;
@@ -292,22 +297,12 @@ function moduleIdentifier(module?: StrategyModuleSummary | null): string {
 }
 
 export default function StrategyModulesPage() {
-  const [modules, setModules] = useState<StrategyModuleSummary[]>([]);
-  const [apiStrategyDirectory, setApiStrategyDirectory] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const searchParams = useSearchParams();
   const [filterDraft, setFilterDraft] = useState(() => ({ ...DEFAULT_FILTERS }));
   const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS }));
   const [limit, setLimit] = useState(DEFAULT_MODULE_LIMIT);
   const [offset, setOffset] = useState(0);
-  const [total, setTotal] = useState(0);
-  const [exportingRegistry, setExportingRegistry] = useState(false);
   const [usageDialog, setUsageDialog] = useState<UsageDialogState | null>(null);
-  const [usageResponse, setUsageResponse] = useState<StrategyModuleUsageResponse | null>(null);
-  const [usageLoading, setUsageLoading] = useState(false);
-  const [usageError, setUsageError] = useState<string | null>(null);
   const [usageLimit, setUsageLimit] = useState(DEFAULT_USAGE_LIMIT);
   const [usageOffset, setUsageOffset] = useState(0);
   const [usageIncludeStopped, setUsageIncludeStopped] = useState(false);
@@ -355,6 +350,53 @@ export default function StrategyModulesPage() {
     revision: StrategyModuleRevision;
   } | null>(null);
   const [templateConfirmOpen, setTemplateConfirmOpen] = useState(false);
+  const moduleQueryParams = useMemo(
+    () => ({
+      strategy: filters.strategy.trim() || undefined,
+      hash: filters.hash.trim() || undefined,
+      runningOnly: filters.runningOnly,
+      limit,
+      offset,
+    }),
+    [filters, limit, offset],
+  );
+  const refreshStrategiesMutation = useRefreshStrategiesMutation();
+  const exportRegistryQuery = useExportStrategyRegistryQuery(false);
+  const loadModuleSource = useStrategyModuleSourceLoader();
+  const createModuleMutation = useCreateStrategyModuleMutation();
+  const updateModuleMutation = useUpdateStrategyModuleMutation();
+  const deleteModuleMutation = useDeleteStrategyModuleMutation();
+  const modulesQuery = useStrategyModulesQuery(moduleQueryParams, true);
+  const { refetch: refetchModules } = modulesQuery;
+  const modules = useMemo(
+    () => modulesQuery.data?.modules ?? [],
+    [modulesQuery.data],
+  );
+  const total = modulesQuery.data?.total ?? modules.length;
+  const apiStrategyDirectory =
+    modulesQuery.data?.strategyDirectory?.trim() ?? null;
+  const loading = modulesQuery.isLoading;
+  const refreshing =
+    refreshStrategiesMutation.isPending ||
+    (modulesQuery.isFetching && modulesQuery.isFetched);
+  const error = modulesQuery.error as Error | null;
+  const usageFilters = useMemo(
+    () => ({
+      limit: usageLimit,
+      offset: usageOffset,
+      includeStopped: usageIncludeStopped,
+    }),
+    [usageIncludeStopped, usageLimit, usageOffset],
+  );
+  const usageQuery = useStrategyModuleUsageQuery(
+    usageDialog?.selector,
+    usageFilters,
+    Boolean(usageDialog),
+  );
+  const usageResponse = usageQuery.data ?? null;
+  const usageLoading = usageQuery.isLoading;
+  const usageError = usageQuery.error as Error | null;
+  const exportingRegistry = exportRegistryQuery.isFetching;
 
   const sourceEditorAnnotations = useMemo(
     () =>
@@ -380,8 +422,6 @@ export default function StrategyModulesPage() {
   const detailConfig = Array.isArray(detailMetadata?.config) ? detailMetadata.config : [];
 
   const resetUsageState = useCallback(() => {
-    setUsageResponse(null);
-    setUsageError(null);
     setUsageOffset(0);
     setUsageLimit(DEFAULT_USAGE_LIMIT);
     setUsageIncludeStopped(false);
@@ -467,52 +507,6 @@ export default function StrategyModulesPage() {
     return directoryFromPath(candidate?.path ?? undefined);
   }, [apiStrategyDirectory, modules]);
 
-  const loadModules = useCallback(
-    async ({ silent = false }: LoadOptions = {}) => {
-      if (!silent) {
-        setLoading(true);
-        setError(null);
-      }
-      try {
-        const response = await apiClient.getStrategyModules({
-          strategy: filters.strategy.trim() || undefined,
-          hash: filters.hash.trim() || undefined,
-          runningOnly: filters.runningOnly,
-          limit,
-          offset,
-        });
-        const entries = Array.isArray(response.modules) ? response.modules : [];
-        setModules(entries);
-        const configuredDirectory =
-          typeof response.strategyDirectory === 'string'
-            ? response.strategyDirectory.trim()
-            : '';
-        setApiStrategyDirectory(configuredDirectory ? configuredDirectory : null);
-        setTotal(typeof response.total === 'number' ? response.total : entries.length);
-        if (!silent) {
-          setError(null);
-        }
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to load strategy modules';
-        if (silent) {
-          showToast({
-            title: 'Reload failed',
-            description: message,
-            variant: 'destructive',
-          });
-        } else {
-          setError(message);
-        }
-      } finally {
-        if (!silent) {
-          setLoading(false);
-        }
-      }
-    },
-    [filters, limit, offset, showToast],
-  );
-
   const applyFilters = useCallback(() => {
     setFilters({ ...filterDraft });
     setOffset(0);
@@ -549,10 +543,6 @@ export default function StrategyModulesPage() {
   }, [limit, total]);
 
   useEffect(() => {
-    void loadModules();
-  }, [loadModules]);
-
-  useEffect(() => {
     const selectorParam = searchParams?.get('usage');
     if (!selectorParam) {
       return;
@@ -581,53 +571,11 @@ export default function StrategyModulesPage() {
     });
   }, [modules]);
 
-  useEffect(() => {
-    if (!usageDialog) {
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      setUsageLoading(true);
-      setUsageError(null);
-      try {
-        const response = await apiClient.getStrategyModuleUsage(usageDialog.selector, {
-          limit: usageLimit,
-          offset: usageOffset,
-          includeStopped: usageIncludeStopped,
-        });
-        if (cancelled) {
-          return;
-        }
-        setUsageResponse(response);
-        setUsageError(null);
-      } catch (err) {
-        if (cancelled) {
-          return;
-        }
-        const message = err instanceof Error ? err.message : 'Failed to load usage data';
-        setUsageError(message);
-        setUsageResponse(null);
-      } finally {
-        if (!cancelled) {
-          setUsageLoading(false);
-        }
-      }
-    };
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [usageDialog, usageIncludeStopped, usageLimit, usageOffset]);
-
   const refreshCatalog = useCallback(
     async ({ silent = false, notifySuccess = !silent }: RefreshOptions = {}) => {
-      if (!silent) {
-        setRefreshing(true);
-      }
       try {
-        const result = await apiClient.refreshStrategies();
-        await loadModules({ silent });
+        const result = await refreshStrategiesMutation.mutateAsync(undefined);
+        await refetchModules();
         if (notifySuccess) {
           showToast({
             title: 'Strategy catalog refreshed',
@@ -650,21 +598,19 @@ export default function StrategyModulesPage() {
           });
         }
         throw err;
-      } finally {
-        if (!silent) {
-          setRefreshing(false);
-        }
       }
     },
-    [loadModules, showToast],
+    [refetchModules, refreshStrategiesMutation, showToast],
   );
 
   const handleExportRegistry = useCallback(async () => {
-    setExportingRegistry(true);
     try {
-      const snapshot = await apiClient.exportStrategyRegistry();
+      const snapshotResult = await exportRegistryQuery.refetch();
+      if (!snapshotResult.data) {
+        throw new Error('Registry export returned empty payload');
+      }
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
+      const blob = new Blob([JSON.stringify(snapshotResult.data, null, 2)], {
         type: 'application/json',
       });
       const url = URL.createObjectURL(blob);
@@ -688,16 +634,13 @@ export default function StrategyModulesPage() {
         description: message,
         variant: 'destructive',
       });
-    } finally {
-      setExportingRegistry(false);
     }
-  }, [showToast]);
+  }, [exportRegistryQuery, showToast]);
 
   const closeUsageDialog = useCallback(() => {
     setUsageDialog(null);
-    setUsageResponse(null);
-    setUsageError(null);
-  }, []);
+    resetUsageState();
+  }, [resetUsageState]);
 
   const handleUsageLimitChange = useCallback((value: string) => {
     const numeric = Number(value);
@@ -754,9 +697,9 @@ export default function StrategyModulesPage() {
     setRefreshProcessing(true);
     setRefreshError(null);
     try {
-      const response = await apiClient.refreshStrategies(payload);
+      const response = await refreshStrategiesMutation.mutateAsync(payload);
       setRefreshResults(response.results ?? []);
-      await loadModules({ silent: true });
+      await refetchModules();
       showToast({
         title: 'Refresh dispatched',
         description:
@@ -776,7 +719,7 @@ export default function StrategyModulesPage() {
     } finally {
       setRefreshProcessing(false);
     }
-  }, [loadModules, refreshHashInput, refreshSelectorInput, showToast]);
+  }, [refetchModules, refreshHashInput, refreshSelectorInput, refreshStrategiesMutation, showToast]);
 
   const openCreateDialog = () => {
     setFormMode('create');
@@ -820,7 +763,7 @@ export default function StrategyModulesPage() {
       if (!identifier) {
         throw new Error('Strategy identifier unavailable for this module.');
       }
-      const source = await apiClient.getStrategyModuleSource(identifier);
+      const source = await loadModuleSource(identifier);
       setFormData((prev) => ({
         ...prev,
         source,
@@ -923,25 +866,13 @@ export default function StrategyModulesPage() {
     setFormProcessing(true);
     try {
       if (formMode === 'create') {
-        const response = await apiClient.createStrategyModule(payload);
-        const identifier = response.module?.name ?? trimmedName ?? response.filename ?? 'module';
-        showToast({
-          title: 'Strategy module saved',
-          description: `Saved ${identifier}. Refreshing catalog…`,
-          variant: 'success',
-        });
+        await createModuleMutation.mutateAsync(payload);
       } else if (formTarget) {
         const targetIdentifier = moduleIdentifier(formTarget);
         if (!targetIdentifier) {
           throw new Error('Strategy identifier unavailable for this module.');
         }
-        const response = await apiClient.updateStrategyModule(targetIdentifier, payload);
-        const identifier = response.module?.name ?? trimmedName ?? response.filename ?? targetIdentifier;
-        showToast({
-          title: 'Strategy module updated',
-          description: `Updated ${identifier}. Refreshing catalog…`,
-          variant: 'success',
-        });
+        await updateModuleMutation.mutateAsync({ identifier: targetIdentifier, payload });
       }
       await refreshCatalog({ silent: true, notifySuccess: false });
       showToast({
@@ -993,12 +924,7 @@ export default function StrategyModulesPage() {
     setDeleting(true);
     setDeleteError(null);
     try {
-      await apiClient.deleteStrategyModule(identifier);
-      showToast({
-        title: 'Module removed',
-        description: `${deleteTarget.name} deleted successfully.`,
-        variant: 'success',
-      });
+      await deleteModuleMutation.mutateAsync(identifier);
       await refreshCatalog({ silent: true, notifySuccess: false });
       setDetailModule((current) => (current?.name === moduleName ? null : current));
       setDeleteTarget(null);
@@ -1008,11 +934,7 @@ export default function StrategyModulesPage() {
         err instanceof Error ? err.message : 'Failed to delete strategy module';
       const message = friendlyDeletionMessage(messageRaw);
       setDeleteError(message);
-      showToast({
-        title: 'Delete failed',
-        description: message,
-        variant: 'destructive',
-      });
+      // Mutation hook already surfaced toast; surface inline message too.
     } finally {
       setDeleting(false);
     }
@@ -1028,7 +950,7 @@ export default function StrategyModulesPage() {
       if (!identifier) {
         throw new Error('Strategy identifier unavailable for this module.');
       }
-      const source = await apiClient.getStrategyModuleSource(identifier);
+      const source = await loadModuleSource(identifier);
       setSourceContent(source);
     } catch (err) {
       const message =
@@ -1117,21 +1039,15 @@ export default function StrategyModulesPage() {
     setRevisionActionBusy(key);
     try {
       const selector = buildRevisionSelector(module, revision);
-      const source = await apiClient.getStrategyModuleSource(selector);
+      const source = await loadModuleSource(selector);
       const payload = {
         source,
         name: module.name,
         promoteLatest: true,
         ...(revision.tag ? { tag: revision.tag } : {}),
       };
-      await apiClient.updateStrategyModule(selector, payload);
+      await updateModuleMutation.mutateAsync({ identifier: selector, payload });
       await refreshCatalog({ silent: true, notifySuccess: false });
-      const description = `Revision ${revisionLabel(revision)} promoted to latest.`;
-      showToast({
-        title: 'Tag promoted',
-        description,
-        variant: 'success',
-      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to promote revision';
       showToast({
@@ -1153,13 +1069,8 @@ export default function StrategyModulesPage() {
     setRevisionActionBusy(key);
     try {
       const selector = buildRevisionSelector(module, revision);
-      await apiClient.deleteStrategyModule(selector);
+      await deleteModuleMutation.mutateAsync(selector);
       await refreshCatalog({ silent: true, notifySuccess: false });
-      showToast({
-        title: 'Revision removed',
-        description: `${module.name} revision ${revisionLabel(revision)} deleted.`,
-        variant: 'success',
-      });
     } catch (err) {
       const messageRaw =
         err instanceof Error ? err.message : 'Failed to delete revision';
@@ -1193,7 +1104,7 @@ export default function StrategyModulesPage() {
     const { module, revision } = aliasDialogTarget;
     try {
       const selector = buildRevisionSelector(module, revision);
-      const source = await apiClient.getStrategyModuleSource(selector);
+      const source = await loadModuleSource(selector);
       const payload = {
         source,
         name: module.name,
@@ -1201,13 +1112,8 @@ export default function StrategyModulesPage() {
         promoteLatest: aliasPromoteLatest,
         ...(revision.tag ? { tag: revision.tag } : {}),
       };
-      await apiClient.updateStrategyModule(selector, payload);
+      await updateModuleMutation.mutateAsync({ identifier: selector, payload });
       await refreshCatalog({ silent: true, notifySuccess: false });
-      showToast({
-        title: 'Alias added',
-        description: `Alias ${alias} now points to ${revisionLabel(revision)}.`,
-        variant: 'success',
-      });
       setAliasDialogTarget(null);
       setAliasValue('');
       setAliasPromoteLatest(false);
@@ -1432,7 +1338,7 @@ export default function StrategyModulesPage() {
       {error ? (
         <Alert variant="destructive">
           <AlertTitle>Unable to load strategy modules</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{error.message}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -1967,7 +1873,7 @@ export default function StrategyModulesPage() {
           {usageError ? (
             <Alert variant="destructive">
               <AlertTitle>Error loading usage data</AlertTitle>
-              <AlertDescription>{usageError}</AlertDescription>
+              <AlertDescription>{usageError.message}</AlertDescription>
             </Alert>
           ) : null}
           {usageLoading ? (

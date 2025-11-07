@@ -13,6 +13,24 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    files: ["src/**/*.ts", "src/**/*.tsx"],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        {
+          name: "fetch",
+          message: "Use the shared API modules in src/lib/api instead of calling fetch directly.",
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/lib/api/**/*.ts"],
+    rules: {
+      "no-restricted-globals": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

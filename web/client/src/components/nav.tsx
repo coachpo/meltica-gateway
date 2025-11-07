@@ -13,7 +13,10 @@ const navItems = [
   { href: '/providers', label: 'Providers' },
   { href: '/adapters', label: 'Adapters' },
   { href: '/risk', label: 'Risk Limits' },
+  { href: '/config/runtime', label: 'Runtime Config' },
+  { href: '/config/backup', label: 'Config Backup' },
   { href: '/context/backup', label: 'Context Backup' },
+  { href: '/outbox', label: 'Outbox' },
 ];
 
 export function Nav() {

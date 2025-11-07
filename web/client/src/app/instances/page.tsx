@@ -2,16 +2,12 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiClient } from '@/lib/api-client';
 import {
   BalanceRecord,
   ExecutionRecord,
   InstanceSpec,
   InstanceSummary,
   OrderRecord,
-  Provider,
-  Strategy,
-  StrategyModuleSummary,
 } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -42,6 +38,22 @@ import {
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CodeEditor } from '@/components/code';
 import { formatInstanceSpec, parseInstanceSpecDraft } from './spec-utils';
+import {
+  useInstancesQuery,
+  useInstanceOrdersQuery,
+  useInstanceExecutionsQuery,
+  useCreateInstanceMutation,
+  useUpdateInstanceMutation,
+  useDeleteInstanceMutation,
+  useStartInstanceMutation,
+  useStopInstanceMutation,
+  useInstanceLoader,
+  useInstanceBalancesQuery,
+  useStrategiesQuery,
+  useStrategyModulesQuery,
+  useProvidersQuery,
+  useProviderLoader,
+} from '@/lib/hooks';
 
 type ProviderInstrumentStatus = {
   symbols: string[];
@@ -57,19 +69,6 @@ type ParsedSelector = {
 };
 
 type HistoryTab = 'orders' | 'executions' | 'balances';
-
-type HistorySectionState<T> = {
-  data: T[];
-  loading: boolean;
-  error: string | null;
-  initialized: boolean;
-};
-
-type HistoryEntry = {
-  orders: HistorySectionState<OrderRecord>;
-  executions: HistorySectionState<ExecutionRecord>;
-  balances: HistorySectionState<BalanceRecord>;
-};
 
 function parseStrategySelector(raw: string): ParsedSelector {
   const selector = raw.trim();
@@ -134,14 +133,6 @@ function formatDateTime(value?: string | number | null): string {
   }).format(date);
 }
 
-function createHistoryEntry(): HistoryEntry {
-  return {
-    orders: { data: [], loading: false, error: null, initialized: false },
-    executions: { data: [], loading: false, error: null, initialized: false },
-    balances: { data: [], loading: false, error: null, initialized: false },
-  };
-}
-
 function formatMetadata(metadata?: Record<string, unknown> | null): string {
   if (!metadata || Object.keys(metadata).length === 0) {
     return '—';
@@ -173,12 +164,26 @@ const EMPTY_INSTANCE_SPEC: InstanceSpec = {
 const DEFAULT_INSTANCE_JSON = formatInstanceSpec(EMPTY_INSTANCE_SPEC);
 
 export default function InstancesPage() {
-  const [instances, setInstances] = useState<InstanceSummary[]>([]);
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [modules, setModules] = useState<StrategyModuleSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const instancesQuery = useInstancesQuery();
+  const strategiesQuery = useStrategiesQuery();
+  const providersQuery = useProvidersQuery();
+  const strategyModulesQuery = useStrategyModulesQuery({ limit: 500, offset: 0 });
+  const instances = useMemo(
+    () => instancesQuery.data ?? [],
+    [instancesQuery.data],
+  );
+  const strategies = useMemo(
+    () => strategiesQuery.data ?? [],
+    [strategiesQuery.data],
+  );
+  const providers = useMemo(
+    () => providersQuery.data ?? [],
+    [providersQuery.data],
+  );
+  const modules = useMemo(
+    () => strategyModulesQuery.data?.modules ?? [],
+    [strategyModulesQuery.data],
+  );
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create');
   const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
@@ -209,7 +214,23 @@ export default function InstancesPage() {
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [historyDialogInstance, setHistoryDialogInstance] = useState<InstanceSummary | null>(null);
   const [historyTab, setHistoryTab] = useState<HistoryTab>('orders');
-  const [historyState, setHistoryState] = useState<Record<string, HistoryEntry>>({});
+  const baseLoading =
+    instancesQuery.isLoading ||
+    strategiesQuery.isLoading ||
+    providersQuery.isLoading ||
+    strategyModulesQuery.isLoading;
+  const baseError =
+    (instancesQuery.error as Error | null) ??
+    (strategiesQuery.error as Error | null) ??
+    (providersQuery.error as Error | null) ??
+    (strategyModulesQuery.error as Error | null);
+  const createInstanceMutation = useCreateInstanceMutation();
+  const updateInstanceMutation = useUpdateInstanceMutation(editingInstanceId ?? '');
+  const deleteInstanceMutation = useDeleteInstanceMutation();
+  const startInstanceMutation = useStartInstanceMutation();
+  const stopInstanceMutation = useStopInstanceMutation();
+  const loadInstance = useInstanceLoader();
+  const loadProviderDetail = useProviderLoader();
 
   const jsonDiagnostics = useMemo(() => {
     const trimmed = instanceJsonDraft.trim();
@@ -242,191 +263,20 @@ export default function InstancesPage() {
   const submitDisabled =
     dialogSaving || instanceLoading || (formMode === 'json' && jsonDiagnostics.status !== 'success');
 
-  const ensureHistoryEntry = useCallback((id: string) => {
-    if (!id) {
-      return;
-    }
-    setHistoryState((prev) => {
-      if (prev[id]) {
-        return prev;
-      }
-      return {
-        ...prev,
-        [id]: createHistoryEntry(),
-      };
-    });
-  }, []);
-
-  const fetchHistory = useCallback(
-    async (instance: InstanceSummary, tab: HistoryTab) => {
-      if (!instance?.id) {
-        return;
-      }
-      setHistoryState((prev) => {
-        const entry = prev[instance.id] ?? createHistoryEntry();
-        if (tab === 'orders') {
-          return {
-            ...prev,
-            [instance.id]: {
-              ...entry,
-              orders: { ...entry.orders, loading: true, error: null },
-            },
-          };
-        }
-        if (tab === 'executions') {
-          return {
-            ...prev,
-            [instance.id]: {
-              ...entry,
-              executions: { ...entry.executions, loading: true, error: null },
-            },
-          };
-        }
-        return {
-          ...prev,
-          [instance.id]: {
-            ...entry,
-            balances: { ...entry.balances, loading: true, error: null },
-          },
-        };
-      });
-      try {
-        if (tab === 'orders') {
-          const response = await apiClient.getInstanceOrders(instance.id, {
-            limit: HISTORY_LIMITS.orders,
-          });
-          setHistoryState((prev) => {
-            const entry = prev[instance.id] ?? createHistoryEntry();
-            return {
-              ...prev,
-              [instance.id]: {
-                ...entry,
-                orders: {
-                  data: response.orders ?? [],
-                  loading: false,
-                  error: null,
-                  initialized: true,
-                },
-              },
-            };
-          });
-          return;
-        }
-        if (tab === 'executions') {
-          const response = await apiClient.getInstanceExecutions(instance.id, {
-            limit: HISTORY_LIMITS.executions,
-          });
-          setHistoryState((prev) => {
-            const entry = prev[instance.id] ?? createHistoryEntry();
-            return {
-              ...prev,
-              [instance.id]: {
-                ...entry,
-                executions: {
-                  data: response.executions ?? [],
-                  loading: false,
-                  error: null,
-                  initialized: true,
-                },
-              },
-            };
-          });
-          return;
-        }
-        if (instance.providers.length === 0) {
-          setHistoryState((prev) => {
-            const entry = prev[instance.id] ?? createHistoryEntry();
-            return {
-              ...prev,
-              [instance.id]: {
-                ...entry,
-                balances: {
-                  data: [],
-                  loading: false,
-                  error: null,
-                  initialized: true,
-                },
-              },
-            };
-          });
-          return;
-        }
-        const responses = await Promise.all(
-          instance.providers.map(async (provider) => {
-            try {
-              return await apiClient.getProviderBalances(provider, {
-                limit: HISTORY_LIMITS.balances,
-              });
-            } catch (err) {
-              const message = err instanceof Error ? err.message : 'failed to load balances';
-              throw new Error(`Provider ${provider}: ${message}`);
-            }
-          })
-        );
-        const balances = responses.flatMap((res) => res.balances ?? []);
-        setHistoryState((prev) => {
-          const entry = prev[instance.id] ?? createHistoryEntry();
-          return {
-            ...prev,
-            [instance.id]: {
-              ...entry,
-              balances: {
-                data: balances,
-                loading: false,
-                error: null,
-                initialized: true,
-              },
-            },
-          };
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to load history';
-        setHistoryState((prev) => {
-          const entry = prev[instance.id] ?? createHistoryEntry();
-          if (tab === 'orders') {
-            return {
-              ...prev,
-              [instance.id]: {
-                ...entry,
-                orders: {
-                  ...entry.orders,
-                  loading: false,
-                  error: message,
-                  initialized: true,
-                },
-              },
-            };
-          }
-          if (tab === 'executions') {
-            return {
-              ...prev,
-              [instance.id]: {
-                ...entry,
-                executions: {
-                  ...entry.executions,
-                  loading: false,
-                  error: message,
-                  initialized: true,
-                },
-              },
-            };
-          }
-          return {
-            ...prev,
-            [instance.id]: {
-              ...entry,
-              balances: {
-                ...entry.balances,
-                loading: false,
-                error: message,
-                initialized: true,
-              },
-            },
-          };
-        });
-      }
-    },
-    []
+  const ordersHistoryQuery = useInstanceOrdersQuery(
+    historyDialogInstance?.id,
+    { limit: HISTORY_LIMITS.orders },
+    Boolean(historyDialogOpen && historyDialogInstance?.id),
+  );
+  const executionsHistoryQuery = useInstanceExecutionsQuery(
+    historyDialogInstance?.id,
+    { limit: HISTORY_LIMITS.executions },
+    Boolean(historyDialogOpen && historyDialogInstance?.id),
+  );
+  const balancesHistoryQuery = useInstanceBalancesQuery(
+    historyDialogInstance?.providers,
+    HISTORY_LIMITS.balances,
+    Boolean(historyDialogOpen && historyDialogInstance?.id),
   );
 
 
@@ -766,7 +616,7 @@ export default function InstancesPage() {
     }
 
     try {
-      const detail = await apiClient.getProvider(providerName);
+      const detail = await loadProviderDetail(providerName);
       const instruments = Array.isArray(detail.instruments) ? detail.instruments : [];
       const symbols = Array.from(
         new Set(
@@ -798,7 +648,7 @@ export default function InstancesPage() {
         };
       });
     }
-  }, []);
+  }, [loadProviderDetail]);
 
   const toggleProviderSelection = (providerName: string, checked: boolean) => {
     setSelectedProviders((prev) => {
@@ -839,56 +689,6 @@ export default function InstancesPage() {
   const handleConfigChange = (field: string, value: string) => {
     setConfigValues((prev) => ({ ...prev, [field]: value }));
     setFormError(null);
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  useEffect(() => {
-    if (!historyDialogOpen || !historyDialogInstance) {
-      return;
-    }
-    const entry = historyState[historyDialogInstance.id];
-    if (!entry) {
-      ensureHistoryEntry(historyDialogInstance.id);
-      return;
-    }
-    const section =
-      historyTab === 'orders'
-        ? entry.orders
-        : historyTab === 'executions'
-          ? entry.executions
-          : entry.balances;
-    if (!section.initialized && !section.loading) {
-      void fetchHistory(historyDialogInstance, historyTab);
-    }
-  }, [
-    historyDialogOpen,
-    historyDialogInstance,
-    historyTab,
-    historyState,
-    fetchHistory,
-    ensureHistoryEntry,
-  ]);
-
-  const fetchData = async () => {
-    try {
-      const [instancesRes, strategiesRes, providersRes, modulesRes] = await Promise.all([
-        apiClient.getInstances(),
-        apiClient.getStrategies(),
-        apiClient.getProviders(),
-        apiClient.getStrategyModules({ limit: 500, offset: 0 }),
-      ]);
-      setInstances(instancesRes.instances);
-      setStrategies(strategiesRes.strategies);
-      setProviders(providersRes.providers);
-      setModules(Array.isArray(modulesRes.modules) ? modulesRes.modules : []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch data');
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleSubmit = async () => {
@@ -932,7 +732,6 @@ export default function InstancesPage() {
       return;
     }
 
-    const mode = dialogMode;
     const targetId = payload.id.trim();
     if (!targetId) {
       setFormError('Instance ID is required.');
@@ -948,18 +747,12 @@ export default function InstancesPage() {
           setDialogSaving(false);
           return;
         }
-        await apiClient.updateInstance(editingInstanceId, payload);
+        await updateInstanceMutation.mutateAsync(payload);
       } else {
-        await apiClient.createInstance(payload);
+        await createInstanceMutation.mutateAsync(payload);
       }
       setCreateDialogOpen(false);
       resetForm();
-      await fetchData();
-      showToast({
-        title: mode === 'create' ? 'Instance created' : 'Instance updated',
-        description: `Instance ${targetId} ${mode === 'create' ? 'created' : 'updated'} successfully.`,
-        variant: 'success',
-      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '';
       const providerNames =
@@ -994,23 +787,15 @@ export default function InstancesPage() {
   const handleStart = async (id: string) => {
     setActionInProgress(prev => ({ ...prev, [`start-${id}`]: true }));
     try {
-      await apiClient.startInstance(id);
-      await fetchData();
-      showToast({
-        title: 'Instance started',
-        description: `${id} is now running.`,
-        variant: 'success',
-      });
+      await startInstanceMutation.mutateAsync(id);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : `Failed to start ${id}`;
-      const description = errorMessage.includes('provider') && errorMessage.includes('unavailable')
-        ? `${errorMessage}. Start the provider before starting this instance.`
-        : errorMessage;
-      showToast({
-        title: 'Failed to start instance',
-        description,
-        variant: 'destructive',
-      });
+      if (err instanceof Error && err.message.includes('provider') && err.message.includes('unavailable')) {
+        showToast({
+          title: 'Provider unavailable',
+          description: `${err.message}. Start the provider before starting this instance.`,
+          variant: 'destructive',
+        });
+      }
     } finally {
       setActionInProgress(prev => ({ ...prev, [`start-${id}`]: false }));
     }
@@ -1019,20 +804,15 @@ export default function InstancesPage() {
   const handleStop = async (id: string) => {
     setActionInProgress(prev => ({ ...prev, [`stop-${id}`]: true }));
     try {
-      await apiClient.stopInstance(id);
-      await fetchData();
-      showToast({
-        title: 'Instance stopped',
-        description: `${id} is now stopped.`,
-        variant: 'success',
-      });
+      await stopInstanceMutation.mutateAsync(id);
     } catch (err) {
-      const message = err instanceof Error ? err.message : `Failed to stop ${id}`;
-      showToast({
-        title: 'Failed to stop instance',
-        description: message,
-        variant: 'destructive',
-      });
+      if (err instanceof Error) {
+        showToast({
+          title: 'Failed to stop instance',
+          description: err.message,
+          variant: 'destructive',
+        });
+      }
     } finally {
       setActionInProgress(prev => ({ ...prev, [`stop-${id}`]: false }));
     }
@@ -1041,21 +821,16 @@ export default function InstancesPage() {
   const performDelete = async (id: string) => {
     setActionInProgress(prev => ({ ...prev, [`delete-${id}`]: true }));
     try {
-      await apiClient.deleteInstance(id);
-      await fetchData();
+      await deleteInstanceMutation.mutateAsync(id);
       setConfirmState(null);
-      showToast({
-        title: 'Instance deleted',
-        description: `${id} has been removed.`,
-        variant: 'success',
-      });
     } catch (err) {
-      const message = err instanceof Error ? err.message : `Failed to delete ${id}`;
-      showToast({
-        title: 'Failed to delete instance',
-        description: message,
-        variant: 'destructive',
-      });
+      if (err instanceof Error) {
+        showToast({
+          title: 'Failed to delete instance',
+          description: err.message,
+          variant: 'destructive',
+        });
+      }
       setConfirmState(null);
     } finally {
       setActionInProgress(prev => ({ ...prev, [`delete-${id}`]: false }));
@@ -1097,13 +872,18 @@ export default function InstancesPage() {
     setHistoryDialogInstance(instance);
     setHistoryDialogOpen(true);
     setHistoryTab('orders');
-    ensureHistoryEntry(instance.id);
   };
 
   const handleHistoryRefresh = () => {
-    if (historyDialogInstance) {
-      void fetchHistory(historyDialogInstance, historyTab);
+    if (historyTab === 'orders') {
+      void ordersHistoryQuery.refetch();
+      return;
     }
+    if (historyTab === 'executions') {
+      void executionsHistoryQuery.refetch();
+      return;
+    }
+    void balancesHistoryQuery.refetch();
   };
 
   const handleEdit = async (id: string) => {
@@ -1115,7 +895,7 @@ export default function InstancesPage() {
     setInstanceLoading(true);
     setCreateDialogOpen(true);
     try {
-      const instance = await apiClient.getInstance(id);
+      const instance = await loadInstance(id);
       populateFormFromSpec(instance, { setPrefilled: true });
       setInstanceJsonDraft(formatInstanceSpec(instance));
       setFormMode('json');
@@ -1127,14 +907,14 @@ export default function InstancesPage() {
     }
   };
 
-  if (loading) {
+  if (baseLoading) {
     return <div>Loading instances...</div>;
   }
 
-  if (error) {
+  if (baseError) {
     return (
       <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
+        <AlertDescription>{baseError.message}</AlertDescription>
       </Alert>
     );
   }
@@ -1147,30 +927,42 @@ export default function InstancesPage() {
         </div>
       );
     }
-    const entry = historyState[historyDialogInstance.id];
-    if (!entry) {
-      return (
-        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-          <Loader2Icon className="h-4 w-4 animate-spin" />
-          Preparing history snapshot…
-        </div>
-      );
-    }
-    const section =
+
+    const sectionState =
       tab === 'orders'
-        ? entry.orders
+        ? {
+            records: (ordersHistoryQuery.data?.orders ?? []) as OrderRecord[],
+            isLoading: ordersHistoryQuery.isLoading,
+            isFetching: ordersHistoryQuery.isFetching,
+            isFetched: ordersHistoryQuery.isFetched,
+            error: ordersHistoryQuery.error as Error | null,
+          }
         : tab === 'executions'
-          ? entry.executions
-          : entry.balances;
-    if (section.error) {
+          ? {
+              records: (executionsHistoryQuery.data?.executions ?? []) as ExecutionRecord[],
+              isLoading: executionsHistoryQuery.isLoading,
+              isFetching: executionsHistoryQuery.isFetching,
+              isFetched: executionsHistoryQuery.isFetched,
+              error: executionsHistoryQuery.error as Error | null,
+            }
+          : {
+              records: (balancesHistoryQuery.data?.balances ?? []) as BalanceRecord[],
+              isLoading: balancesHistoryQuery.isLoading,
+              isFetching: balancesHistoryQuery.isFetching,
+              isFetched: balancesHistoryQuery.isFetched ?? false,
+              error: balancesHistoryQuery.error as Error | null,
+            };
+
+    if (sectionState.error) {
       return (
         <Alert variant="destructive">
           <AlertTitle>Failed to load {tab}</AlertTitle>
-          <AlertDescription>{section.error}</AlertDescription>
+          <AlertDescription>{sectionState.error.message}</AlertDescription>
         </Alert>
       );
     }
-    if (section.loading && !section.initialized) {
+
+    if (sectionState.isLoading && !sectionState.isFetched) {
       return (
         <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
           <Loader2Icon className="h-4 w-4 animate-spin" />
@@ -1178,21 +970,25 @@ export default function InstancesPage() {
         </div>
       );
     }
-    if (!section.loading && section.initialized && section.data.length === 0) {
+
+    if (sectionState.isFetched && sectionState.records.length === 0) {
       return (
         <p className="py-6 text-sm text-muted-foreground">
           No {tab === 'balances' ? 'balance' : tab} records yet.
         </p>
       );
     }
-    const loadingOverlay = section.loading ? (
-      <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-        <Loader2Icon className="h-3 w-3 animate-spin" />
-        Refreshing {tab}…
-      </div>
-    ) : null;
+
+    const loadingOverlay =
+      sectionState.isFetching && sectionState.isFetched ? (
+        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2Icon className="h-3 w-3 animate-spin" />
+          Refreshing {tab}…
+        </div>
+      ) : null;
+
     if (tab === 'orders') {
-      const records = section.data as OrderRecord[];
+      const records = sectionState.records as OrderRecord[];
       return (
         <>
           {loadingOverlay}
@@ -1243,8 +1039,9 @@ export default function InstancesPage() {
         </>
       );
     }
+
     if (tab === 'executions') {
-      const records = section.data as ExecutionRecord[];
+      const records = sectionState.records as ExecutionRecord[];
       return (
         <>
           {loadingOverlay}
@@ -1289,7 +1086,8 @@ export default function InstancesPage() {
         </>
       );
     }
-    const records = section.data as BalanceRecord[];
+
+    const records = sectionState.records as BalanceRecord[];
     return (
       <>
         {loadingOverlay}
@@ -1329,15 +1127,12 @@ export default function InstancesPage() {
     );
   };
 
-  const activeHistoryEntry = historyDialogInstance
-    ? historyState[historyDialogInstance.id]
-    : undefined;
-  const activeHistorySection =
+  const historySectionLoading =
     historyTab === 'orders'
-      ? activeHistoryEntry?.orders
+      ? ordersHistoryQuery.isFetching
       : historyTab === 'executions'
-        ? activeHistoryEntry?.executions
-        : activeHistoryEntry?.balances;
+        ? executionsHistoryQuery.isFetching
+        : balancesHistoryQuery.isFetching;
 
   const confirmOpen = Boolean(confirmState);
   const confirmLoading =
@@ -2132,9 +1927,9 @@ export default function InstancesPage() {
                     variant="outline"
                     size="sm"
                     onClick={handleHistoryRefresh}
-                    disabled={!historyDialogInstance || Boolean(activeHistorySection?.loading)}
+                    disabled={!historyDialogInstance || historySectionLoading}
                   >
-                    {activeHistorySection?.loading ? (
+                    {historySectionLoading ? (
                       <Loader2Icon className="mr-2 h-3 w-3 animate-spin" />
                     ) : (
                       <RotateCcwIcon className="mr-2 h-3 w-3" />

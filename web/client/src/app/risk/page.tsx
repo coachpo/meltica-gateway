@@ -1,7 +1,6 @@
 'use client';
 
 import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
-import { apiClient } from '@/lib/api-client';
 import { RiskConfig } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { XIcon } from 'lucide-react';
+import { useRiskLimitsQuery, useUpdateRiskLimitsMutation } from '@/lib/hooks';
 
 type RiskPresence = {
   maxPositionSize: boolean;
@@ -107,8 +107,6 @@ export default function RiskPage() {
   });
 
   const [limits, setLimits] = useState<RiskConfig | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [presence, setPresence] = useState<RiskPresence | null>(null);
@@ -134,24 +132,20 @@ export default function RiskPage() {
   });
   const [orderTypeInput, setOrderTypeInput] = useState('');
 
-  useEffect(() => {
-    const loadLimits = async () => {
-      try {
-        const response = await apiClient.getRiskLimits();
-        const normalized = normalizeRiskConfig(response.limits);
-        const resolvedPresence = computePresence(response.limits as Partial<RiskConfig>);
-        setLimits(normalized);
-        setFormData(normalized);
-        setPresence(resolvedPresence);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch risk limits');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const riskQuery = useRiskLimitsQuery();
+  const updateLimitsMutation = useUpdateRiskLimitsMutation();
 
-    void loadLimits();
-  }, []);
+  useEffect(() => {
+    if (!riskQuery.data?.limits) {
+      return;
+    }
+    const normalized = normalizeRiskConfig(riskQuery.data.limits as Partial<RiskConfig>);
+    setLimits(normalized);
+    if (!editMode) {
+      setFormData(normalized);
+    }
+    setPresence(computePresence(riskQuery.data.limits as Partial<RiskConfig>));
+  }, [riskQuery.data, editMode]);
 
   useEffect(() => {
     if (!actionMessage) {
@@ -171,8 +165,8 @@ export default function RiskPage() {
     try {
       setActionMessage(null);
       setActionError(null);
-      const response = await apiClient.updateRiskLimits(formData);
-      const normalized = normalizeRiskConfig(response.limits);
+      const response = await updateLimitsMutation.mutateAsync(formData);
+      const normalized = normalizeRiskConfig(response.limits as Partial<RiskConfig>);
       const resolvedPresence = computePresence(response.limits as Partial<RiskConfig>);
       setLimits(normalized);
       setEditMode(false);
@@ -253,14 +247,18 @@ export default function RiskPage() {
     return fields;
   }, [presence]);
 
-  if (loading) {
+  if (riskQuery.isLoading) {
     return <div>Loading risk limits...</div>;
   }
 
-  if (error) {
+  if (riskQuery.isError) {
     return (
       <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
+        <AlertDescription>
+          {riskQuery.error instanceof Error
+            ? riskQuery.error.message
+            : 'Failed to load risk limits'}
+        </AlertDescription>
       </Alert>
     );
   }

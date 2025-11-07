@@ -1,12 +1,10 @@
 'use client';
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { apiClient } from '@/lib/api-client';
 import type {
   AdapterMetadata,
   Instrument,
   InstanceSummary,
-  Provider,
   ProviderDetail,
   ProviderRequest,
   SettingsSchema,
@@ -34,10 +32,31 @@ import {
 } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useToast } from '@/components/ui/toast-provider';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import {
+  useAdaptersQuery,
+  useCreateProviderMutation,
+  useDeleteProviderMutation,
+  useInstancesQuery,
+  useProviderBalancesQuery,
+  useProviderQuery,
+  useProvidersQuery,
+  useStartProviderMutation,
+  useStopProviderMutation,
+  useUpdateProviderMutation,
+} from '@/lib/hooks';
 
 const INSTRUMENTS_PAGE_SIZE = 120;
 
@@ -104,6 +123,9 @@ const MASKED_SECRET_PLACEHOLDER = '••••••';
 
 const DEFAULT_PRIVATE_NOTE =
   'Leave blank to disable private subscriptions such as balances and execution reports.';
+
+const BALANCE_LIMIT_OPTIONS = [25, 50, 100, 200];
+const DEFAULT_BALANCE_LIMIT = 50;
 
 type AuthFieldHints = Record<
   string,
@@ -298,29 +320,107 @@ function maskProviderDetail(detail: ProviderDetail): ProviderDetail {
   };
 }
 
+function resolveErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string' && error.trim()) {
+    return error.trim();
+  }
+  return fallback;
+}
+
+function formatTimestamp(value?: number | string | null): string {
+  if (value === undefined || value === null || value === '') {
+    return '—';
+  }
+  const timestamp = typeof value === 'number' ? value : Number(value);
+  const date = Number.isFinite(timestamp) ? new Date(timestamp) : new Date(value as string);
+  if (Number.isNaN(date.getTime())) {
+    return '—';
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date);
+}
+
 export default function ProvidersPage() {
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [adapters, setAdapters] = useState<AdapterMetadata[]>([]);
-  const [instanceIndex, setInstanceIndex] = useState<Record<string, InstanceSummary>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [pollingEnabled, setPollingEnabled] = useState(false);
+  const providersQuery = useProvidersQuery();
+  const adaptersQuery = useAdaptersQuery();
+  const instancesQuery = useInstancesQuery();
+  const providers = providersQuery.data ?? [];
+  const adapters = useMemo(() => adaptersQuery.data ?? [], [adaptersQuery.data]);
+  const instanceIndex = useMemo(
+    () => buildInstanceIndex(instancesQuery.data ?? []),
+    [instancesQuery.data],
+  );
+  const loading = providersQuery.isLoading || adaptersQuery.isLoading || instancesQuery.isLoading;
+  const queryError =
+    (providersQuery.error as Error | null) ??
+    (adaptersQuery.error as Error | null) ??
+    (instancesQuery.error as Error | null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>('create');
   const [formState, setFormState] = useState<FormState>(defaultFormState);
   const [formError, setFormError] = useState<string | null>(null);
-  const [formLoading, setFormLoading] = useState(false);
+  const [formTargetProvider, setFormTargetProvider] = useState<string | null>(null);
+  const [formPrefilledProvider, setFormPrefilledProvider] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const [detailOpen, setDetailOpen] = useState(false);
-  const [detail, setDetail] = useState<ProviderDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailTarget, setDetailTarget] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<'overview' | 'balances'>('overview');
+  const [balanceLimit, setBalanceLimit] = useState(DEFAULT_BALANCE_LIMIT);
+  const [balanceAssetFilter, setBalanceAssetFilter] = useState('');
   const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(null);
   const [instrumentQuery, setInstrumentQuery] = useState('');
   const [instrumentPage, setInstrumentPage] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  const editProviderQuery = useProviderQuery(
+    formTargetProvider ?? undefined,
+    Boolean(formOpen && formMode === 'edit' && formTargetProvider),
+  );
+
+  const detailProviderQuery = useProviderQuery(
+    detailTarget ?? undefined,
+    Boolean(detailOpen && detailTarget),
+  );
+
+  const detail = useMemo(() => {
+    if (!detailProviderQuery.data) {
+      return null;
+    }
+    return maskProviderDetail(detailProviderQuery.data);
+  }, [detailProviderQuery.data]);
+
+  const detailLoading = Boolean(detailOpen && detailTarget && detailProviderQuery.isLoading);
+  const detailError = detailProviderQuery.error && detailOpen && detailTarget
+    ? resolveErrorMessage(detailProviderQuery.error, 'Failed to load provider details')
+    : null;
+  const formLoading = Boolean(formOpen && formMode === 'edit' && formTargetProvider && editProviderQuery.isLoading);
+
+  const providerBalancesQuery = useProviderBalancesQuery(
+    detailTarget ?? undefined,
+    {
+      limit: balanceLimit,
+      asset: balanceAssetFilter.trim() || undefined,
+    },
+    Boolean(detailOpen && detailTab === 'balances' && detailTarget),
+  );
+  const balanceRows = providerBalancesQuery.data?.balances ?? [];
+  const balanceCount = providerBalancesQuery.data?.count ?? balanceRows.length;
+  const balanceLoading = providerBalancesQuery.isLoading;
+  const balanceError =
+    detailTab === 'balances' && providerBalancesQuery.error
+      ? resolveErrorMessage(providerBalancesQuery.error, 'Failed to load balances')
+      : null;
 
   type ProviderActionType = 'start' | 'stop' | 'delete';
   type ProviderActionState = Record<ProviderActionType, string | null>;
@@ -340,7 +440,11 @@ export default function ProvidersPage() {
     },
     [],
   );
-  const { show: showToast } = useToast();
+  const createProviderMutation = useCreateProviderMutation();
+  const updateProviderMutation = useUpdateProviderMutation();
+  const deleteProviderMutation = useDeleteProviderMutation();
+  const startProviderMutation = useStartProviderMutation();
+  const stopProviderMutation = useStopProviderMutation();
 
   const selectedAdapter = useMemo(
     () => adapters.find((adapter) => adapter.identifier === formState.adapter),
@@ -354,72 +458,6 @@ export default function ProvidersPage() {
     });
     return map;
   }, [adapters]);
-
-  const refreshProviders = useCallback(
-    async (silent = false) => {
-      try {
-        const [providersResponse, instancesResponse] = await Promise.all([
-          apiClient.getProviders(),
-          apiClient.getInstances(),
-        ]);
-        setProviders(providersResponse.providers);
-        setInstanceIndex(buildInstanceIndex(instancesResponse.instances ?? []));
-
-        const hasStarting = providersResponse.providers.some((p) => p.status === 'starting');
-        setPollingEnabled(hasStarting);
-      } catch (err) {
-        if (!silent) {
-          const message = err instanceof Error ? err.message : 'Failed to refresh providers';
-          showToast({
-            title: 'Provider refresh failed',
-            description: message,
-            variant: 'destructive',
-          });
-        }
-      }
-    },
-    [showToast],
-  );
-
-  useEffect(() => {
-    const fetchInitial = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [providersResponse, adaptersResponse, instancesResponse] = await Promise.all([
-          apiClient.getProviders(),
-          apiClient.getAdapters(),
-          apiClient.getInstances(),
-        ]);
-        setProviders(providersResponse.providers);
-        setAdapters(adaptersResponse.adapters);
-        setInstanceIndex(buildInstanceIndex(instancesResponse.instances ?? []));
-        
-        // Check if any provider is in 'starting' state
-        const hasStarting = providersResponse.providers.some((p) => p.status === 'starting');
-        setPollingEnabled(hasStarting);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load providers');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchInitial();
-  }, []);
-
-  // Poll for updates when providers are in 'starting' state
-  useEffect(() => {
-    if (!pollingEnabled) {
-      return;
-    }
-
-    const intervalId = setInterval(() => {
-      void refreshProviders(true);
-    }, 2000); // Poll every 2 seconds
-
-    return () => clearInterval(intervalId);
-  }, [pollingEnabled, refreshProviders]);
 
   useEffect(() => {
     if (!detailOpen) {
@@ -537,7 +575,8 @@ export default function ProvidersPage() {
   const resetForm = () => {
     setFormState(defaultFormState);
     setFormError(null);
-    setFormLoading(false);
+    setFormTargetProvider(null);
+    setFormPrefilledProvider(null);
   };
 
   const handleFormOpenChange = (open: boolean) => {
@@ -545,6 +584,19 @@ export default function ProvidersPage() {
     if (!open) {
       resetForm();
       setFormMode('create');
+    }
+  };
+
+  const handleDetailOpenChange = (open: boolean) => {
+    setDetailOpen(open);
+    if (!open) {
+      setDetailTarget(null);
+      setDetailTab('overview');
+      setBalanceAssetFilter('');
+      setBalanceLimit(DEFAULT_BALANCE_LIMIT);
+      setSelectedInstrument(null);
+      setInstrumentQuery('');
+      setInstrumentPage(0);
     }
   };
 
@@ -573,40 +625,62 @@ export default function ProvidersPage() {
     }));
   };
 
-  const handleEdit = async (name: string) => {
+  const handleEdit = (name: string) => {
     setFormMode('edit');
-    setFormOpen(true);
-    setFormLoading(true);
     setFormError(null);
-    try {
-      const detailResponse = await apiClient.getProvider(name);
-      setFormState({
-        name: detailResponse.name,
-        adapter: detailResponse.adapter.identifier,
-        configValues: buildConfigValues(detailResponse.adapter, detailResponse.settings),
-        enabled: detailResponse.running,
-      });
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to load provider');
-    } finally {
-      setFormLoading(false);
-    }
+    setFormPrefilledProvider(null);
+    setFormTargetProvider(name);
+    setFormState(() => ({
+      ...defaultFormState,
+      name,
+    }));
+    setFormOpen(true);
   };
 
-  const handleDetail = async (name: string) => {
+  const handleDetail = (name: string) => {
+    setDetailTarget(name);
+    setDetailTab('overview');
+    setBalanceAssetFilter('');
+    setBalanceLimit(DEFAULT_BALANCE_LIMIT);
+    setSelectedInstrument(null);
+    setInstrumentQuery('');
+    setInstrumentPage(0);
     setDetailOpen(true);
-    setDetailLoading(true);
-    setDetailError(null);
-    setDetail(null);
-    try {
-      const detailResponse = await apiClient.getProvider(name);
-      setDetail(maskProviderDetail(detailResponse));
-    } catch (err) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to load provider details');
-    } finally {
-      setDetailLoading(false);
-    }
   };
+
+  useEffect(() => {
+    if (!formOpen || formMode !== 'edit' || !formTargetProvider) {
+      return;
+    }
+    if (!editProviderQuery.data || formPrefilledProvider === formTargetProvider) {
+      return;
+    }
+    const detailResponse = editProviderQuery.data;
+    setFormState({
+      name: detailResponse.name,
+      adapter: detailResponse.adapter.identifier,
+      configValues: buildConfigValues(detailResponse.adapter, detailResponse.settings),
+      enabled: detailResponse.running,
+    });
+    setFormError(null);
+    setFormPrefilledProvider(formTargetProvider);
+  }, [
+    formOpen,
+    formMode,
+    formTargetProvider,
+    formPrefilledProvider,
+    editProviderQuery.data,
+  ]);
+
+  useEffect(() => {
+    if (!formOpen || formMode !== 'edit' || !formTargetProvider) {
+      return;
+    }
+    if (!editProviderQuery.error) {
+      return;
+    }
+    setFormError(resolveErrorMessage(editProviderQuery.error, 'Failed to load provider'));
+  }, [formOpen, formMode, formTargetProvider, editProviderQuery.error]);
 
   const handleFormSubmit = async () => {
     setFormError(null);
@@ -639,20 +713,10 @@ export default function ProvidersPage() {
     setSubmitting(true);
     try {
       if (mode === 'create') {
-        await apiClient.createProvider(payload);
+        await createProviderMutation.mutateAsync(payload);
       } else {
-        await apiClient.updateProvider(trimmedName, payload);
+        await updateProviderMutation.mutateAsync({ name: trimmedName, payload });
       }
-      await refreshProviders();
-      const actionVerb = mode === 'create' ? 'created' : 'updated';
-      const description = formState.enabled
-        ? `Provider ${trimmedName} ${actionVerb}. Starting asynchronously...`
-        : `Provider ${trimmedName} ${actionVerb} successfully.`;
-      showToast({
-        title: mode === 'create' ? 'Provider created' : 'Provider updated',
-        description,
-        variant: 'success',
-      });
       handleFormOpenChange(false);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to save provider');
@@ -664,20 +728,9 @@ export default function ProvidersPage() {
   const handleStart = async (name: string) => {
     setPending('start', name);
     try {
-      await apiClient.startProvider(name);
-      await refreshProviders();
-      showToast({
-        title: 'Provider starting',
-        description: `${name} is starting asynchronously. Check status for updates.`,
-        variant: 'success',
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : `Failed to start ${name}`;
-      showToast({
-        title: 'Start failed',
-        description: message,
-        variant: 'destructive',
-      });
+      await startProviderMutation.mutateAsync(name);
+    } catch {
+      // Notification handled by mutation hook
     } finally {
       setPending('start', null);
     }
@@ -686,20 +739,9 @@ export default function ProvidersPage() {
   const handleStop = async (name: string) => {
     setPending('stop', name);
     try {
-      await apiClient.stopProvider(name);
-      await refreshProviders();
-      showToast({
-        title: 'Provider stopped',
-        description: `${name} is now stopped.`,
-        variant: 'success',
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : `Failed to stop ${name}`;
-      showToast({
-        title: 'Stop failed',
-        description: message,
-        variant: 'destructive',
-      });
+      await stopProviderMutation.mutateAsync(name);
+    } catch {
+      // Notification handled by mutation hook
     } finally {
       setPending('stop', null);
     }
@@ -708,24 +750,12 @@ export default function ProvidersPage() {
   const performDelete = async (name: string) => {
     setPending('delete', name);
     try {
-      await apiClient.deleteProvider(name);
-      await refreshProviders();
-      setDeleteTarget(null);
-      showToast({
-        title: 'Provider deleted',
-        description: `${name} has been removed.`,
-        variant: 'success',
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : `Failed to delete ${name}`;
-      showToast({
-        title: 'Delete failed',
-        description: message,
-        variant: 'destructive',
-      });
-      setDeleteTarget(null);
+      await deleteProviderMutation.mutateAsync(name);
+    } catch {
+      // Notification handled by mutation hook
     } finally {
       setPending('delete', null);
+      setDeleteTarget(null);
     }
   };
   const handleDelete = (name: string) => {
@@ -736,10 +766,10 @@ export default function ProvidersPage() {
     return <div>Loading providers...</div>;
   }
 
-  if (error) {
+  if (queryError) {
     return (
       <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
+        <AlertDescription>{queryError.message ?? 'Failed to load providers'}</AlertDescription>
       </Alert>
     );
   }
@@ -1041,24 +1071,35 @@ export default function ProvidersPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-3xl sm:max-h-[85vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Provider details</DialogTitle>
-            <DialogDescription>Inspect adapter configuration and subscribed instruments.</DialogDescription>
-          </DialogHeader>
 
-          {detailError && (
-            <Alert variant="destructive">
-              <AlertDescription>{detailError}</AlertDescription>
-            </Alert>
-          )}
+<Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
+  <DialogContent className="max-w-3xl sm:max-h-[85vh] flex flex-col">
+    <DialogHeader>
+      <DialogTitle>Provider details</DialogTitle>
+      <DialogDescription>Inspect adapter configuration, balances, and subscribed instruments.</DialogDescription>
+    </DialogHeader>
 
-          <ScrollArea className="flex-1" type="auto">
-            {detailLoading ? (
-              <div>Loading provider…</div>
-            ) : detail ? (
-              <div className="space-y-4 pr-1 text-sm">
+    {detailError && (
+      <Alert variant="destructive">
+        <AlertDescription>{detailError}</AlertDescription>
+      </Alert>
+    )}
+
+    <ScrollArea className="flex-1" type="auto">
+      {detailLoading ? (
+        <div className="py-6 text-sm text-muted-foreground">Loading provider…</div>
+      ) : detail ? (
+        <Tabs
+          value={detailTab}
+          onValueChange={(value) => setDetailTab(value as 'overview' | 'balances')}
+          className="flex flex-col gap-4 pr-1"
+        >
+          <TabsList className="w-full justify-start">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="balances">Balances</TabsTrigger>
+          </TabsList>
+          <TabsContent value="overview" className="mt-0">
+            <div className="space-y-4 text-sm">
               {(() => {
                 const dependentInstances = detail.dependentInstances ?? [];
                 const { visible: dynamicDependents, hidden: baselineDependents } = partitionDependents(
@@ -1137,161 +1178,216 @@ export default function ProvidersPage() {
               <Separator />
 
               <div>
-                <p className="font-medium text-foreground">
-                  Instruments (
-                  {filteredInstruments.length}
-                  {detail.instruments.length !== filteredInstruments.length
-                    ? ` of ${detail.instruments.length}`
-                    : ''}
-                  )
-                </p>
-                {detail.instruments.length === 0 ? (
-                  <p className="text-muted-foreground">No instruments registered.</p>
-                ) : (
-                  <>
-                    <Input
-                      value={instrumentQuery}
-                      onChange={(event) => setInstrumentQuery(event.target.value)}
-                      placeholder="Search symbol or asset"
-                      className="mt-2"
-                    />
-                    {filteredInstruments.length === 0 ? (
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        No instruments match your filter.
-                      </p>
-                    ) : (
-                      <>
-                        <ScrollArea
-                          className="pr-1"
-                          type="auto"
-                          aria-label="Provider instruments"
-                          viewportClassName="max-h-56"
-                        >
-                          <div className="space-y-1">
-                            {currentPageInstruments.map((instrument) => {
-                              const isSelected = selectedInstrument?.symbol === instrument.symbol;
-                              const baseLabel = instrumentBaseValue(instrument) || '—';
-                              const quoteLabel = instrumentQuoteValue(instrument) || '—';
-                              return (
-                                <button
-                                  key={instrument.symbol}
-                                  type="button"
-                                  onClick={() => setSelectedInstrument(instrument)}
-                                  className={cn(
-                                    'w-full rounded-md px-2 py-1 text-left text-sm transition-colors',
-                                    isSelected
-                                      ? 'bg-primary/10 text-primary'
-                                      : 'text-muted-foreground hover:bg-muted'
-                                  )}
-                                >
-                                  <span className="font-medium">{instrument.symbol ?? '—'}</span>{' '}
-                                  ({baseLabel}/{quoteLabel})
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </ScrollArea>
-                        {totalInstrumentPages > 1 && (
-                          <div className="flex flex-col gap-2 pt-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                            <span>
-                              Showing {pageDisplayStart.toLocaleString()}–
-                              {pageDisplayEnd.toLocaleString()} of {totalInstrumentCount.toLocaleString()}
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  setInstrumentPage((prev) => Math.max(prev - 1, 0))
-                                }
-                                disabled={effectiveInstrumentPage === 0}
-                              >
-                                Previous
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  setInstrumentPage((prev) =>
-                                    totalInstrumentPages === 0
-                                      ? 0
-                                      : Math.min(prev + 1, totalInstrumentPages - 1),
-                                  )
-                                }
-                                disabled={
-                                  totalInstrumentPages === 0 ||
-                                  effectiveInstrumentPage >= totalInstrumentPages - 1
-                                }
-                              >
-                                Next
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {selectedInstrument && selectedInstrumentDisplay && (
-                <div className="space-y-2 rounded-lg border bg-muted/30 p-4 text-sm">
-                  <p className="font-medium text-foreground">Instrument details</p>
-                  <div className="grid gap-1 text-muted-foreground">
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Symbol</span>
-                      <span>{selectedInstrument.symbol ?? '—'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Type</span>
-                      <span>{selectedInstrumentDisplay.type}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Base asset</span>
-                      <span>{selectedInstrumentDisplay.base}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Quote asset</span>
-                      <span>{selectedInstrumentDisplay.quote}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Price precision</span>
-                      <span>{selectedInstrumentDisplay.pricePrecision}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Quantity precision</span>
-                      <span>{selectedInstrumentDisplay.quantityPrecision}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Price increment</span>
-                      <span>{selectedInstrumentDisplay.priceIncrement}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Quantity increment</span>
-                      <span>{selectedInstrumentDisplay.quantityIncrement}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Min quantity</span>
-                      <span>{selectedInstrumentDisplay.minQuantity}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Max quantity</span>
-                      <span>{selectedInstrumentDisplay.maxQuantity}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-foreground">Notional precision</span>
-                      <span>{selectedInstrumentDisplay.notionalPrecision}</span>
-                    </div>
+                <p className="font-medium text-foreground">Instruments ({detail.instruments.length})</p>
+                <div className="flex flex-col gap-2 py-2">
+                  <Input
+                    placeholder="Search symbols…"
+                    value={instrumentQuery}
+                    onChange={(event) => setInstrumentQuery(event.target.value)}
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    {filteredInstruments.length} matching instrument{filteredInstruments.length === 1 ? '' : 's'}
                   </div>
                 </div>
-              )}
+                <div className="rounded-md border">
+                  <div className="grid gap-2 p-3 text-xs sm:grid-cols-2">
+                    {currentPageInstruments.length === 0 ? (
+                      <div className="text-muted-foreground">No instruments match the current filter.</div>
+                    ) : (
+                      currentPageInstruments.map((instrument) => (
+                        <button
+                          type="button"
+                          key={instrument.symbol}
+                          onClick={() => setSelectedInstrument(instrument)}
+                          className={cn(
+                            'rounded-md border px-3 py-2 text-left transition hover:border-foreground/40',
+                            selectedInstrument?.symbol === instrument.symbol && 'border-primary text-primary',
+                          )}
+                        >
+                          <div className="text-sm font-medium">{instrument.symbol}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {instrumentBaseValue(instrument)} / {instrumentQuoteValue(instrument)}
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+                {totalInstrumentPages > 1 && (
+                  <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                    <div>
+                      Showing {pageDisplayStart} – {pageDisplayEnd}{' '}
+                      of {totalInstrumentCount} instrument{totalInstrumentCount === 1 ? '' : 's'}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={effectiveInstrumentPage === 0}
+                        onClick={() => setInstrumentPage((page) => Math.max(0, page - 1))}
+                      >
+                        Prev
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={effectiveInstrumentPage >= totalInstrumentPages - 1}
+                        onClick={() =>
+                          setInstrumentPage((page) =>
+                            Math.min(totalInstrumentPages - 1, page + 1),
+                          )
+                        }
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {selectedInstrumentDisplay && (
+                  <div className="mt-4 space-y-2 rounded-md border p-3">
+                    <p className="text-sm font-medium text-foreground">Instrument details</p>
+                    <div className="grid gap-2 text-xs sm:grid-cols-2">
+                      <div>
+                        <p className="text-muted-foreground">Base</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.base}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Quote</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.quote}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Type</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.type}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Price precision</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.pricePrecision}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Quantity precision</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.quantityPrecision}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Price increment</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.priceIncrement}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Quantity increment</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.quantityIncrement}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Min quantity</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.minQuantity}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Max quantity</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.maxQuantity}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Notional precision</p>
+                        <p className="font-medium">{selectedInstrumentDisplay.notionalPrecision}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="text-muted-foreground">Select a provider to view details.</div>
-            )}
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
+            </div>
+          </TabsContent>
+          <TabsContent value="balances" className="mt-0">
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-3">
+                <div className="flex min-w-[180px] flex-1 flex-col gap-1">
+                  <Label htmlFor="balance-asset">Asset filter</Label>
+                  <Input
+                    id="balance-asset"
+                    placeholder="e.g. USDT"
+                    value={balanceAssetFilter}
+                    onChange={(event) => setBalanceAssetFilter(event.target.value.toUpperCase())}
+                  />
+                </div>
+                <div className="flex w-full flex-col gap-1 sm:w-auto">
+                  <Label>Page size</Label>
+                  <Select
+                    value={String(balanceLimit)}
+                    onValueChange={(value) => {
+                      const numeric = Number(value);
+                      if (Number.isFinite(numeric) && numeric > 0) {
+                        setBalanceLimit(numeric);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-[5rem]">
+                      <SelectValue placeholder={`${DEFAULT_BALANCE_LIMIT}`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BALANCE_LIMIT_OPTIONS.map((option) => (
+                        <SelectItem key={option} value={String(option)}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-1 flex-col justify-end text-xs text-muted-foreground sm:text-right">
+                  <span>{balanceCount} record{balanceCount === 1 ? '' : 's'}</span>
+                  <span>
+                    Last snapshot {balanceRows[0] ? formatTimestamp(balanceRows[0].snapshotAt) : '—'}
+                  </span>
+                </div>
+              </div>
+
+              {balanceError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{balanceError}</AlertDescription>
+                </Alert>
+              )}
+
+              {balanceLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Fetching balances…
+                </div>
+              ) : balanceRows.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No balances reported for this provider{balanceAssetFilter ? ` and asset ${balanceAssetFilter}` : ''}.
+                      </p>
+              ) : (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[20%]">Asset</TableHead>
+                        <TableHead>Provider</TableHead>
+                        <TableHead>Total</TableHead>
+                        <TableHead>Available</TableHead>
+                        <TableHead>Snapshot</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {balanceRows.map((entry) => (
+                        <TableRow key={`${entry.provider}-${entry.asset}-${entry.snapshotAt}`}>
+                          <TableCell className="font-mono text-sm">{entry.asset}</TableCell>
+                          <TableCell>{entry.provider}</TableCell>
+                          <TableCell className="font-mono text-xs">{entry.total}</TableCell>
+                          <TableCell className="font-mono text-xs">{entry.available}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {formatTimestamp(entry.snapshotAt)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <div className="text-sm text-muted-foreground">Select a provider to view details.</div>
+      )}
+    </ScrollArea>
+  </DialogContent>
+</Dialog>
       </div>
       <ConfirmDialog
         open={deleteConfirmOpen}

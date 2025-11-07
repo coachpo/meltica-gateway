@@ -1,7 +1,6 @@
 'use client';
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { apiClient } from '@/lib/api-client';
+import { ChangeEvent, useCallback, useMemo, useRef, useState } from 'react';
 import type { ContextBackupPayload } from '@/lib/types';
 import {
   formatContextBackupPayload,
@@ -15,14 +14,16 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast-provider';
 import { CodeEditor, CodeViewer } from '@/components/code';
+import { useContextBackupQuery, useRestoreContextBackupMutation } from '@/lib/hooks';
 
 const CONTEXT_VIEWER_CONTAINER_CLASS = 'max-h-[60vh] min-h-[16rem] rounded-md border';
 const CONTEXT_EDITOR_CONTAINER_CLASS = 'max-h-[60vh] rounded-md border';
 const CONTEXT_CODE_CLASS = 'font-mono text-xs';
 
 export default function ContextBackupPage() {
-  const [snapshot, setSnapshot] = useState<ContextBackupPayload | null>(null);
-  const [loadingSnapshot, setLoadingSnapshot] = useState(true);
+  const contextQuery = useContextBackupQuery();
+  const restoreContextMutation = useRestoreContextBackupMutation();
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -34,16 +35,16 @@ export default function ContextBackupPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const sensitivePatterns = useMemo(() => getSensitiveKeyFragments().join(', '), []);
+  const snapshot = contextQuery.data ?? null;
+  const snapshotLoading = contextQuery.isLoading || refreshing;
 
-  const loadSnapshot = useCallback(async (showNotice = false, silent = false) => {
-    if (!silent) {
-      setLoadingSnapshot(true);
-    }
+  const loadSnapshot = useCallback(async (showNotice = false) => {
     setError(null);
+    setRefreshing(true);
     try {
-      const data = await apiClient.getContextBackup();
-      setSnapshot(data);
-      if (showNotice) {
+      const result = await contextQuery.refetch();
+      const data = result.data ?? null;
+      if (data && showNotice) {
         showToast({
           title: 'Snapshot refreshed',
           description: 'Fetched the latest providers, lambdas, and risk settings.',
@@ -60,23 +61,19 @@ export default function ContextBackupPage() {
       });
       return null;
     } finally {
-      if (!silent) {
-        setLoadingSnapshot(false);
-      }
+      setRefreshing(false);
     }
-  }, [showToast]);
-
-  useEffect(() => {
-    void loadSnapshot();
-  }, [loadSnapshot]);
+  }, [contextQuery, showToast]);
 
   const handleRefresh = async () => {
     await loadSnapshot(true);
   };
 
   const obtainSnapshot = useCallback(async () => {
-    const current = snapshot ?? (await loadSnapshot(false, true));
-    return current;
+    if (snapshot) {
+      return snapshot;
+    }
+    return loadSnapshot();
   }, [snapshot, loadSnapshot]);
 
   const inputDiagnostics = useMemo(() => {
@@ -264,12 +261,12 @@ export default function ContextBackupPage() {
       return;
     }
     try {
-      await apiClient.restoreContextBackup(sanitized);
+      await restoreContextMutation.mutateAsync(sanitized);
       showToast({
         title: 'Context restored',
         description: 'Providers and lambdas were recreated stopped. Start them manually after validation.',
       });
-      await loadSnapshot(false, true);
+      await loadSnapshot();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to restore context backup';
       setError(message);
@@ -309,6 +306,16 @@ export default function ContextBackupPage() {
         </AlertDescription>
       </Alert>
 
+      {contextQuery.isError && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            {contextQuery.error instanceof Error
+              ? contextQuery.error.message
+              : 'Failed to load context snapshot'}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -330,17 +337,17 @@ export default function ContextBackupPage() {
             </div>
             <Separator />
             <div className="flex flex-wrap gap-2">
-              <Button onClick={handleDownload} disabled={downloading || loadingSnapshot}>
+              <Button onClick={handleDownload} disabled={downloading || snapshotLoading}>
                 {downloading ? 'Downloading...' : 'Download JSON'}
               </Button>
-              <Button variant="outline" onClick={handleCopy} disabled={loadingSnapshot}>
+              <Button variant="outline" onClick={handleCopy} disabled={snapshotLoading}>
                 Copy JSON
               </Button>
-              <Button variant="outline" onClick={handleRefresh} disabled={loadingSnapshot}>
-                {loadingSnapshot ? 'Refreshing...' : 'Refresh snapshot'}
+              <Button variant="outline" onClick={handleRefresh} disabled={snapshotLoading}>
+                {snapshotLoading ? 'Refreshing...' : 'Refresh snapshot'}
               </Button>
             </div>
-            {loadingSnapshot && (
+            {snapshotLoading && (
               <p className="text-sm text-muted-foreground">Loading context snapshot...</p>
             )}
             {snapshot && (

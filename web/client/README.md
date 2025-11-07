@@ -10,6 +10,9 @@ Next.js web client for managing Meltica trading gateway strategies and configura
 - **Providers**: View exchange provider connections and instrument catalogs
 - **Adapters**: Explore exchange adapter definitions and capabilities
 - **Risk Limits**: Configure position limits, order throttling, and circuit breakers
+- **Runtime Config**: Inspect and edit the gateway runtime snapshot
+- **Config Backup**: Download and restore persisted configuration bundles
+- **Outbox**: Monitor control-plane event deliveries and clean up failures
 
 ## Tech Stack
 
@@ -17,6 +20,7 @@ Next.js web client for managing Meltica trading gateway strategies and configura
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS v4
 - **Components**: shadcn/ui
+- **Data Layer**: TanStack React Query v5
 - **Package Manager**: pnpm
 - **Icons**: lucide-react
 
@@ -51,10 +55,13 @@ Next.js web client for managing Meltica trading gateway strategies and configura
 
 ## Available Scripts
 
-- `pnpm dev` - Start development server with Turbopack
-- `pnpm build` - Build production bundle
-- `pnpm start` - Start production server
-- `pnpm lint` - Run ESLint
+- `pnpm dev` – Start development server with Turbopack
+- `pnpm build` – Build production bundle
+- `pnpm start` – Start production server
+- `pnpm lint` – Run ESLint
+- `pnpm test` – Run unit/integration tests (Vitest + MSW)
+- `pnpm test:unit:watch` – Watch mode for the Vitest suite
+- `pnpm test:e2e` – Run Playwright smoke tests (requires running frontend + API stubs)
 
 ## Project Structure
 
@@ -65,6 +72,8 @@ src/
 │   ├── instances/         # Strategy instance management
 │   ├── providers/         # Provider monitoring page
 │   ├── risk/              # Risk limits configuration
+│   ├── config/            # Runtime/config backup management
+│   ├── outbox/            # Outbox inspection
 │   ├── strategies/        # Strategy catalog page
 │   ├── layout.tsx         # Root layout with navigation
 │   └── page.tsx           # Dashboard landing page
@@ -72,40 +81,16 @@ src/
 │   ├── nav.tsx            # Main navigation component
 │   └── ui/                # shadcn/ui components
 ├── lib/
-│   ├── api-client.ts      # REST API client
+│   ├── api/               # Domain-oriented REST modules
+│   ├── hooks/             # React Query hooks & helpers
 │   ├── types.ts           # TypeScript type definitions
 │   └── utils.ts           # Utility functions
 └── ...
 ```
 
-## API Client
+## Data Layer
 
-The API client (`src/lib/api-client.ts`) provides typed methods for all Control API endpoints:
-
-### Strategy Catalog
-- `getStrategies()` - List all strategies
-- `getStrategy(name)` - Get strategy details
-
-### Providers
-- `getProviders()` - List all providers
-- `getProvider(name)` - Get provider details with instruments
-
-### Adapters
-- `getAdapters()` - List all adapters
-- `getAdapter(identifier)` - Get adapter metadata
-
-### Strategy Instances
-- `getInstances()` - List all instances
-- `getInstance(id)` - Get instance details
-- `createInstance(spec)` - Create and start instance
-- `updateInstance(id, spec)` - Update instance configuration
-- `deleteInstance(id)` - Delete instance
-- `startInstance(id)` - Start stopped instance
-- `stopInstance(id)` - Stop running instance
-
-### Risk Limits
-- `getRiskLimits()` - Get current risk configuration
-- `updateRiskLimits(config)` - Update risk limits
+All API access flows through domain-specific modules in `src/lib/api/`. Each module exports request helpers plus Zod schemas to validate responses before they reach React Query caches. Corresponding hooks live under `src/lib/hooks/` and wrap common queries or mutations with cache keys, toast notifications, and error handling.
 
 ## Component Library
 
@@ -121,6 +106,25 @@ pnpm dlx shadcn@latest add <component-name>
 - API calls are made client-side for real-time updates
 - The backend CORS middleware allows requests from any origin during development
 - Error handling displays user-friendly messages via alerts and dialogs
+
+## Testing
+
+1. **Unit & hook tests (Vitest + MSW)**
+   ```bash
+   pnpm test        # one-off run
+   pnpm test:unit   # alias
+   pnpm test:unit:watch
+   ```
+   - Uses MSW handlers defined in `src/mocks/handlers.ts` to stub the control-plane API.
+   - Fetch is polyfilled via `vitest.setup.ts` so hooks run in a Node environment.
+
+2. **Playwright smoke tests**
+   ```bash
+   pnpm dev &
+   PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e
+   ```
+   - The `tests/strategies-drawer-smoke.spec.ts` spec exercises the new strategy drawer.
+   - API calls are intercepted inline via `page.route`. Adjust `PLAYWRIGHT_BASE_URL` if the dev server runs on another address.
 
 ## Production Deployment
 
