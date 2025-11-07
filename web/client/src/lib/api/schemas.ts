@@ -235,7 +235,7 @@ export const providerSchema = z.object({
 });
 
 export const providerDetailSchema = providerSchema.extend({
-  instruments: z.array(instrumentSchema),
+  instruments: z.array(instrumentSchema).nullish().default([]),
   adapter: adapterMetadataSchema,
 });
 

@@ -89,8 +89,11 @@ func CloneRuntimeDetail(detail RuntimeDetail) RuntimeDetail {
 }
 
 func cloneInstruments(instruments []schema.Instrument) []schema.Instrument {
-	if len(instruments) == 0 {
+	if instruments == nil {
 		return nil
+	}
+	if len(instruments) == 0 {
+		return make([]schema.Instrument, 0)
 	}
 	out := make([]schema.Instrument, len(instruments))
 	for i, inst := range instruments {

@@ -113,7 +113,7 @@ export default function OutboxPage() {
               <Checkbox
                 id="delivered-toggle"
                 checked={showDelivered}
-                onCheckedChange={(checked) => setShowDelivered(Boolean(checked))}
+                onChange={(event) => setShowDelivered(event.currentTarget.checked)}
               />
               <span className="text-sm text-muted-foreground">Include delivered</span>
             </div>

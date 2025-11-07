@@ -62,12 +62,6 @@ export const queryKeys = {
   riskLimits(): [string] {
     return ['risk-limits'];
   },
-  runtimeConfig(): [string] {
-    return ['runtime-config'];
-  },
-  configBackup(): [string] {
-    return ['config-backup'];
-  },
   contextBackup(): [string] {
     return ['context-backup'];
   },

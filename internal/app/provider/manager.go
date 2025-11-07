@@ -54,14 +54,15 @@ func WithPersistence(store providerstore.Store) Option {
 }
 
 type providerState struct {
-	spec          config.ProviderSpec
-	instance      Instance
-	subscriptions *shared.SubscriptionManager
-	cancel        context.CancelFunc
-	cachedRoutes  []dispatcher.Route
-	running       bool
-	status        Status
-	startupErr    error
+	spec              config.ProviderSpec
+	instance          Instance
+	subscriptions     *shared.SubscriptionManager
+	cancel            context.CancelFunc
+	cachedRoutes      []dispatcher.Route
+	cachedInstruments []schema.Instrument
+	running           bool
+	status            Status
+	startupErr        error
 }
 
 func statusFromString(value string) Status {
@@ -487,6 +488,7 @@ func (m *Manager) recordProviderStartSuccess(name string, cancel context.CancelF
 		state.running = true
 		state.status = StatusRunning
 		state.startupErr = nil
+		state.cachedInstruments = nil
 	}
 	m.mu.Unlock()
 	if ok {
@@ -506,6 +508,13 @@ func (m *Manager) clearCachedRoutes(name string) {
 func (m *Manager) stopProviderLocked(state *providerState) {
 	if state == nil || !state.running {
 		return
+	}
+	if state.instance != nil {
+		if snapshot := state.instance.Instruments(); snapshot != nil {
+			state.cachedInstruments = schema.CloneInstruments(snapshot)
+		} else {
+			state.cachedInstruments = nil
+		}
 	}
 	if state.subscriptions != nil {
 		state.cachedRoutes = cloneRoutes(state.subscriptions.Snapshot())
@@ -882,10 +891,15 @@ func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 		var empty RuntimeDetail
 		return empty, false
 	}
-	instruments := []schema.Instrument(nil)
+	instruments := make([]schema.Instrument, 0)
 	instrumentCount := 0
 	if running {
-		instruments = instance.Instruments()
+		if instInstruments := instance.Instruments(); instInstruments != nil {
+			instruments = instInstruments
+		}
+		instrumentCount = len(instruments)
+	} else if len(state.cachedInstruments) > 0 {
+		instruments = state.cachedInstruments
 		instrumentCount = len(instruments)
 	}
 	meta := buildRuntimeMetadata(spec, instrumentCount, running, status, startupErr)
@@ -894,9 +908,6 @@ func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 		RuntimeMetadata: meta,
 		Instruments:     instruments,
 		AdapterMetadata: adapterMeta,
-	}
-	if !running {
-		detail.Instruments = nil
 	}
 	m.recordCacheHit(trimmed, providerMetadataCacheName)
 	return CloneRuntimeDetail(detail), true

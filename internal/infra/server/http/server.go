@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	json "github.com/goccy/go-json"
+	"github.com/shopspring/decimal"
 
 	"github.com/coachpo/meltica/internal/app/lambda/js"
 	"github.com/coachpo/meltica/internal/app/lambda/runtime"
@@ -1663,11 +1664,11 @@ func riskConfigFromLimits(limits risk.Limits) config.RiskConfig {
 }
 
 func validateRiskConfig(cfg config.RiskConfig) error {
-	if cfg.MaxPositionSize == "" {
-		return fmt.Errorf("maxPositionSize required")
+	if err := ensurePositiveDecimal("maxPositionSize", cfg.MaxPositionSize); err != nil {
+		return err
 	}
-	if cfg.MaxNotionalValue == "" {
-		return fmt.Errorf("maxNotionalValue required")
+	if err := ensurePositiveDecimal("maxNotionalValue", cfg.MaxNotionalValue); err != nil {
+		return err
 	}
 	if cfg.NotionalCurrency == "" {
 		return fmt.Errorf("notionalCurrency required")
@@ -1692,6 +1693,21 @@ func validateRiskConfig(cfg config.RiskConfig) error {
 	}
 	if cfg.CircuitBreaker.Enabled && strings.TrimSpace(cfg.CircuitBreaker.Cooldown) == "" {
 		return fmt.Errorf("circuitBreaker.cooldown required when enabled")
+	}
+	return nil
+}
+
+func ensurePositiveDecimal(field, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fmt.Errorf("%s required", field)
+	}
+	dec, err := decimal.NewFromString(trimmed)
+	if err != nil {
+		return fmt.Errorf("%s must be a valid decimal number", field)
+	}
+	if dec.Cmp(decimal.Zero) <= 0 {
+		return fmt.Errorf("%s must be greater than 0", field)
 	}
 	return nil
 }
