@@ -58,6 +58,7 @@ const (
 	EventTypeKline            = "kline"
 	EventTypeExecReport       = "exec_report"
 	EventTypeBalanceUpdate    = "balance_update"
+	EventTypeExtension        = "extension"
 )
 
 // Helper functions for creating common attribute sets

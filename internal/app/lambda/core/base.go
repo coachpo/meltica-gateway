@@ -54,6 +54,11 @@ type TradingStrategy interface {
 	WantsCrossProviderEvents() bool
 }
 
+// ExtensionEventConsumer marks strategies that elect to consume ExtensionEventType payloads.
+type ExtensionEventConsumer interface {
+	OnExtensionEvent(ctx context.Context, evt *schema.Event, payload any)
+}
+
 // MarketState represents the current market state for a symbol.
 type MarketState struct {
 	LastPrice float64
@@ -328,6 +333,28 @@ func (l *BaseLambda) Start(ctx context.Context) (<-chan error, error) {
 		schema.EventTypeBalanceUpdate,
 		schema.EventTypeRiskControl,
 	}
+	seenEvents := make(map[schema.EventType]struct{}, len(eventTypes))
+	for _, typ := range eventTypes {
+		seenEvents[typ] = struct{}{}
+	}
+	if l.strategy != nil {
+		for _, requested := range l.strategy.SubscribedEvents() {
+			normalized := schema.EventType(strings.TrimSpace(string(requested)))
+			if normalized == "" {
+				continue
+			}
+			if normalized == schema.ExtensionEventType {
+				if _, ok := l.strategy.(ExtensionEventConsumer); !ok {
+					continue
+				}
+			}
+			if _, exists := seenEvents[normalized]; exists {
+				continue
+			}
+			seenEvents[normalized] = struct{}{}
+			eventTypes = append(eventTypes, normalized)
+		}
+	}
 
 	errs := make(chan error, len(eventTypes))
 	subs := make([]subscription, 0, len(eventTypes))
@@ -406,7 +433,9 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 		return
 	}
 
-	if typ == schema.EventTypeBalanceUpdate {
+	if typ == schema.ExtensionEventType {
+		// Extension events bypass symbol filtering to allow arbitrary payloads.
+	} else if typ == schema.EventTypeBalanceUpdate {
 		if !l.matchesBalanceCurrency(evt.Symbol) {
 			return
 		}
@@ -431,6 +460,8 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 		l.handleBalanceUpdate(ctx, evt)
 	case schema.EventTypeRiskControl:
 		l.handleRiskControl(ctx, evt)
+	case schema.ExtensionEventType:
+		l.handleExtension(ctx, evt)
 	}
 }
 
@@ -620,6 +651,17 @@ func (l *BaseLambda) handleRiskControl(ctx context.Context, evt *schema.Event) {
 		payload.Symbol = evt.Symbol
 	}
 	l.strategy.OnRiskControl(ctx, evt, payload)
+}
+
+func (l *BaseLambda) handleExtension(ctx context.Context, evt *schema.Event) {
+	if l.strategy == nil {
+		return
+	}
+	consumer, ok := l.strategy.(ExtensionEventConsumer)
+	if !ok {
+		return
+	}
+	consumer.OnExtensionEvent(ctx, evt, evt.Payload)
 }
 
 // SubmitOrder submits an order request to the specified provider.

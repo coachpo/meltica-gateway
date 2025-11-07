@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 )
 
 func TestLoadMissingFile(t *testing.T) {
@@ -123,6 +125,9 @@ database:
 	}
 	if workers := cfg.Eventbus.FanoutWorkerCount(); workers != 4 {
 		t.Fatalf("expected fanout workers 4, got %d", workers)
+	}
+	if cfg.Eventbus.ExtensionPayloadCapBytes != eventbus.DefaultExtensionPayloadCapBytes {
+		t.Fatalf("expected default extension payload cap %d, got %d", eventbus.DefaultExtensionPayloadCapBytes, cfg.Eventbus.ExtensionPayloadCapBytes)
 	}
 
 	if cfg.APIServer.Addr != ":9999" {
@@ -298,6 +303,83 @@ telemetry:
 
 	if !reflect.DeepEqual(cfg.Risk, defaultRiskConfig()) {
 		t.Fatalf("expected risk config defaults: %#v", cfg.Risk)
+	}
+}
+
+func TestEventbusExtensionPayloadCapOverrides(t *testing.T) {
+	dir := t.TempDir()
+	validPath := filepath.Join(dir, "valid.yaml")
+	validYAML := `
+environment: dev
+eventbus:
+  bufferSize: 64
+  fanoutWorkers: 2
+  extensionPayloadCapBytes: 204800
+pools:
+  event:
+    size: 10
+  orderRequest:
+    size: 5
+risk:
+  maxPositionSize: "1"
+  maxNotionalValue: "10"
+  notionalCurrency: USD
+  orderThrottle: 1
+apiServer:
+  addr: ":8080"
+telemetry:
+  otlpEndpoint: http://localhost:4318
+  serviceName: svc
+  otlpInsecure: true
+  enableMetrics: true
+`
+	if err := os.WriteFile(validPath, []byte(validYAML), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	cfg, err := Load(context.Background(), validPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Eventbus.ExtensionPayloadCapBytes != 204800 {
+		t.Fatalf("expected override cap 204800, got %d", cfg.Eventbus.ExtensionPayloadCapBytes)
+	}
+
+	invalidPath := filepath.Join(dir, "invalid.yaml")
+	invalidYAML := `
+environment: dev
+eventbus:
+  bufferSize: 64
+  fanoutWorkers: 2
+  extensionPayloadCapBytes: -1
+pools:
+  event:
+    size: 10
+  orderRequest:
+    size: 5
+risk:
+  maxPositionSize: "1"
+  maxNotionalValue: "10"
+  notionalCurrency: USD
+  orderThrottle: 1
+apiServer:
+  addr: ":8080"
+telemetry:
+  otlpEndpoint: http://localhost:4318
+  serviceName: svc
+  otlpInsecure: true
+  enableMetrics: true
+`
+	if err := os.WriteFile(invalidPath, []byte(invalidYAML), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	_, err = Load(context.Background(), invalidPath)
+	if err == nil {
+		t.Fatalf("expected error for negative extension payload cap")
+	}
+	if !strings.Contains(err.Error(), "extensionPayloadCapBytes") {
+		t.Fatalf("expected extension payload cap validation error, got %v", err)
 	}
 }
 

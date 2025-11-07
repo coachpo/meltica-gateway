@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,5 +275,67 @@ func TestMemoryConfigNormalize(t *testing.T) {
 	}
 	if normalized.FanoutWorkers <= 0 {
 		t.Error("expected positive fanout workers after normalization")
+	}
+}
+
+func TestMemoryBusPublishExtensionPayloadWithinCap(t *testing.T) {
+	poolMgr := pool.NewPoolManager()
+	if err := poolMgr.RegisterPool("Event", 10, 0, func() any { return new(schema.Event) }); err != nil {
+		t.Fatalf("register pool: %v", err)
+	}
+	bus := NewMemoryBus(MemoryConfig{
+		BufferSize:               4,
+		FanoutWorkers:            1,
+		ExtensionPayloadCapBytes: 64,
+		Pools:                    poolMgr,
+	})
+	defer bus.Close()
+	ctx := context.Background()
+	evt, err := poolMgr.BorrowEventInst(ctx)
+	if err != nil {
+		t.Fatalf("borrow event: %v", err)
+	}
+	evt.EventID = "ext-ok"
+	evt.Provider = "test"
+	evt.Symbol = "BTC-USD"
+	evt.Type = schema.ExtensionEventType
+	evt.Payload = map[string]any{"data": strings.Repeat("a", 32)}
+
+	if err := bus.Publish(ctx, evt); err != nil {
+		t.Fatalf("publish under cap: %v", err)
+	}
+	if err := poolMgr.Shutdown(ctx); err != nil {
+		t.Fatalf("pool shutdown: %v", err)
+	}
+}
+
+func TestMemoryBusPublishExtensionPayloadOverCap(t *testing.T) {
+	poolMgr := pool.NewPoolManager()
+	if err := poolMgr.RegisterPool("Event", 10, 0, func() any { return new(schema.Event) }); err != nil {
+		t.Fatalf("register pool: %v", err)
+	}
+	bus := NewMemoryBus(MemoryConfig{
+		BufferSize:               4,
+		FanoutWorkers:            1,
+		ExtensionPayloadCapBytes: 16,
+		Pools:                    poolMgr,
+	})
+	defer bus.Close()
+	ctx := context.Background()
+	evt, err := poolMgr.BorrowEventInst(ctx)
+	if err != nil {
+		t.Fatalf("borrow event: %v", err)
+	}
+	evt.EventID = "ext-too-big"
+	evt.Provider = "test"
+	evt.Symbol = "ETH-USD"
+	evt.Type = schema.ExtensionEventType
+	evt.Payload = map[string]any{"payload": strings.Repeat("x", 64)}
+
+	if err := bus.Publish(ctx, evt); err == nil {
+		t.Fatal("expected error for payload exceeding cap")
+	}
+	if err := poolMgr.Shutdown(ctx); err != nil {
+		t.Fatalf("pool shutdown: %v", err)
 	}
 }

@@ -107,6 +107,16 @@ func (p *Publisher) PublishInstrumentUpdate(ctx context.Context, symbol string, 
 	p.emitEvent(ctx, evt)
 }
 
+// PublishExtension emits a custom extension event with arbitrary payload.
+func (p *Publisher) PublishExtension(ctx context.Context, symbol string, payload any) {
+	seq := p.nextSeq(schema.ExtensionEventType, symbol)
+	evt := p.newEvent(ctx, schema.ExtensionEventType, symbol, seq, payload, p.clock().UTC())
+	if evt == nil {
+		return
+	}
+	p.emitEvent(ctx, evt)
+}
+
 func (p *Publisher) newEvent(ctx context.Context, evtType schema.EventType, symbol string, seq uint64, payload any, ts time.Time) *schema.Event {
 	if ts.IsZero() {
 		ts = p.clock().UTC()

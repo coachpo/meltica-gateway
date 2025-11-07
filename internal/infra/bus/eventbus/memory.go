@@ -102,6 +102,12 @@ func (b *MemoryBus) Publish(ctx context.Context, evt *schema.Event) error {
 	start := time.Now()
 	result := "success"
 
+	if err := enforceExtensionPayloadCap(evt, b.cfg.ExtensionPayloadCapBytes); err != nil {
+		result = "extension_payload_cap"
+		b.recycle(evt)
+		return err
+	}
+
 	defer func() {
 		if b.publishDuration != nil {
 			attrs := telemetry.OperationResultAttributes(telemetry.Environment(), provider, "eventbus.publish", result)

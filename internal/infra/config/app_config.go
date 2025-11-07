@@ -13,12 +13,15 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 )
 
 // EventbusConfig sets in-memory event bus sizing characteristics.
 type EventbusConfig struct {
-	BufferSize    int                 `yaml:"bufferSize"`
-	FanoutWorkers FanoutWorkerSetting `yaml:"fanoutWorkers"`
+	BufferSize               int                 `yaml:"bufferSize"`
+	FanoutWorkers            FanoutWorkerSetting `yaml:"fanoutWorkers"`
+	ExtensionPayloadCapBytes int                 `yaml:"extensionPayloadCapBytes"`
 }
 
 type fanoutWorkerKind int
@@ -223,15 +226,15 @@ func (c DatabaseConfig) validate() error {
 
 // AppConfig is the unified Meltica application configuration sourced from YAML.
 type AppConfig struct {
-	Environment    Environment                 `yaml:"environment"`
-	Providers      map[Provider]map[string]any `yaml:"providers"`
-	Eventbus       EventbusConfig              `yaml:"eventbus"`
-	Pools          PoolConfig                  `yaml:"pools"`
-	Risk           RiskConfig                  `yaml:"risk"`
-	APIServer      APIServerConfig             `yaml:"apiServer"`
-	Telemetry      TelemetryConfig             `yaml:"telemetry"`
-	Strategies     StrategiesConfig            `yaml:"strategies"`
-	Database       DatabaseConfig              `yaml:"database"`
+	Environment Environment                 `yaml:"environment"`
+	Providers   map[Provider]map[string]any `yaml:"providers"`
+	Eventbus    EventbusConfig              `yaml:"eventbus"`
+	Pools       PoolConfig                  `yaml:"pools"`
+	Risk        RiskConfig                  `yaml:"risk"`
+	APIServer   APIServerConfig             `yaml:"apiServer"`
+	Telemetry   TelemetryConfig             `yaml:"telemetry"`
+	Strategies  StrategiesConfig            `yaml:"strategies"`
+	Database    DatabaseConfig              `yaml:"database"`
 }
 
 func defaultRiskConfig() RiskConfig {
@@ -326,6 +329,10 @@ func (c *AppConfig) normalise() error {
 	c.Telemetry.OTLPEndpoint = strings.TrimSpace(c.Telemetry.OTLPEndpoint)
 	c.Telemetry.ServiceName = strings.TrimSpace(c.Telemetry.ServiceName)
 
+	if c.Eventbus.ExtensionPayloadCapBytes == 0 {
+		c.Eventbus.ExtensionPayloadCapBytes = eventbus.DefaultExtensionPayloadCapBytes
+	}
+
 	strategyDir := strings.TrimSpace(c.Strategies.Directory)
 	if strategyDir == "" {
 		strategyDir = "strategies"
@@ -377,6 +384,9 @@ func (c AppConfig) Validate() error {
 	}
 	if c.Eventbus.FanoutWorkerCount() <= 0 {
 		return fmt.Errorf("eventbus fanoutWorkers must be >0")
+	}
+	if c.Eventbus.ExtensionPayloadCapBytes <= 0 {
+		return fmt.Errorf("eventbus extensionPayloadCapBytes must be >0")
 	}
 
 	if c.Pools.Event.Size <= 0 {

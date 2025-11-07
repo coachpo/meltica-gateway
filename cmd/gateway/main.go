@@ -225,15 +225,17 @@ func buildPoolManager(cfg config.PoolConfig) (*pool.PoolManager, error) {
 
 func newEventBus(cfg config.EventbusConfig, pools *pool.PoolManager, outbox outboxstore.Store, logger *log.Logger) eventbus.Bus {
 	memoryBus := eventbus.NewMemoryBus(eventbus.MemoryConfig{
-		BufferSize:    cfg.BufferSize,
-		FanoutWorkers: cfg.FanoutWorkerCount(),
-		Pools:         pools,
+		BufferSize:               cfg.BufferSize,
+		FanoutWorkers:            cfg.FanoutWorkerCount(),
+		ExtensionPayloadCapBytes: cfg.ExtensionPayloadCapBytes,
+		Pools:                    pools,
 	})
 	return eventbus.NewDurableBus(
 		memoryBus,
 		outbox,
 		eventbus.WithDurableLogger(logger),
 		eventbus.WithDurablePoolManager(pools),
+		eventbus.WithExtensionPayloadCapBytes(cfg.ExtensionPayloadCapBytes),
 	)
 }
 

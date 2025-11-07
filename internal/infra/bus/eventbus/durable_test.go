@@ -3,6 +3,7 @@ package eventbus
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	json "github.com/goccy/go-json"
@@ -212,5 +213,60 @@ func TestDurableBusReplayPreservesSequenceAndPayload(t *testing.T) {
 	}
 	if payload.TradeID != "t1" {
 		t.Fatalf("expected payload trade id t1, got %s", payload.TradeID)
+	}
+}
+
+func TestDurableBusPublishExtensionPayloadRoundTrip(t *testing.T) {
+	inner := &stubBus{}
+	store := &fakeOutboxStore{}
+	bus := NewDurableBus(inner, store, WithReplayDisabled(), WithExtensionPayloadCapBytes(1024))
+	ext := &schema.Event{
+		EventID:  "ext-1",
+		Provider: "test",
+		Type:     schema.ExtensionEventType,
+		Payload: map[string]any{
+			"custom": map[string]any{"value": "alpha"},
+		},
+	}
+	if err := bus.Publish(context.Background(), ext); err != nil {
+		t.Fatalf("publish extension event: %v", err)
+	}
+	if len(store.enqueued) != 1 {
+		t.Fatalf("expected enqueued record, got %d", len(store.enqueued))
+	}
+	if len(inner.published) != 1 {
+		t.Fatalf("expected publish delegation, got %d", len(inner.published))
+	}
+	payload, ok := inner.published[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map payload, got %T", inner.published[0].Payload)
+	}
+	nested, ok := payload["custom"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested custom payload, got %T", payload["custom"])
+	}
+	if value := nested["value"]; value != "alpha" {
+		t.Fatalf("expected nested value alpha, got %v", value)
+	}
+}
+
+func TestDurableBusPublishExtensionPayloadOverCap(t *testing.T) {
+	inner := &stubBus{}
+	store := &fakeOutboxStore{}
+	bus := NewDurableBus(inner, store, WithReplayDisabled(), WithExtensionPayloadCapBytes(16))
+	tooLarge := &schema.Event{
+		EventID:  "ext-big",
+		Provider: "test",
+		Type:     schema.ExtensionEventType,
+		Payload: map[string]any{"data": strings.Repeat("x", 128)},
+	}
+	if err := bus.Publish(context.Background(), tooLarge); err == nil {
+		t.Fatal("expected error for extension payload exceeding cap")
+	}
+	if len(store.enqueued) != 0 {
+		t.Fatalf("expected no enqueued records, got %d", len(store.enqueued))
+	}
+	if len(inner.published) != 0 {
+		t.Fatalf("expected no inner publishes, got %d", len(inner.published))
 	}
 }

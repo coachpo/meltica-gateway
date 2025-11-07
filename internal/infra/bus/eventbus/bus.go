@@ -8,6 +8,8 @@ import (
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
 
+const DefaultExtensionPayloadCapBytes = 100 * 1024
+
 // SubscriptionID uniquely identifies a bus subscription.
 type SubscriptionID string
 
@@ -21,9 +23,10 @@ type Bus interface {
 
 // MemoryConfig configures the in-memory bus buffers.
 type MemoryConfig struct {
-	BufferSize    int
-	FanoutWorkers int
-	Pools         *pool.PoolManager
+	BufferSize               int
+	FanoutWorkers            int
+	ExtensionPayloadCapBytes int
+	Pools                    *pool.PoolManager
 }
 
 func (c MemoryConfig) normalize() MemoryConfig {
@@ -32,6 +35,9 @@ func (c MemoryConfig) normalize() MemoryConfig {
 	}
 	if c.FanoutWorkers <= 0 {
 		c.FanoutWorkers = 4
+	}
+	if c.ExtensionPayloadCapBytes <= 0 {
+		c.ExtensionPayloadCapBytes = DefaultExtensionPayloadCapBytes
 	}
 	return c
 }

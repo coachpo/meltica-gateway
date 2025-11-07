@@ -85,7 +85,8 @@ func isValidEventType(evt schema.EventType) bool {
 		schema.EventTypeKlineSummary,
 		schema.EventTypeInstrumentUpdate,
 		schema.EventTypeBalanceUpdate,
-		schema.EventTypeRiskControl:
+		schema.EventTypeRiskControl,
+		schema.ExtensionEventType:
 		return true
 	default:
 		return false

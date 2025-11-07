@@ -217,6 +217,11 @@ func (s *Strategy) OnRiskControl(ctx context.Context, evt *schema.Event, payload
 	s.invoke("onRiskControl", ctx, evt, payload)
 }
 
+// OnExtensionEvent dispatches custom extension payloads when the strategy subscribes to them.
+func (s *Strategy) OnExtensionEvent(ctx context.Context, evt *schema.Event, payload any) {
+	s.invoke("onExtensionEvent", ctx, evt, payload)
+}
+
 func (s *Strategy) invoke(method string, args ...any) {
 	if s == nil {
 		return

@@ -61,6 +61,15 @@ func WithDurablePoolManager(pools *pool.PoolManager) DurableOption {
 	}
 }
 
+// WithExtensionPayloadCapBytes overrides the maximum payload size allowed for extension events.
+func WithExtensionPayloadCapBytes(limit int) DurableOption {
+	return func(b *DurableBus) {
+		if limit > 0 {
+			b.extensionPayloadCapBytes = limit
+		}
+	}
+}
+
 type poolAwareBus interface {
 	PoolManager() *pool.PoolManager
 }
@@ -76,6 +85,8 @@ type DurableBus struct {
 	replayDisabled  bool
 
 	pools *pool.PoolManager
+
+	extensionPayloadCapBytes int
 
 	replayCtx    context.Context
 	replayCancel context.CancelFunc
@@ -104,6 +115,7 @@ func NewDurableBus(inner Bus, store outboxstore.Store, opts ...DurableOption) Bu
 		replayBatchSize: defaultReplayBatchSize,
 		replayDisabled:  false,
 		pools:           nil,
+		extensionPayloadCapBytes: DefaultExtensionPayloadCapBytes,
 		replayCtx:       nil,
 		replayCancel:    nil,
 		replayWG:        sync.WaitGroup{},
@@ -117,6 +129,9 @@ func NewDurableBus(inner Bus, store outboxstore.Store, opts ...DurableOption) Bu
 		if aware, ok := inner.(poolAwareBus); ok {
 			durable.pools = aware.PoolManager()
 		}
+	}
+	if durable.extensionPayloadCapBytes <= 0 {
+		durable.extensionPayloadCapBytes = DefaultExtensionPayloadCapBytes
 	}
 	if durable.replayBatchSize <= 0 {
 		durable.replayBatchSize = defaultReplayBatchSize
@@ -132,10 +147,13 @@ func NewDurableBus(inner Bus, store outboxstore.Store, opts ...DurableOption) Bu
 
 // Publish persists the event to the outbox before delegating to the inner bus.
 func (b *DurableBus) Publish(ctx context.Context, evt *schema.Event) error {
-	if b == nil || b.store == nil {
-		if b == nil {
-			return nil
-		}
+	if b == nil {
+		return nil
+	}
+	if err := enforceExtensionPayloadCap(evt, b.extensionPayloadCapBytes); err != nil {
+		return err
+	}
+	if b.store == nil {
 		if b.inner == nil {
 			return fmt.Errorf("durable bus: inner bus unavailable")
 		}
