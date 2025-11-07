@@ -1,0 +1,589 @@
+# Page snapshot
+
+```yaml
+- generic:
+  - navigation:
+    - generic:
+      - generic:
+        - generic: Meltica Control
+      - generic:
+        - generic:
+          - link:
+            - /url: /
+            - text: Dashboard
+          - link:
+            - /url: /instances
+            - text: Instances
+          - link:
+            - /url: /strategies
+            - text: Strategies
+          - link:
+            - /url: /strategies/modules
+            - text: Strategy Modules
+          - link:
+            - /url: /providers
+            - text: Providers
+          - link:
+            - /url: /adapters
+            - text: Adapters
+          - link:
+            - /url: /risk
+            - text: Risk Limits
+          - link:
+            - /url: /config/runtime
+            - text: Runtime Config
+          - link:
+            - /url: /config/backup
+            - text: Config Backup
+          - link:
+            - /url: /context/backup
+            - text: Context Backup
+          - link:
+            - /url: /outbox
+            - text: Outbox
+        - generic:
+          - button:
+            - img
+  - main:
+    - generic:
+      - generic:
+        - generic:
+          - heading [level=1]: Providers
+          - paragraph: Manage exchange provider lifecycles and configuration
+        - button: Create provider
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic: binance-demo
+                - generic: Binance Spot (binance)
+                - paragraph: Binance spot market data and order routing adapter
+              - generic: Running
+          - generic:
+            - generic:
+              - generic: "Identifier: binance"
+              - generic: "Instruments: 1604"
+              - generic:
+                - text: "In use by:"
+                - generic: 3 dynamic instances
+            - generic: "Dynamic instances: grid-demo-1, test, test-instance"
+            - generic:
+              - button: Details
+              - button: Edit
+              - button: Stop
+              - button [disabled]: Delete
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic: binance2
+                - generic: Binance Spot (binance)
+                - paragraph: Binance spot market data and order routing adapter
+              - generic: Running
+          - generic:
+            - generic:
+              - generic: "Identifier: binance"
+              - generic: "Instruments: 1604"
+              - generic: "In use by: No dynamic instances"
+            - generic:
+              - button: Details
+              - button: Edit
+              - button: Stop
+              - button: Delete
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic: okx-spot
+                - generic: OKX Spot (okx)
+                - paragraph: OKX spot market data and trading adapter
+              - generic: Running
+          - generic:
+            - generic:
+              - generic: "Identifier: okx"
+              - generic: "Instruments: 703"
+              - generic:
+                - text: "In use by:"
+                - generic: 1 dynamic instance
+            - generic: "Dynamic instances: test"
+            - generic:
+              - button: Details
+              - button: Edit
+              - button: Stop
+              - button [disabled]: Delete
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic: test-provider
+                - generic: Binance Spot (binance)
+                - paragraph: Binance spot market data and order routing adapter
+              - generic: Running
+          - generic:
+            - generic:
+              - generic: "Identifier: binance"
+              - generic: "Instruments: 1604"
+              - generic: "In use by: No dynamic instances"
+            - generic:
+              - button: Details
+              - button: Edit
+              - button: Stop
+              - button: Delete
+  - generic:
+    - generic:
+      - img
+    - button:
+      - img
+  - button "Open Next.js Dev Tools" [ref=e6] [cursor=pointer]:
+    - img [ref=e7]
+  - alert
+  - dialog "Provider details" [ref=e11]:
+    - generic [ref=e12]:
+      - heading "Provider details" [level=2] [ref=e13]
+      - paragraph [ref=e14]: Inspect adapter configuration, balances, and subscribed instruments.
+    - generic [ref=e18]:
+      - tablist [ref=e19]:
+        - tab "Overview" [selected] [ref=e20]
+        - tab "Balances" [ref=e21]
+      - tabpanel "Overview" [ref=e22]:
+        - generic [ref=e23]:
+          - generic [ref=e24]:
+            - paragraph [ref=e25]: Adapter
+            - paragraph [ref=e26]: Binance Spot (binance)
+            - paragraph [ref=e27]: Binance spot market data and order routing adapter
+          - generic [ref=e28]:
+            - paragraph [ref=e29]: Dependent instances
+            - generic [ref=e30]:
+              - paragraph [ref=e31]: 3 dynamic instances requiring this provider
+              - list [ref=e32]:
+                - listitem [ref=e33]: grid-demo-1
+                - listitem [ref=e34]: test
+                - listitem [ref=e35]: test-instance
+          - generic [ref=e36]:
+            - paragraph [ref=e37]: Settings
+            - paragraph [ref=e38]: Sensitive values are masked and must be re-entered when editing.
+            - generic [ref=e39]:
+              - generic [ref=e40]:
+                - generic [ref=e41]: "http_timeout:"
+                - text: 10s
+              - generic [ref=e42]:
+                - generic [ref=e43]: "instrument_refresh_interval:"
+                - text: 30m0s
+              - generic [ref=e44]:
+                - generic [ref=e45]: "recv_window:"
+                - text: 5s
+              - generic [ref=e46]:
+                - generic [ref=e47]: "snapshot_depth:"
+                - text: "1000"
+              - generic [ref=e48]:
+                - generic [ref=e49]: "user_stream_keepalive:"
+                - text: 15m0s
+          - generic [ref=e50]:
+            - paragraph [ref=e51]: Instruments (1604)
+            - generic [ref=e52]:
+              - textbox "Search symbols…" [ref=e53]
+              - generic [ref=e54]: 1604 matching instruments
+            - generic [ref=e56]:
+              - button "SOL-USDC SOL / USDC" [ref=e57]:
+                - generic [ref=e58]: SOL-USDC
+                - generic [ref=e59]: SOL / USDC
+              - button "SUI-EUR SUI / EUR" [ref=e60]:
+                - generic [ref=e61]: SUI-EUR
+                - generic [ref=e62]: SUI / EUR
+              - button "INIT-USDC INIT / USDC" [ref=e63]:
+                - generic [ref=e64]: INIT-USDC
+                - generic [ref=e65]: INIT / USDC
+              - button "NEWT-FDUSD NEWT / FDUSD" [ref=e66]:
+                - generic [ref=e67]: NEWT-FDUSD
+                - generic [ref=e68]: NEWT / FDUSD
+              - button "JUV-USDT JUV / USDT" [ref=e69]:
+                - generic [ref=e70]: JUV-USDT
+                - generic [ref=e71]: JUV / USDT
+              - button "TRX-EUR TRX / EUR" [ref=e72]:
+                - generic [ref=e73]: TRX-EUR
+                - generic [ref=e74]: TRX / EUR
+              - button "ANKR-TRY ANKR / TRY" [ref=e75]:
+                - generic [ref=e76]: ANKR-TRY
+                - generic [ref=e77]: ANKR / TRY
+              - button "SYS-BTC SYS / BTC" [ref=e78]:
+                - generic [ref=e79]: SYS-BTC
+                - generic [ref=e80]: SYS / BTC
+              - button "BNT-USDT BNT / USDT" [ref=e81]:
+                - generic [ref=e82]: BNT-USDT
+                - generic [ref=e83]: BNT / USDT
+              - button "NEXO-USDT NEXO / USDT" [ref=e84]:
+                - generic [ref=e85]: NEXO-USDT
+                - generic [ref=e86]: NEXO / USDT
+              - button "LISTA-TRY LISTA / TRY" [ref=e87]:
+                - generic [ref=e88]: LISTA-TRY
+                - generic [ref=e89]: LISTA / TRY
+              - button "RENDER-TRY RENDER / TRY" [ref=e90]:
+                - generic [ref=e91]: RENDER-TRY
+                - generic [ref=e92]: RENDER / TRY
+              - button "POL-BNB POL / BNB" [ref=e93]:
+                - generic [ref=e94]: POL-BNB
+                - generic [ref=e95]: POL / BNB
+              - button "PENGU-USDC PENGU / USDC" [ref=e96]:
+                - generic [ref=e97]: PENGU-USDC
+                - generic [ref=e98]: PENGU / USDC
+              - button "MITO-USDT MITO / USDT" [ref=e99]:
+                - generic [ref=e100]: MITO-USDT
+                - generic [ref=e101]: MITO / USDT
+              - button "ZEC-BTC ZEC / BTC" [ref=e102]:
+                - generic [ref=e103]: ZEC-BTC
+                - generic [ref=e104]: ZEC / BTC
+              - button "ZEN-BTC ZEN / BTC" [ref=e105]:
+                - generic [ref=e106]: ZEN-BTC
+                - generic [ref=e107]: ZEN / BTC
+              - button "ETH-TRY ETH / TRY" [ref=e108]:
+                - generic [ref=e109]: ETH-TRY
+                - generic [ref=e110]: ETH / TRY
+              - button "VOXEL-USDT VOXEL / USDT" [ref=e111]:
+                - generic [ref=e112]: VOXEL-USDT
+                - generic [ref=e113]: VOXEL / USDT
+              - button "ARB-ETH ARB / ETH" [ref=e114]:
+                - generic [ref=e115]: ARB-ETH
+                - generic [ref=e116]: ARB / ETH
+              - button "GPS-USDT GPS / USDT" [ref=e117]:
+                - generic [ref=e118]: GPS-USDT
+                - generic [ref=e119]: GPS / USDT
+              - button "ZBT-USDC ZBT / USDC" [ref=e120]:
+                - generic [ref=e121]: ZBT-USDC
+                - generic [ref=e122]: ZBT / USDC
+              - button "ZRX-BTC ZRX / BTC" [ref=e123]:
+                - generic [ref=e124]: ZRX-BTC
+                - generic [ref=e125]: ZRX / BTC
+              - button "POLYX-TRY POLYX / TRY" [ref=e126]:
+                - generic [ref=e127]: POLYX-TRY
+                - generic [ref=e128]: POLYX / TRY
+              - button "POL-JPY POL / JPY" [ref=e129]:
+                - generic [ref=e130]: POL-JPY
+                - generic [ref=e131]: POL / JPY
+              - button "NEIRO-TRY NEIRO / TRY" [ref=e132]:
+                - generic [ref=e133]: NEIRO-TRY
+                - generic [ref=e134]: NEIRO / TRY
+              - button "USDC-PLN USDC / PLN" [ref=e135]:
+                - generic [ref=e136]: USDC-PLN
+                - generic [ref=e137]: USDC / PLN
+              - button "PARTI-USDT PARTI / USDT" [ref=e138]:
+                - generic [ref=e139]: PARTI-USDT
+                - generic [ref=e140]: PARTI / USDT
+              - button "OP-FDUSD OP / FDUSD" [ref=e141]:
+                - generic [ref=e142]: OP-FDUSD
+                - generic [ref=e143]: OP / FDUSD
+              - button "AI-FDUSD AI / FDUSD" [ref=e144]:
+                - generic [ref=e145]: AI-FDUSD
+                - generic [ref=e146]: AI / FDUSD
+              - button "GALA-USDC GALA / USDC" [ref=e147]:
+                - generic [ref=e148]: GALA-USDC
+                - generic [ref=e149]: GALA / USDC
+              - button "GRT-USDC GRT / USDC" [ref=e150]:
+                - generic [ref=e151]: GRT-USDC
+                - generic [ref=e152]: GRT / USDC
+              - button "OXT-USDT OXT / USDT" [ref=e153]:
+                - generic [ref=e154]: OXT-USDT
+                - generic [ref=e155]: OXT / USDT
+              - button "CTK-BTC CTK / BTC" [ref=e156]:
+                - generic [ref=e157]: CTK-BTC
+                - generic [ref=e158]: CTK / BTC
+              - button "VET-TRY VET / TRY" [ref=e159]:
+                - generic [ref=e160]: VET-TRY
+                - generic [ref=e161]: VET / TRY
+              - button "RARE-BTC RARE / BTC" [ref=e162]:
+                - generic [ref=e163]: RARE-BTC
+                - generic [ref=e164]: RARE / BTC
+              - button "RDNT-TRY RDNT / TRY" [ref=e165]:
+                - generic [ref=e166]: RDNT-TRY
+                - generic [ref=e167]: RDNT / TRY
+              - button "APT-JPY APT / JPY" [ref=e168]:
+                - generic [ref=e169]: APT-JPY
+                - generic [ref=e170]: APT / JPY
+              - button "RIF-BTC RIF / BTC" [ref=e171]:
+                - generic [ref=e172]: RIF-BTC
+                - generic [ref=e173]: RIF / BTC
+              - button "AVAX-ETH AVAX / ETH" [ref=e174]:
+                - generic [ref=e175]: AVAX-ETH
+                - generic [ref=e176]: AVAX / ETH
+              - button "MAGIC-USDT MAGIC / USDT" [ref=e177]:
+                - generic [ref=e178]: MAGIC-USDT
+                - generic [ref=e179]: MAGIC / USDT
+              - button "LPT-TRY LPT / TRY" [ref=e180]:
+                - generic [ref=e181]: LPT-TRY
+                - generic [ref=e182]: LPT / TRY
+              - button "LDO-TRY LDO / TRY" [ref=e183]:
+                - generic [ref=e184]: LDO-TRY
+                - generic [ref=e185]: LDO / TRY
+              - button "TURBO-USDC TURBO / USDC" [ref=e186]:
+                - generic [ref=e187]: TURBO-USDC
+                - generic [ref=e188]: TURBO / USDC
+              - button "EGLD-USDC EGLD / USDC" [ref=e189]:
+                - generic [ref=e190]: EGLD-USDC
+                - generic [ref=e191]: EGLD / USDC
+              - button "RLC-USDT RLC / USDT" [ref=e192]:
+                - generic [ref=e193]: RLC-USDT
+                - generic [ref=e194]: RLC / USDT
+              - button "SOL-BTC SOL / BTC" [ref=e195]:
+                - generic [ref=e196]: SOL-BTC
+                - generic [ref=e197]: SOL / BTC
+              - button "SEI-USDT SEI / USDT" [ref=e198]:
+                - generic [ref=e199]: SEI-USDT
+                - generic [ref=e200]: SEI / USDT
+              - button "BIGTIME-USDC BIGTIME / USDC" [ref=e201]:
+                - generic [ref=e202]: BIGTIME-USDC
+                - generic [ref=e203]: BIGTIME / USDC
+              - button "ERA-BNB ERA / BNB" [ref=e204]:
+                - generic [ref=e205]: ERA-BNB
+                - generic [ref=e206]: ERA / BNB
+              - button "LINEA-USDC LINEA / USDC" [ref=e207]:
+                - generic [ref=e208]: LINEA-USDC
+                - generic [ref=e209]: LINEA / USDC
+              - button "WBTC-ETH WBTC / ETH" [ref=e210]:
+                - generic [ref=e211]: WBTC-ETH
+                - generic [ref=e212]: WBTC / ETH
+              - button "CHESS-USDT CHESS / USDT" [ref=e213]:
+                - generic [ref=e214]: CHESS-USDT
+                - generic [ref=e215]: CHESS / USDT
+              - button "ALT-TRY ALT / TRY" [ref=e216]:
+                - generic [ref=e217]: ALT-TRY
+                - generic [ref=e218]: ALT / TRY
+              - button "ETHFI-USDT ETHFI / USDT" [ref=e219]:
+                - generic [ref=e220]: ETHFI-USDT
+                - generic [ref=e221]: ETHFI / USDT
+              - button "VTHO-TRY VTHO / TRY" [ref=e222]:
+                - generic [ref=e223]: VTHO-TRY
+                - generic [ref=e224]: VTHO / TRY
+              - button "KAITO-TRY KAITO / TRY" [ref=e225]:
+                - generic [ref=e226]: KAITO-TRY
+                - generic [ref=e227]: KAITO / TRY
+              - button "FORM-USDC FORM / USDC" [ref=e228]:
+                - generic [ref=e229]: FORM-USDC
+                - generic [ref=e230]: FORM / USDC
+              - button "HYPER-USDC HYPER / USDC" [ref=e231]:
+                - generic [ref=e232]: HYPER-USDC
+                - generic [ref=e233]: HYPER / USDC
+              - button "LTC-BTC LTC / BTC" [ref=e234]:
+                - generic [ref=e235]: LTC-BTC
+                - generic [ref=e236]: LTC / BTC
+              - button "PROVE-USDT PROVE / USDT" [ref=e237]:
+                - generic [ref=e238]: PROVE-USDT
+                - generic [ref=e239]: PROVE / USDT
+              - button "MITO-FDUSD MITO / FDUSD" [ref=e240]:
+                - generic [ref=e241]: MITO-FDUSD
+                - generic [ref=e242]: MITO / FDUSD
+              - button "PUMP-USDC PUMP / USDC" [ref=e243]:
+                - generic [ref=e244]: PUMP-USDC
+                - generic [ref=e245]: PUMP / USDC
+              - button "LTC-ETH LTC / ETH" [ref=e246]:
+                - generic [ref=e247]: LTC-ETH
+                - generic [ref=e248]: LTC / ETH
+              - button "FUN-USDT FUN / USDT" [ref=e249]:
+                - generic [ref=e250]: FUN-USDT
+                - generic [ref=e251]: FUN / USDT
+              - button "ONT-TRY ONT / TRY" [ref=e252]:
+                - generic [ref=e253]: ONT-TRY
+                - generic [ref=e254]: ONT / TRY
+              - button "WLD-USDT WLD / USDT" [ref=e255]:
+                - generic [ref=e256]: WLD-USDT
+                - generic [ref=e257]: WLD / USDT
+              - button "TRB-USDC TRB / USDC" [ref=e258]:
+                - generic [ref=e259]: TRB-USDC
+                - generic [ref=e260]: TRB / USDC
+              - button "TREE-USDT TREE / USDT" [ref=e261]:
+                - generic [ref=e262]: TREE-USDT
+                - generic [ref=e263]: TREE / USDT
+              - button "CVC-USDT CVC / USDT" [ref=e264]:
+                - generic [ref=e265]: CVC-USDT
+                - generic [ref=e266]: CVC / USDT
+              - button "YFI-BTC YFI / BTC" [ref=e267]:
+                - generic [ref=e268]: YFI-BTC
+                - generic [ref=e269]: YFI / BTC
+              - button "STRAX-USDT STRAX / USDT" [ref=e270]:
+                - generic [ref=e271]: STRAX-USDT
+                - generic [ref=e272]: STRAX / USDT
+              - button "ATA-USDT ATA / USDT" [ref=e273]:
+                - generic [ref=e274]: ATA-USDT
+                - generic [ref=e275]: ATA / USDT
+              - button "MTL-USDT MTL / USDT" [ref=e276]:
+                - generic [ref=e277]: MTL-USDT
+                - generic [ref=e278]: MTL / USDT
+              - button "IOTX-USDT IOTX / USDT" [ref=e279]:
+                - generic [ref=e280]: IOTX-USDT
+                - generic [ref=e281]: IOTX / USDT
+              - button "YFI-USDT YFI / USDT" [ref=e282]:
+                - generic [ref=e283]: YFI-USDT
+                - generic [ref=e284]: YFI / USDT
+              - button "UMA-BTC UMA / BTC" [ref=e285]:
+                - generic [ref=e286]: UMA-BTC
+                - generic [ref=e287]: UMA / BTC
+              - button "TAO-TRY TAO / TRY" [ref=e288]:
+                - generic [ref=e289]: TAO-TRY
+                - generic [ref=e290]: TAO / TRY
+              - button "NOT-FDUSD NOT / FDUSD" [ref=e291]:
+                - generic [ref=e292]: NOT-FDUSD
+                - generic [ref=e293]: NOT / FDUSD
+              - button "MUBARAK-USDC MUBARAK / USDC" [ref=e294]:
+                - generic [ref=e295]: MUBARAK-USDC
+                - generic [ref=e296]: MUBARAK / USDC
+              - button "WAL-USDC WAL / USDC" [ref=e297]:
+                - generic [ref=e298]: WAL-USDC
+                - generic [ref=e299]: WAL / USDC
+              - button "VTHO-USDT VTHO / USDT" [ref=e300]:
+                - generic [ref=e301]: VTHO-USDT
+                - generic [ref=e302]: VTHO / USDT
+              - button "SAND-BTC SAND / BTC" [ref=e303]:
+                - generic [ref=e304]: SAND-BTC
+                - generic [ref=e305]: SAND / BTC
+              - button "AXS-USDT AXS / USDT" [ref=e306]:
+                - generic [ref=e307]: AXS-USDT
+                - generic [ref=e308]: AXS / USDT
+              - button "DODO-USDT DODO / USDT" [ref=e309]:
+                - generic [ref=e310]: DODO-USDT
+                - generic [ref=e311]: DODO / USDT
+              - button "AI-BTC AI / BTC" [ref=e312]:
+                - generic [ref=e313]: AI-BTC
+                - generic [ref=e314]: AI / BTC
+              - button "BERA-USDT BERA / USDT" [ref=e315]:
+                - generic [ref=e316]: BERA-USDT
+                - generic [ref=e317]: BERA / USDT
+              - button "0G-USDT 0G / USDT" [ref=e318]:
+                - generic [ref=e319]: 0G-USDT
+                - generic [ref=e320]: 0G / USDT
+              - button "ZBT-BNB ZBT / BNB" [ref=e321]:
+                - generic [ref=e322]: ZBT-BNB
+                - generic [ref=e323]: ZBT / BNB
+              - button "CHR-BTC CHR / BTC" [ref=e324]:
+                - generic [ref=e325]: CHR-BTC
+                - generic [ref=e326]: CHR / BTC
+              - button "ROSE-BTC ROSE / BTC" [ref=e327]:
+                - generic [ref=e328]: ROSE-BTC
+                - generic [ref=e329]: ROSE / BTC
+              - button "WIF-USDT WIF / USDT" [ref=e330]:
+                - generic [ref=e331]: WIF-USDT
+                - generic [ref=e332]: WIF / USDT
+              - button "ME-BTC ME / BTC" [ref=e333]:
+                - generic [ref=e334]: ME-BTC
+                - generic [ref=e335]: ME / BTC
+              - button "KERNEL-FDUSD KERNEL / FDUSD" [ref=e336]:
+                - generic [ref=e337]: KERNEL-FDUSD
+                - generic [ref=e338]: KERNEL / FDUSD
+              - button "A2Z-USDC A2Z / USDC" [ref=e339]:
+                - generic [ref=e340]: A2Z-USDC
+                - generic [ref=e341]: A2Z / USDC
+              - button "ZBT-FDUSD ZBT / FDUSD" [ref=e342]:
+                - generic [ref=e343]: ZBT-FDUSD
+                - generic [ref=e344]: ZBT / FDUSD
+              - button "ONG-BTC ONG / BTC" [ref=e345]:
+                - generic [ref=e346]: ONG-BTC
+                - generic [ref=e347]: ONG / BTC
+              - button "ALGO-USDT ALGO / USDT" [ref=e348]:
+                - generic [ref=e349]: ALGO-USDT
+                - generic [ref=e350]: ALGO / USDT
+              - button "BEL-USDT BEL / USDT" [ref=e351]:
+                - generic [ref=e352]: BEL-USDT
+                - generic [ref=e353]: BEL / USDT
+              - button "JTO-USDC JTO / USDC" [ref=e354]:
+                - generic [ref=e355]: JTO-USDC
+                - generic [ref=e356]: JTO / USDC
+              - button "ZEN-USDC ZEN / USDC" [ref=e357]:
+                - generic [ref=e358]: ZEN-USDC
+                - generic [ref=e359]: ZEN / USDC
+              - button "MIRA-FDUSD MIRA / FDUSD" [ref=e360]:
+                - generic [ref=e361]: MIRA-FDUSD
+                - generic [ref=e362]: MIRA / FDUSD
+              - button "DASH-BTC DASH / BTC" [ref=e363]:
+                - generic [ref=e364]: DASH-BTC
+                - generic [ref=e365]: DASH / BTC
+              - button "PEPE-BRL PEPE / BRL" [ref=e366]:
+                - generic [ref=e367]: PEPE-BRL
+                - generic [ref=e368]: PEPE / BRL
+              - button "SAHARA-USDT SAHARA / USDT" [ref=e369]:
+                - generic [ref=e370]: SAHARA-USDT
+                - generic [ref=e371]: SAHARA / USDT
+              - button "SOMI-USDC SOMI / USDC" [ref=e372]:
+                - generic [ref=e373]: SOMI-USDC
+                - generic [ref=e374]: SOMI / USDC
+              - button "WIN-USDT WIN / USDT" [ref=e375]:
+                - generic [ref=e376]: WIN-USDT
+                - generic [ref=e377]: WIN / USDT
+              - button "POND-USDT POND / USDT" [ref=e378]:
+                - generic [ref=e379]: POND-USDT
+                - generic [ref=e380]: POND / USDT
+              - button "MAGIC-TRY MAGIC / TRY" [ref=e381]:
+                - generic [ref=e382]: MAGIC-TRY
+                - generic [ref=e383]: MAGIC / TRY
+              - button "USDT-ARS USDT / ARS" [ref=e384]:
+                - generic [ref=e385]: USDT-ARS
+                - generic [ref=e386]: USDT / ARS
+              - button "DOGE-FDUSD DOGE / FDUSD" [ref=e387]:
+                - generic [ref=e388]: DOGE-FDUSD
+                - generic [ref=e389]: DOGE / FDUSD
+              - button "BONK-BRL BONK / BRL" [ref=e390]:
+                - generic [ref=e391]: BONK-BRL
+                - generic [ref=e392]: BONK / BRL
+              - button "TRX-JPY TRX / JPY" [ref=e393]:
+                - generic [ref=e394]: TRX-JPY
+                - generic [ref=e395]: TRX / JPY
+              - button "TREE-FDUSD TREE / FDUSD" [ref=e396]:
+                - generic [ref=e397]: TREE-FDUSD
+                - generic [ref=e398]: TREE / FDUSD
+              - button "ADA-BNB ADA / BNB" [ref=e399]:
+                - generic [ref=e400]: ADA-BNB
+                - generic [ref=e401]: ADA / BNB
+              - button "GLM-BTC GLM / BTC" [ref=e402]:
+                - generic [ref=e403]: GLM-BTC
+                - generic [ref=e404]: GLM / BTC
+              - button "PSG-USDT PSG / USDT" [ref=e405]:
+                - generic [ref=e406]: PSG-USDT
+                - generic [ref=e407]: PSG / USDT
+              - button "CELO-TRY CELO / TRY" [ref=e408]:
+                - generic [ref=e409]: CELO-TRY
+                - generic [ref=e410]: CELO / TRY
+              - button "HBAR-USDT HBAR / USDT" [ref=e411]:
+                - generic [ref=e412]: HBAR-USDT
+                - generic [ref=e413]: HBAR / USDT
+              - button "PROM-USDT PROM / USDT" [ref=e414]:
+                - generic [ref=e415]: PROM-USDT
+                - generic [ref=e416]: PROM / USDT
+            - generic [ref=e417]:
+              - generic [ref=e418]: Showing 1 – 120 of 1604 instruments
+              - generic [ref=e419]:
+                - button "Prev" [disabled]
+                - button "Next" [ref=e420]
+            - generic [ref=e421]:
+              - paragraph [ref=e422]: Instrument details
+              - generic [ref=e423]:
+                - generic [ref=e424]:
+                  - paragraph [ref=e425]: Base
+                  - paragraph [ref=e426]: SOL
+                - generic [ref=e427]:
+                  - paragraph [ref=e428]: Quote
+                  - paragraph [ref=e429]: USDC
+                - generic [ref=e430]:
+                  - paragraph [ref=e431]: Type
+                  - paragraph [ref=e432]: spot
+                - generic [ref=e433]:
+                  - paragraph [ref=e434]: Price precision
+                  - paragraph [ref=e435]: —
+                - generic [ref=e436]:
+                  - paragraph [ref=e437]: Quantity precision
+                  - paragraph [ref=e438]: —
+                - generic [ref=e439]:
+                  - paragraph [ref=e440]: Price increment
+                  - paragraph [ref=e441]: —
+                - generic [ref=e442]:
+                  - paragraph [ref=e443]: Quantity increment
+                  - paragraph [ref=e444]: —
+                - generic [ref=e445]:
+                  - paragraph [ref=e446]: Min quantity
+                  - paragraph [ref=e447]: —
+                - generic [ref=e448]:
+                  - paragraph [ref=e449]: Max quantity
+                  - paragraph [ref=e450]: —
+                - generic [ref=e451]:
+                  - paragraph [ref=e452]: Notional precision
+                  - paragraph [ref=e453]: —
+    - button "Close" [active] [ref=e454]:
+      - img
+      - generic [ref=e455]: Close
+```

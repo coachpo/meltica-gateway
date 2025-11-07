@@ -55,7 +55,7 @@ coverage/
 !web/**/*
 web/node_modules
 web/.next
-
+node_modules
 # Strategies
 !strategies/**/*
 
@@ -64,3 +64,4 @@ web/.next
 !internal/infra/persistence/postgres/sql/**
 
 !sqlc.yaml
+
