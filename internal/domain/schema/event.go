@@ -236,6 +236,9 @@ const (
 	EventTypeBalanceUpdate EventType = "BalanceUpdate"
 	// EventTypeRiskControl identifies risk control notifications emitted by runtime safeguards.
 	EventTypeRiskControl EventType = "RiskControl"
+	// ExtensionEventType enables providers and strategies to opt-in to custom payload passthroughs.
+	// When both parties coordinate on ExtensionEventType, arbitrary payloads can be exchanged end-to-end.
+	ExtensionEventType EventType = "Extension"
 )
 
 // PriceLevel describes an order book price level using decimal strings.
