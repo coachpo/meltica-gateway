@@ -8,6 +8,7 @@ import {
   InstanceSpec,
   InstanceSummary,
   OrderRecord,
+  Provider,
 } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -59,6 +60,11 @@ type ProviderInstrumentStatus = {
   symbols: string[];
   loading: boolean;
   error: string | null;
+};
+
+type ProviderAvailability = {
+  missing: string[];
+  stopped: string[];
 };
 
 type ParsedSelector = {
@@ -145,6 +151,27 @@ function formatMetadata(metadata?: Record<string, unknown> | null): string {
   }
 }
 
+function formatProviderIssueMessage(availability: ProviderAvailability): string | null {
+  const segments: string[] = [];
+  const { missing, stopped } = availability;
+  if (missing.length > 0) {
+    const missingList = missing.join(', ');
+    segments.push(
+      `Provider${missing.length > 1 ? 's' : ''} ${missingList} ${missing.length > 1 ? 'are' : 'is'} not configured.`,
+    );
+  }
+  if (stopped.length > 0) {
+    const stoppedList = stopped.join(', ');
+    segments.push(
+      `Start ${stoppedList} provider${stopped.length > 1 ? 's' : ''} before starting this instance.`,
+    );
+  }
+  if (segments.length === 0) {
+    return null;
+  }
+  return segments.join(' ');
+}
+
 const HISTORY_LIMITS: Record<HistoryTab, number> = {
   orders: 100,
   executions: 100,
@@ -179,6 +206,43 @@ export default function InstancesPage() {
   const providers = useMemo(
     () => providersQuery.data ?? [],
     [providersQuery.data],
+  );
+  const providerLookup = useMemo(() => {
+    const map = new Map<string, Provider>();
+    providers.forEach((provider) => {
+      map.set(provider.name.toLowerCase(), provider);
+    });
+    return map;
+  }, [providers]);
+  const providerStatusReady = providersQuery.isSuccess;
+  const evaluateProviderAvailability = useCallback(
+    (names: string[]): ProviderAvailability => {
+      const missing: string[] = [];
+      const stopped: string[] = [];
+      const missingSeen = new Set<string>();
+      const stoppedSeen = new Set<string>();
+      names.forEach((rawName) => {
+        const trimmed = rawName.trim();
+        if (!trimmed) {
+          return;
+        }
+        const key = trimmed.toLowerCase();
+        const provider = providerLookup.get(key);
+        if (!provider) {
+          if (!missingSeen.has(key)) {
+            missing.push(trimmed);
+            missingSeen.add(key);
+          }
+          return;
+        }
+        if (!provider.running && !stoppedSeen.has(key)) {
+          stopped.push(trimmed);
+          stoppedSeen.add(key);
+        }
+      });
+      return { missing, stopped };
+    },
+    [providerLookup],
   );
   const modules = useMemo(
     () => strategyModulesQuery.data?.modules ?? [],
@@ -784,10 +848,29 @@ export default function InstancesPage() {
     }
   };
 
-  const handleStart = async (id: string) => {
-    setActionInProgress(prev => ({ ...prev, [`start-${id}`]: true }));
+  const handleStart = async (instance: InstanceSummary) => {
+    const trimmedId = instance.id.trim();
+    if (!trimmedId) {
+      return;
+    }
+    if (providerStatusReady) {
+      const availability = evaluateProviderAvailability(instance.providers ?? []);
+      if (availability.missing.length > 0 || availability.stopped.length > 0) {
+        const description =
+          formatProviderIssueMessage(availability) ??
+          'Resolve provider issues before starting this instance.';
+        showToast({
+          title: 'Provider unavailable',
+          description,
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+    const actionKey = `start-${trimmedId}`;
+    setActionInProgress(prev => ({ ...prev, [actionKey]: true }));
     try {
-      await startInstanceMutation.mutateAsync(id);
+      await startInstanceMutation.mutateAsync(trimmedId);
     } catch (err) {
       if (err instanceof Error && err.message.includes('provider') && err.message.includes('unavailable')) {
         showToast({
@@ -797,7 +880,7 @@ export default function InstancesPage() {
         });
       }
     } finally {
-      setActionInProgress(prev => ({ ...prev, [`start-${id}`]: false }));
+      setActionInProgress(prev => ({ ...prev, [actionKey]: false }));
     }
   };
 
@@ -1646,6 +1729,16 @@ export default function InstancesPage() {
           const usageLink = `/strategies/modules?usage=${encodeURIComponent(usageSelector)}`;
           const isBaseline = Boolean(instance.baseline);
           const isDynamic = Boolean(instance.dynamic);
+          const providerAvailability = providerStatusReady
+            ? evaluateProviderAvailability(instance.providers)
+            : { missing: [], stopped: [] };
+          const providerIssuesPresent =
+            providerStatusReady &&
+            (providerAvailability.missing.length > 0 || providerAvailability.stopped.length > 0);
+          const providerIssueHint = providerIssuesPresent
+            ? formatProviderIssueMessage(providerAvailability)
+            : null;
+          const startBlocked = !instance.running && Boolean(providerIssueHint);
           return (
             <Card key={instance.id}>
               <CardHeader>
@@ -1751,6 +1844,9 @@ export default function InstancesPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </div>
+                    {providerIssueHint ? (
+                      <p className="mt-1 text-xs text-destructive">{providerIssueHint}</p>
+                    ) : null}
                   </div>
                   <div>
                     <span className="font-medium">Symbols:</span>
@@ -1833,8 +1929,13 @@ export default function InstancesPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleStart(instance.id)}
-                      disabled={actionInProgress[`start-${instance.id}`] || anyActionInFlight}
+                      onClick={() => handleStart(instance)}
+                      disabled={
+                        actionInProgress[`start-${instance.id}`] ||
+                        anyActionInFlight ||
+                        startBlocked
+                      }
+                      title={startBlocked ? providerIssueHint ?? undefined : undefined}
                     >
                       {actionInProgress[`start-${instance.id}`] ? (
                         <Loader2Icon className="mr-1 h-3 w-3 animate-spin" />
