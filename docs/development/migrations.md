@@ -4,15 +4,15 @@ Meltica uses [`golang-migrate`](https://github.com/golang-migrate/migrate) to ma
 
 ## Prerequisites
 
-- Install the CLI: `brew install golang-migrate` or download binaries from the upstream releases page.
+- Install the upstream CLI (`brew install golang-migrate`) only if you plan to run `migrate create ...` for new files. Applying migrations via `make migrate` now uses the repository's built-in runner (`go run ./cmd/migrate`), so no external binary is required.
 - Ensure PostgreSQL is running locally and accessible via the DSN `postgresql://localhost:5432/meltica`.
 
 ## Commands
 
 | Command          | Description                                                         |
 | ---------------- | ------------------------------------------------------------------- |
-| `make migrate`   | Apply all pending migrations to the database specified by `DATABASE_URL`. |
-| `make migrate-down` | Roll back the most recent migration.                                   |
+| `make migrate`   | Apply all pending migrations to the database specified by `DATABASE_URL` using the first-party runner. |
+| `make migrate-down` | Roll back the most recent migration via the same runner.                                   |
 | `make sqlc`      | Regenerate typed query bindings from SQL files.                      |
 
 The Makefile defaults `DATABASE_URL` to `postgresql://localhost:5432/meltica?sslmode=disable`. Override it by exporting the variable before invoking `make`:

@@ -1,6 +1,7 @@
 GO111MODULE=on
-MIGRATE_BIN ?= migrate
+MIGRATE_BIN ?= go run ./cmd/migrate
 DATABASE_URL ?= postgresql://postgres:root@localhost:5432/meltica?sslmode=disable
+CONFIG_FILE ?= config/app.yaml
 
 .PHONY: test bench lint vet tidy build build-linux-arm64 clean coverage run migrate migrate-down sqlc
 
@@ -42,7 +43,7 @@ clean:
 	rm -rf coverage/
 
 run:
-	go run ./cmd/gateway/main.go
+	go run ./cmd/gateway/main.go -config $(CONFIG_FILE)
 
 backtest:
 	go run ./cmd/backtest/main.go --data=./data.csv --strategy=$(STRATEGY)

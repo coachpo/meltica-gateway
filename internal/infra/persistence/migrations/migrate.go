@@ -35,48 +35,11 @@ var (
 // Apply ensures the migrations located at migrationsDir are applied to the Postgres
 // instance reachable via dsn. A nil logger disables informational logging.
 func Apply(ctx context.Context, dsn, migrationsDir string, logger *log.Logger) error {
-	resolvedDir, err := resolveDir(migrationsDir)
+	m, cleanup, resolvedDir, err := prepareMigrator(ctx, dsn, migrationsDir, logger)
 	if err != nil {
 		return err
 	}
-
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		return fmt.Errorf("open migrations connection: %w", err)
-	}
-	defer func() {
-		if cerr := db.Close(); cerr != nil && logger != nil {
-			logger.Printf("database migrations close: %v", cerr)
-		}
-	}()
-
-	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("ping migrations database: %w", err)
-	}
-
-	var driverConfig pgxv5.Config
-	driver, err := pgxv5.WithInstance(db, &driverConfig)
-	if err != nil {
-		return fmt.Errorf("initialise pgx v5 driver: %w", err)
-	}
-
-	sourceURL := fileURL(resolvedDir)
-	m, err := migrate.NewWithDatabaseInstance(sourceURL, "pgx5", driver)
-	if err != nil {
-		return fmt.Errorf("initialise migrate instance: %w", err)
-	}
-	defer func() {
-		sourceErr, dbErr := m.Close()
-		if logger == nil {
-			return
-		}
-		if sourceErr != nil {
-			logger.Printf("database migrations source close: %v", sourceErr)
-		}
-		if dbErr != nil {
-			logger.Printf("database migrations db close: %v", dbErr)
-		}
-	}()
+	defer cleanup()
 
 	if logger != nil {
 		logger.Printf("running database migrations: path=%s", resolvedDir)
@@ -100,6 +63,92 @@ func Apply(ctx context.Context, dsn, migrationsDir string, logger *log.Logger) e
 	recordMigrationMetric(ctx, "applied", resolvedDir)
 
 	return nil
+}
+
+// Rollback steps the database backwards by the requested number of migrations.
+// Steps defaults to 1 when zero or negative values are supplied.
+func Rollback(ctx context.Context, dsn, migrationsDir string, steps int, logger *log.Logger) error {
+	if steps <= 0 {
+		steps = 1
+	}
+
+	m, cleanup, resolvedDir, err := prepareMigrator(ctx, dsn, migrationsDir, logger)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if logger != nil {
+		logger.Printf("rolling back database migrations: path=%s steps=%d", resolvedDir, steps)
+	}
+
+	if err := m.Steps(-steps); err != nil {
+		if errors.Is(err, migrate.ErrNoChange) {
+			recordMigrationMetric(ctx, "noop", resolvedDir)
+			if logger != nil {
+				logger.Printf("no migrations available to roll back")
+			}
+			return nil
+		}
+		recordMigrationMetric(ctx, "failed", resolvedDir)
+		return fmt.Errorf("rollback migrations: %w", err)
+	}
+
+	recordMigrationMetric(ctx, "rolled_back", resolvedDir)
+	if logger != nil {
+		logger.Printf("database migrations rolled back successfully")
+	}
+	return nil
+}
+
+func prepareMigrator(ctx context.Context, dsn, migrationsDir string, logger *log.Logger) (*migrate.Migrate, func(), string, error) {
+	resolvedDir, err := resolveDir(migrationsDir)
+	if err != nil {
+		return nil, func() {}, "", err
+	}
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, func() {}, "", fmt.Errorf("open migrations connection: %w", err)
+	}
+
+	cleanup := func() {
+		if cerr := db.Close(); cerr != nil && logger != nil {
+			logger.Printf("database migrations close: %v", cerr)
+		}
+	}
+
+	if err := db.PingContext(ctx); err != nil {
+		cleanup()
+		return nil, func() {}, "", fmt.Errorf("ping migrations database: %w", err)
+	}
+
+	var driverConfig pgxv5.Config
+	driver, err := pgxv5.WithInstance(db, &driverConfig)
+	if err != nil {
+		cleanup()
+		return nil, func() {}, "", fmt.Errorf("initialise pgx v5 driver: %w", err)
+	}
+
+	sourceURL := fileURL(resolvedDir)
+	m, err := migrate.NewWithDatabaseInstance(sourceURL, "pgx5", driver)
+	if err != nil {
+		cleanup()
+		return nil, func() {}, "", fmt.Errorf("initialise migrate instance: %w", err)
+	}
+
+	return m, func() {
+		sourceErr, dbErr := m.Close()
+		if logger != nil {
+			if sourceErr != nil {
+				logger.Printf("database migrations source close: %v", sourceErr)
+			}
+			if dbErr != nil {
+				logger.Printf("database migrations db close: %v", dbErr)
+			}
+		}
+		cleanup()
+	}, resolvedDir, nil
 }
 
 func resolveDir(dir string) (string, error) {

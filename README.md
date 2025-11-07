@@ -32,7 +32,7 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
 - `cmd/gateway`: Main binary; exposes `-config` to point at any `app.yaml`.
 - `internal/`: Core implementation packages organised into `app/`, `domain/`, `infra/`, and `support/`.
 - `api/`: Holds public API contracts and future protobuf/OpenAPI material.
-- `config/`: Shipping configuration (`app.yaml`) plus `app.example.yaml` for local overrides.
+- `config/`: Shipping configuration (`app.yaml` for dev, `app.ci.yaml` for CI) plus `app.example.yaml` for local overrides.
 - `deployments/`: IaC and telemetry deployment notes (`deployments/telemetry/PROMETHEUS_SETUP.md`).
 - `docs/`: Lambdas API reference and Grafana dashboards.
 - `test/` and `tests/`: Shared fixtures, architecture/contract suites, and package-level `_test.go` files.
@@ -47,16 +47,17 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
    # edit providers, telemetry endpoint, or lambda manifest as needed
    cp .env.example .env        # optional: provides DATABASE_URL for migrations
    ```
+   Set `MELTICA_CONFIG_PATH` (or pass `-config`) when you need a different config file. CI exports `MELTICA_CONFIG_PATH=config/app.ci.yaml` so jobs never depend on your local `config/app.yaml`.
 3. **Prepare persistence**:
    ```bash
-   # Start (or connect to) PostgreSQL and apply schema
+   # Start (or connect to) PostgreSQL and apply schema via the built-in runner
    make migrate    # uses DATABASE_URL or config database.dsn
    ```
    Meltica requires PostgreSQL before the gateway will boot; the in-memory driver has been removed.
 
 4. **Run locally**:
    ```bash
-   make run              # shorthand for go run ./cmd/gateway
+   make run              # honors CONFIG_FILE or MELTICA_CONFIG_PATH overrides
    # or build & execute
    make build
    ./bin/gateway -config config/app.yaml
@@ -73,7 +74,7 @@ Meltica is a Go 1.25 gateway for aggregating exchange market data, routing event
 | `make test`                | Run `go test ./... -race -count=1 -timeout=30s` across the module. |
 | `make lint`                | Execute `golangci-lint` with `.golangci.yml`.                      |
 | `make coverage`            | Enforce the ≥70% TS-01 coverage bar and emit `coverage.out`.       |
-| `make migrate`             | Apply all pending database migrations via `golang-migrate`.        |
+| `make migrate`             | Apply all pending database migrations via the built-in runner.     |
 | `make migrate-down`        | Roll back the most recent database migration.                      |
 | `make contract-ws-routing` | Run the focused contract suite in `tests/contract/ws-routing`.     |
 | `make bench`               | Launch benchmark runs for hot paths.                               |

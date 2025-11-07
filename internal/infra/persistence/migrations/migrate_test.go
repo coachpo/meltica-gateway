@@ -83,3 +83,14 @@ func TestApplyValidatesPathBeforeConnecting(t *testing.T) {
 		t.Fatalf("expected missing directory error, got %v", err)
 	}
 }
+
+func TestRollbackValidatesPathBeforeConnecting(t *testing.T) {
+	ctx := context.Background()
+	err := Rollback(ctx, "postgresql://invalid", "still-missing", 1, nil)
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("expected missing directory error, got %v", err)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 
 const (
 	defaultConfigPath            = "config/app.yaml"
+	configPathEnvVar             = "MELTICA_CONFIG_PATH"
 	defaultMigrationsPath        = "db/migrations"
 	gatewayLoggerPrefix          = "gateway "
 	eventPoolName                = "Event"
@@ -446,8 +448,12 @@ func performGracefulShutdown(ctx context.Context, logger *log.Logger, cfg gracef
 }
 
 func resolveConfigPath(flagValue string) string {
-	if flagValue != "" {
-		return flagValue
+	if strings.TrimSpace(flagValue) != "" {
+		return filepath.Clean(flagValue)
+	}
+
+	if envPath := strings.TrimSpace(os.Getenv(configPathEnvVar)); envPath != "" {
+		return filepath.Clean(envPath)
 	}
 
 	return filepath.Clean(defaultConfigPath)

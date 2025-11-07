@@ -1,0 +1,36 @@
+# CI-specific configuration to keep telemetry/local overrides separate from dev machines.
+environment: ci
+
+database:
+  dsn: postgresql://postgres:root@localhost:5432/meltica?sslmode=disable
+  maxConns: 8
+  minConns: 1
+  maxConnLifetime: 30m
+  maxConnIdleTime: 5m
+  healthCheckPeriod: 30s
+  runMigrations: true
+
+eventbus:
+  bufferSize: 4096
+  fanoutWorkers: auto
+
+pools:
+  event:
+    size: 4096
+    waitQueueSize: 4096
+  orderRequest:
+    size: 2048
+    waitQueueSize: 2048
+
+apiServer:
+  addr: ":8880"
+
+telemetry:
+  otlpEndpoint: ""
+  serviceName: meltica-gateway-ci
+  otlpInsecure: true
+  enableMetrics: false
+
+strategies:
+  directory: strategies
+  requireRegistry: false

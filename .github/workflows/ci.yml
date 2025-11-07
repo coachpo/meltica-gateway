@@ -4,6 +4,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      MELTICA_CONFIG_PATH: config/app.ci.yaml
     services:
       postgres:
         image: postgres:16-alpine
@@ -32,10 +34,9 @@ jobs:
       - name: Expose Go bin on PATH
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
-      - name: Install tooling
+      - name: Install sqlc
         run: |
           go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
-          go install github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.3
 
       - name: Verify sqlc generation
         run: |
