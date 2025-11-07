@@ -878,12 +878,16 @@ func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 	var running bool
 	var status Status
 	var startupErr error
+	var cachedInstruments []schema.Instrument
 	if ok {
 		spec = state.spec
 		instance = state.instance
 		running = state.running && instance != nil
 		status = state.status
 		startupErr = state.startupErr
+		if len(state.cachedInstruments) > 0 {
+			cachedInstruments = schema.CloneInstruments(state.cachedInstruments)
+		}
 	}
 	m.mu.RUnlock()
 	if !ok {
@@ -898,8 +902,8 @@ func (m *Manager) ProviderMetadataFor(name string) (RuntimeDetail, bool) {
 			instruments = instInstruments
 		}
 		instrumentCount = len(instruments)
-	} else if len(state.cachedInstruments) > 0 {
-		instruments = state.cachedInstruments
+	} else if len(cachedInstruments) > 0 {
+		instruments = cachedInstruments
 		instrumentCount = len(instruments)
 	}
 	meta := buildRuntimeMetadata(spec, instrumentCount, running, status, startupErr)
