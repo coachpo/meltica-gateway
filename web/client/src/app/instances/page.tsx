@@ -178,17 +178,48 @@ const HISTORY_LIMITS: Record<HistoryTab, number> = {
   balances: 50,
 };
 
-const EMPTY_INSTANCE_SPEC: InstanceSpec = {
-  id: '',
+const DEFAULT_INSTANCE_SPEC: InstanceSpec = {
+  id: 'my-strategy-instance',
   strategy: {
-    identifier: '',
-    selector: '',
-    config: {},
+    identifier: 'grid',
+    selector: 'grid',
+    config: {
+      dry_run: true,
+    },
   },
-  scope: {},
+  scope: {
+    'your-provider': {
+      symbols: ['BTC-USDT'],
+    },
+  },
 };
 
-const DEFAULT_INSTANCE_JSON = formatInstanceSpec(EMPTY_INSTANCE_SPEC);
+const DEFAULT_INSTANCE_JSON = formatInstanceSpec(DEFAULT_INSTANCE_SPEC);
+
+const DIALOG_STATE_KEY = 'instances:dialog-state';
+
+type PersistedDialogState = {
+  open: boolean;
+  mode: 'create' | 'edit';
+  editingId?: string | null;
+  draft?: string;
+  formMode?: 'json' | 'guided';
+};
+
+const loadPersistedDialogState = (): PersistedDialogState | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(DIALOG_STATE_KEY);
+    if (!raw) {
+      return null;
+    }
+    return JSON.parse(raw) as PersistedDialogState;
+  } catch {
+    return null;
+  }
+};
 
 export default function InstancesPage() {
   const instancesQuery = useInstancesQuery();
@@ -248,15 +279,30 @@ export default function InstancesPage() {
     () => strategyModulesQuery.data?.modules ?? [],
     [strategyModulesQuery.data],
   );
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create');
-  const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
-  const [prefilledConfig, setPrefilledConfig] = useState(false);
+  const [persistedDialogState] = useState<PersistedDialogState | null>(() =>
+    loadPersistedDialogState(),
+  );
+  const [createDialogOpen, setCreateDialogOpen] = useState<boolean>(
+    () => persistedDialogState?.open ?? false,
+  );
+  const [dialogMode, setDialogMode] = useState<'create' | 'edit'>(
+    () => persistedDialogState?.mode ?? 'create',
+  );
+  const [editingInstanceId, setEditingInstanceId] = useState<string | null>(
+    () => persistedDialogState?.editingId ?? null,
+  );
+  const [prefilledConfig, setPrefilledConfig] = useState(
+    () => (persistedDialogState?.mode === 'edit' ? true : false),
+  );
   const [dialogSaving, setDialogSaving] = useState(false);
   const [instanceLoading, setInstanceLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<Record<string, boolean>>({});
-  const [formMode, setFormMode] = useState<'json' | 'guided'>('json');
-  const [instanceJsonDraft, setInstanceJsonDraft] = useState<string>(DEFAULT_INSTANCE_JSON);
+  const [formMode, setFormMode] = useState<'json' | 'guided'>(
+    () => persistedDialogState?.formMode ?? 'json',
+  );
+  const [instanceJsonDraft, setInstanceJsonDraft] = useState<string>(
+    () => persistedDialogState?.draft ?? DEFAULT_INSTANCE_JSON,
+  );
 
   const [newInstance, setNewInstance] = useState({
     id: '',
@@ -278,6 +324,24 @@ export default function InstancesPage() {
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [historyDialogInstance, setHistoryDialogInstance] = useState<InstanceSummary | null>(null);
   const [historyTab, setHistoryTab] = useState<HistoryTab>('orders');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (!createDialogOpen) {
+      window.sessionStorage.removeItem(DIALOG_STATE_KEY);
+      return;
+    }
+    const payload: PersistedDialogState = {
+      open: true,
+      mode: dialogMode,
+      editingId: editingInstanceId,
+      draft: instanceJsonDraft,
+      formMode,
+    };
+    window.sessionStorage.setItem(DIALOG_STATE_KEY, JSON.stringify(payload));
+  }, [createDialogOpen, dialogMode, editingInstanceId, instanceJsonDraft, formMode]);
   const baseLoading =
     instancesQuery.isLoading ||
     strategiesQuery.isLoading ||
@@ -920,6 +984,13 @@ export default function InstancesPage() {
     }
   };
   const handleDelete = (id: string) => {
+    const editingTarget = createDialogOpen && dialogMode === 'edit' && editingInstanceId === id;
+    if (editingTarget) {
+      setCreateDialogOpen(false);
+      resetForm();
+      setTimeout(() => setConfirmState({ type: 'delete-instance', id }), 0);
+      return;
+    }
     setConfirmState({ type: 'delete-instance', id });
   };
 

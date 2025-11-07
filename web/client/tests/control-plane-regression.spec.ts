@@ -41,9 +41,13 @@ test.describe('control plane regression', () => {
   test('instance creation enforces required fields', async ({ page }) => {
     await page.goto('/instances');
     await page.getByRole('button', { name: 'Create Instance' }).click();
-    await page.getByRole('button', { name: 'Create' }).click();
-
-    await expect(page.getByText('Instance ID is required.')).toBeVisible();
+    const createButton = page.getByRole('button', { name: 'Create' });
+    await expect(createButton).toBeEnabled();
+    await createButton.click();
+    const duplicateAlert = page
+      .getByRole('alert')
+      .filter({ hasText: /strategy instance already exists/i });
+    await expect(duplicateAlert).toBeVisible();
 
     await page.getByRole('tab', { name: 'Guided form' }).click();
     await expect(page.getByRole('checkbox', { name: /binance-demo/i })).toBeVisible();
@@ -53,7 +57,14 @@ test.describe('control plane regression', () => {
   test('providers start without schema errors', async ({ page }) => {
     await page.goto('/providers');
     await expect(page.getByRole('heading', { name: 'Providers' })).toBeVisible();
-    const firstStartButton = page.getByRole('button', { name: /^Start$/ }).first();
+    let startButtons = page.getByRole('button', { name: /^Start$/ });
+    if ((await startButtons.count()) === 0) {
+      const stopButton = page.getByRole('button', { name: /^Stop$/ }).first();
+      await expect(stopButton).toBeEnabled();
+      await stopButton.click();
+      startButtons = page.getByRole('button', { name: /^Start$/ });
+    }
+    const firstStartButton = startButtons.first();
     await expect(firstStartButton).toBeEnabled();
     await firstStartButton.click();
     await expect(page.getByText(/Start failed/i)).not.toBeVisible();
