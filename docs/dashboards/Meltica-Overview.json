@@ -1519,7 +1519,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(adapter_extension_events{environment=\"$environment\"}[5m])) by (provider)",
+          "expr": "sum(rate(meltica_adapter_extension_events{environment=\"$environment\"}[5m])) by (provider)",
           "legendFormat": "{{provider}}",
           "refId": "A"
         }
@@ -1573,7 +1573,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (provider)(rate(adapter_extension_payload_bytes_sum{environment=\"$environment\"}[5m])) / clamp_min(sum by (provider)(rate(adapter_extension_payload_bytes_count{environment=\"$environment\"}[5m])), 1)",
+          "expr": "sum by (provider)(rate(meltica_adapter_extension_payload_bytes_sum{environment=\"$environment\"}[5m])) / clamp_min(sum by (provider)(rate(meltica_adapter_extension_payload_bytes_count{environment=\"$environment\"}[5m])), 1)",
           "legendFormat": "{{provider}}",
           "refId": "A"
         }

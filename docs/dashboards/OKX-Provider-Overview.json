@@ -136,7 +136,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(adapter_extension_events{environment=\"$environment\",provider=\"$provider\"}[5m])) by (symbol)",
+          "expr": "sum(rate(meltica_adapter_extension_events{environment=\"$environment\",provider=\"$provider\"}[5m])) by (symbol)",
           "legendFormat": "{{symbol}}",
           "refId": "A"
         }
@@ -190,7 +190,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (symbol)(rate(adapter_extension_payload_bytes_sum{environment=\"$environment\",provider=\"$provider\"}[5m])) / clamp_min(sum by (symbol)(rate(adapter_extension_payload_bytes_count{environment=\"$environment\",provider=\"$provider\"}[5m])), 1)",
+          "expr": "sum by (symbol)(rate(meltica_adapter_extension_payload_bytes_sum{environment=\"$environment\",provider=\"$provider\"}[5m])) / clamp_min(sum by (symbol)(rate(meltica_adapter_extension_payload_bytes_count{environment=\"$environment\",provider=\"$provider\"}[5m])), 1)",
           "legendFormat": "{{symbol}}",
           "refId": "A"
         }
@@ -244,7 +244,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(adapter_extension_events{environment=\"$environment\",provider=\"$provider\"}[1m]))",
+          "expr": "sum(rate(meltica_adapter_extension_events{environment=\"$environment\",provider=\"$provider\"}[1m]))",
           "legendFormat": "events/sec",
           "refId": "A"
         }
@@ -413,7 +413,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(adapter_extension_events{environment=\"$environment\",provider=\"$provider\"}[1m]))",
+          "expr": "sum(rate(meltica_adapter_extension_events{environment=\"$environment\",provider=\"$provider\"}[1m]))",
           "refId": "A"
         }
       ],
@@ -473,7 +473,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(adapter_extension_payload_bytes_sum{environment=\"$environment\",provider=\"$provider\"}[1m])) / clamp_min(sum(rate(adapter_extension_payload_bytes_count{environment=\"$environment\",provider=\"$provider\"}[1m])), 1)",
+          "expr": "sum(rate(meltica_adapter_extension_payload_bytes_sum{environment=\"$environment\",provider=\"$provider\"}[1m])) / clamp_min(sum(rate(meltica_adapter_extension_payload_bytes_count{environment=\"$environment\",provider=\"$provider\"}[1m])), 1)",
           "refId": "A"
         }
       ],

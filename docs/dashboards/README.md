@@ -134,7 +134,7 @@ All dashboard queries are optimized for performance:
 ## 📝 Recent Changes
 
 ### 2025-11-08
-- ✅ Added **Extension Events** row to `Meltica-Overview.json` showing per-provider throughput and average payload size using `adapter_extension_events` and `adapter_extension_payload_bytes_*`.
+- ✅ Added **Extension Events** row to `Meltica-Overview.json` showing per-provider throughput and average payload size using `meltica_adapter_extension_events` and `meltica_adapter_extension_payload_bytes_*`.
 - ✅ Added dedicated **Binance extension panels** to highlight per-symbol adoption and payload sizes on `Binance-Provider-Overview.json`.
 - ✅ Created `OKX-Provider-Overview.json` with OKX-specific event throughput, extension payload, and event bus latency panels.
 
@@ -212,8 +212,8 @@ All dashboards use these verified metrics from `http://capy.lan:8889/metrics`:
 - `meltica_controlbus_queue_depth` - Command queue depth
 
 ### Extension Events
-- `adapter_extension_events` - Adapter-level extension payload rate (labels: `environment`, `provider`, `symbol`)
-- `adapter_extension_payload_bytes_sum` / `_count` - Helpers for computing average payload sizes (same labels as above)
+- `meltica_adapter_extension_events` - Adapter-level extension payload rate (labels: `environment`, `provider`, `symbol`)
+- `meltica_adapter_extension_payload_bytes_sum` / `_count` - Helpers for computing average payload sizes (same labels as above)
 
 ## 🐛 Troubleshooting
 
