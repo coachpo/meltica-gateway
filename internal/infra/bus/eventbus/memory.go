@@ -92,34 +92,45 @@ func (b *MemoryBus) Publish(ctx context.Context, evt *schema.Event) error {
 	if evt == nil {
 		return nil
 	}
-	if evt.Type == "" {
-		return errs.New("eventbus/publish", errs.CodeInvalid, errs.WithMessage("event type required"))
-	}
 
 	provider := evt.Provider
 	symbol := evt.Symbol
 	eventType := string(evt.Type)
 	start := time.Now()
 	result := "success"
+	shouldRecord := false
+
+	defer func() {
+		if !shouldRecord {
+			return
+		}
+		attrs := telemetry.OperationResultAttributes(telemetry.Environment(), provider, "eventbus.publish", result)
+		if eventType != "" {
+			attrs = append(attrs, telemetry.AttrEventType.String(eventType))
+		}
+		if symbol != "" {
+			attrs = append(attrs, telemetry.AttrSymbol.String(symbol))
+		}
+		if b.publishDuration != nil {
+			b.publishDuration.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(attrs...))
+		}
+		if b.eventsPublishedCounter != nil {
+			b.eventsPublishedCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+	}()
+
+	if evt.Type == "" {
+		result = "invalid_event_type"
+		return errs.New("eventbus/publish", errs.CodeInvalid, errs.WithMessage("event type required"))
+	}
+
+	shouldRecord = true
 
 	if err := enforceExtensionPayloadCap(evt, b.cfg.ExtensionPayloadCapBytes); err != nil {
 		result = "extension_payload_cap"
 		b.recycle(evt)
 		return err
 	}
-
-	defer func() {
-		if b.publishDuration != nil {
-			attrs := telemetry.OperationResultAttributes(telemetry.Environment(), provider, "eventbus.publish", result)
-			if eventType != "" {
-				attrs = append(attrs, telemetry.AttrEventType.String(eventType))
-			}
-			if symbol != "" {
-				attrs = append(attrs, telemetry.AttrSymbol.String(symbol))
-			}
-			b.publishDuration.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(attrs...))
-		}
-	}()
 
 	// ROUTE FIRST: snapshot subscribers before any pool operations.
 	b.mu.RLock()
