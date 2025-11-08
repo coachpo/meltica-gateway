@@ -11,18 +11,6 @@
       }
     }
   },
-  "fixed-strategy-test": {
-    "tags": {
-      "latest": "sha256:54bc6069ab953524e77859da7b63f44613f25568168120ccf29e8393446f8822",
-      "v1.0.0": "sha256:54bc6069ab953524e77859da7b63f44613f25568168120ccf29e8393446f8822"
-    },
-    "hashes": {
-      "sha256:54bc6069ab953524e77859da7b63f44613f25568168120ccf29e8393446f8822": {
-        "tag": "v1.0.0",
-        "path": "fixed-strategy-test/v1.0.0/fixed-strategy-test.js"
-      }
-    }
-  },
   "grid": {
     "tags": {
       "latest": "sha256:5f41c95e1edf674561de3aa3badcdc7f168f6d29e8c889fbe3daf3a0e1672737",
@@ -92,31 +80,6 @@
       "sha256:f14c7cdb4239ad27dd83cb06fc03f589b2aaed4a2875c4314922cfb87d0b5b42": {
         "tag": "v1.0.0",
         "path": "noop/v1.0.0/noop.js"
-      }
-    }
-  },
-  "strategy-name": {
-    "tags": {
-      "latest": "sha256:2c1f3698ab363b1c69255ed605b83a6b2e3f94e15783b2e4408c45a8bae7753d",
-      "v1.0.0": "sha256:2c1f3698ab363b1c69255ed605b83a6b2e3f94e15783b2e4408c45a8bae7753d"
-    },
-    "hashes": {
-      "sha256:2c1f3698ab363b1c69255ed605b83a6b2e3f94e15783b2e4408c45a8bae7753d": {
-        "tag": "v1.0.0",
-        "path": "strategy-name/v1.0.0/strategy-name.js"
-      }
-    }
-  },
-  "test-module": {
-    "tags": {
-      "1.0.0": "sha256:085ee278157abe59391a46e7b21eaf9a5392f389fc4fbb3608a7348478913968",
-      "latest": "sha256:085ee278157abe59391a46e7b21eaf9a5392f389fc4fbb3608a7348478913968",
-      "test": "sha256:085ee278157abe59391a46e7b21eaf9a5392f389fc4fbb3608a7348478913968"
-    },
-    "hashes": {
-      "sha256:085ee278157abe59391a46e7b21eaf9a5392f389fc4fbb3608a7348478913968": {
-        "tag": "1.0.0",
-        "path": "test-module/1.0.0/test-module.js"
       }
     }
   }
