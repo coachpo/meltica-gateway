@@ -3,12 +3,40 @@
 ## Overview
 This guide distills the Binance adapter workflow into practical steps for integrating additional exchanges. It covers provider responsibilities, event emission patterns, and how to hydrate order books from snapshot plus diff streams.
 
+## End-to-End Onboarding Phases
+1. **Surface mapping.** Capture every REST and WebSocket surface the exchange exposes (public, private, snapshot, diff). For Binance this lives in `options.go` via `exchangeInfo`, `depth`, and listen-key endpoints, while OKX tracks `instruments`, `books`, and separate public/private WS URLs. Documenting these up front keeps the factory and options wiring mechanical.
+2. **Metadata + config scaffolding.** Build the public/private metadata structs, the adapter metadata (`provider.AdapterMetadata`), and a typed `Options` struct. Both adapters parse user config in `manifest.go`, run `withDefaults`, and immediately fail if the shared `PoolManager` is missing. New exchanges should follow the same pattern so aliases, defaults, and SettingsSchema stay discoverable by the control plane.
+3. **Streaming integration.** Implement dynamic subscribe/unsubscribe over a single WS connection per stream type. Binance uses channel-scoped `streamManager` instances (`tradeManager`, `tickerManager`, `bookManager`), whereas OKX centralizes routing inside a shared `wsManager` that fans out by channel argument. Choose the topology that matches the venue limits but keep the live subscription contract identical.
+4. **Trading + private surfaces.** Even if trading is deferred, scaffold `SubmitOrder`, credential parsing, and private stream plumbing. Binance guards user data by listen keys plus keepalive, while OKX performs WS logins with API key/secret/passphrase and signs REST orders. Following this pipeline now avoids architectural churn when enabling strategies later.
+
 ## WebSocket Stream Management (MANDATORY)
 
 All exchange adapters **MUST** implement WebSocket stream management using the **Live Subscribing/Unsubscribing** pattern. This approach uses a single WebSocket connection per stream type and manages subscriptions dynamically via the exchange's native subscribe/unsubscribe API.
 
 > **Rate-limit reminder:** Exchanges often impose per-connection limits on control traffic. Identify those caps during onboarding, then serialize SUBSCRIBE/UNSUBSCRIBE flows and pace control frames accordingly so reconnect storms stay under the venue’s thresholds and avoid `StatusPolicyViolation` disconnects.
 > **Retry policy:** Always use exponential backoff for all retry scenarios.
+
+Binance and OKX illustrate the two common orchestration styles:
+- **Channel-scoped managers (Binance).** Each stream type (trades, tickers, order books) has its own `streamManager` with mutex-protected subscription sets and a reconnect loop that replays pending subscriptions before emitting events. This keeps reconnection blast radius isolated per feed but requires coordinating multiple sockets when an exchange enforces per-connection instrument limits (e.g., 1024 topics per WS).
+- **Multiplexed managers (OKX).** A single `wsManager` batches heterogeneous channel arguments (`{channel:"trades", instId:"BTC-USDT"}`) and centralizes resubscription. This works well when the venue, like OKX, multiplexes everything over `ws/v5/public`. New adapters should choose the shape that matches the venue contract but still expose the same `SubscribeRoute` semantics to the dispatcher.
+
+Before adding a new exchange, decide which class applies:
+1. Does the venue require separate domains/ports for public vs private feeds?
+2. Can multiple stream types share a connection? If not, mirror the Binance pattern; if yes, reuse the OKX manager design.
+3. What heartbeats are mandatory? Record ping/pong payloads so `wsManager` wrappers can abstract them (text `ping` for OKX, native control frames for Binance, plus any JSON heartbeat contracts the venue specifies).
+
+## Private Stream & Authentication Patterns
+
+Trading-ready adapters need a private channel plan before `SubmitOrder` ever ships:
+- **Listen-key model (Binance).** `listenKeyEndpoint` issues a session token that expires without periodic REST keepalive (`user_stream_keepalive`). Implement a goroutine that hits keepalive ahead of the TTL, restart the user WS on failure, and surface errors via `Errors()` so operators can alert.
+- **Login challenge model (OKX).** Private WS sessions require an HMAC signature (`OK-ACCESS-SIGN`, timestamp, passphrase) at connect time plus periodic `ping` frames. Re-authenticate on every reconnect and ensure REST order signatures reuse the same timestamp+nonce helper to avoid drift.
+
+When onboarding a new venue, answer the following before writing code:
+1. Which credentials are required for REST vs WS (API key/secret, passphrase, sub-account name)?
+2. Does the exchange multiplex private + public data on one socket or separate them?
+3. How long do session tokens stay valid and how are they refreshed?
+4. Are balance/execution updates separate channels? Decide whether to dedicate distinct handlers (see `binance.handleAccount` vs `okx.handleOrders`).
+5. Can REST orders share the same signing primitive as WS auth? If not, isolate helpers per channel so credentials and timestamps stay consistent.
 
 ## Provider Responsibilities
 - Implement the provider interface with `Start(ctx)` guarding lifecycle and exposing `Events()`/`Errors()` channels backed by pooled `schema.Event` objects.
