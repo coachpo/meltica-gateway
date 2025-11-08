@@ -69,7 +69,7 @@ func (s *StrategyStore) Save(ctx context.Context, snapshot strategystore.Snapsho
 	params := sqlc.UpsertStrategyInstanceParams{
 		InstanceID:         id,
 		StrategyIdentifier: strings.TrimSpace(snapshot.Strategy.Identifier),
-		Version:            strings.TrimSpace(snapshot.Strategy.Version),
+		Tag:                strings.TrimSpace(snapshot.Strategy.Tag),
 		Status:             status,
 		ConfigHash:         configHash,
 		Description:        "",
@@ -127,8 +127,8 @@ func (s *StrategyStore) Load(ctx context.Context) ([]strategystore.Snapshot, err
 		if snapshot.Strategy.Identifier == "" {
 			snapshot.Strategy.Identifier = row.StrategyIdentifier
 		}
-		if snapshot.Strategy.Version == "" {
-			snapshot.Strategy.Version = row.Version
+		if snapshot.Strategy.Tag == "" {
+			snapshot.Strategy.Tag = row.Tag
 		}
 		snapshots = append(snapshots, snapshot)
 	}
@@ -151,7 +151,6 @@ func encodeStrategyMetadata(snapshot strategystore.Snapshot) (strategyMetadata, 
 			Selector:   strings.TrimSpace(snapshot.Strategy.Selector),
 			Tag:        strings.TrimSpace(snapshot.Strategy.Tag),
 			Hash:       strings.TrimSpace(snapshot.Strategy.Hash),
-			Version:    strings.TrimSpace(snapshot.Strategy.Version),
 			Config:     cloneMap(snapshot.Strategy.Config),
 		},
 		Providers:       cloneStringSlice(snapshot.Providers),
@@ -171,7 +170,6 @@ func decodeStrategyMetadata(raw []byte) (strategyMetadata, error) {
 				Selector:   "",
 				Tag:        "",
 				Hash:       "",
-				Version:    "",
 				Config:     make(map[string]any),
 			},
 			Providers:       []string{},

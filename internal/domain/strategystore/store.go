@@ -25,7 +25,6 @@ type Strategy struct {
 	Selector   string
 	Tag        string
 	Hash       string
-	Version    string
 	Config     map[string]any
 }
 

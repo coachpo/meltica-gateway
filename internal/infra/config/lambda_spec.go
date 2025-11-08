@@ -15,7 +15,8 @@ type LambdaStrategySpec struct {
 	Selector   string         `yaml:"-" json:"selector,omitempty"`
 	Tag        string         `yaml:"-" json:"tag,omitempty"`
 	Hash       string         `yaml:"-" json:"hash,omitempty"`
-	Version    string         `yaml:"-" json:"version,omitempty"`
+	// LegacyVersion captures payloads that still send strategy.version so we can map it to Tag.
+	LegacyVersion string `yaml:"-" json:"version,omitempty"`
 }
 
 func (s *LambdaStrategySpec) normalize() {
@@ -29,7 +30,11 @@ func (s *LambdaStrategySpec) normalize() {
 	s.Selector = strings.TrimSpace(s.Selector)
 	s.Tag = strings.TrimSpace(s.Tag)
 	s.Hash = strings.TrimSpace(s.Hash)
-	s.Version = strings.TrimSpace(s.Version)
+	s.LegacyVersion = strings.TrimSpace(s.LegacyVersion)
+	if s.Tag == "" {
+		s.Tag = s.LegacyVersion
+	}
+	s.LegacyVersion = ""
 }
 
 // Normalize applies canonical formatting to the strategy definition.

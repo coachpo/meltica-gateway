@@ -184,7 +184,6 @@ func TestPostgresPersistenceStores(t *testing.T) {
 			Selector:   "momentum-v1",
 			Tag:        "beta",
 			Hash:       "hash-123",
-			Version:    "1.0.0",
 			Config: map[string]any{
 				"window": "24h",
 			},

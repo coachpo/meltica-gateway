@@ -748,8 +748,10 @@ func moduleResolutionPayload(res js.ModuleResolution) map[string]any {
 		"hash": res.Hash,
 		"tag":  res.Tag,
 	}
+	if res.Alias != "" {
+		payload["alias"] = res.Alias
+	}
 	if res.Module != nil {
-		payload["version"] = res.Module.Version
 		payload["file"] = res.Module.Filename
 		payload["path"] = res.Module.Path
 	}
@@ -1811,7 +1813,6 @@ func (s *httpServer) applyContextBackup(ctx context.Context, payload contextBack
 				Selector:   strings.TrimSpace(spec.Strategy.Selector),
 				Tag:        strings.TrimSpace(spec.Strategy.Tag),
 				Hash:       strings.TrimSpace(spec.Strategy.Hash),
-				Version:    strings.TrimSpace(spec.Strategy.Version),
 			},
 			ProviderSymbols: cloneProviderSymbolsMap(spec.ProviderSymbols),
 			Providers:       cloneStringSlice(spec.Providers),
@@ -1912,7 +1913,6 @@ func lambdaSpecFromSnapshot(snapshot runtime.InstanceSnapshot) config.LambdaSpec
 			Selector:   snapshot.Strategy.Selector,
 			Tag:        snapshot.Strategy.Tag,
 			Hash:       snapshot.Strategy.Hash,
-			Version:    snapshot.Strategy.Version,
 		},
 		ProviderSymbols: cloneProviderSymbolsMap(snapshot.ProviderSymbols),
 		Providers:       cloneStringSlice(snapshot.Providers),

@@ -169,6 +169,7 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 			t.Fatalf("resolve delay: %v", err)
 		}
 		hash := resolution.Hash
+		canonicalTag := resolution.Tag
 
 		testCases := []struct {
 			id         string
@@ -176,24 +177,24 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 			expectTag  string
 			expectSel  string
 		}{
-			{
-				id:         "delay-default",
-				identifier: "delay",
-				expectTag:  "latest",
-				expectSel:  "delay",
-			},
-			{
-				id:         "delay-tag",
-				identifier: "delay:v1.0.0",
-				expectTag:  "v1.0.0",
-				expectSel:  "delay:v1.0.0",
-			},
-			{
-				id:         "delay-hash",
-				identifier: "delay@" + hash,
-				expectTag:  "",
-				expectSel:  "delay@" + hash,
-			},
+		{
+			id:         "delay-default",
+			identifier: "delay",
+			expectTag:  canonicalTag,
+			expectSel:  "delay",
+		},
+		{
+			id:         "delay-tag",
+			identifier: "delay:" + canonicalTag,
+			expectTag:  canonicalTag,
+			expectSel:  "delay:" + canonicalTag,
+		},
+		{
+			id:         "delay-hash",
+			identifier: "delay@" + hash,
+			expectTag:  canonicalTag,
+			expectSel:  "delay@" + hash,
+		},
 		}
 
 		for _, tc := range testCases {

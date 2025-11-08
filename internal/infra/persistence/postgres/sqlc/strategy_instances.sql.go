@@ -32,7 +32,7 @@ func (q *Queries) GetStrategyInternalID(ctx context.Context, instanceID string) 
 }
 
 const listStrategyInstances = `-- name: ListStrategyInstances :many
-SELECT id, strategy_identifier, version, status, config_hash, description, metadata, created_at, updated_at, instance_id
+SELECT id, strategy_identifier, tag, status, config_hash, description, metadata, created_at, updated_at, instance_id
 FROM strategy_instances
 ORDER BY instance_id
 `
@@ -49,7 +49,7 @@ func (q *Queries) ListStrategyInstances(ctx context.Context) ([]StrategyInstance
 		if err := rows.Scan(
 			&i.ID,
 			&i.StrategyIdentifier,
-			&i.Version,
+			&i.Tag,
 			&i.Status,
 			&i.ConfigHash,
 			&i.Description,
@@ -72,7 +72,7 @@ const upsertStrategyInstance = `-- name: UpsertStrategyInstance :one
 INSERT INTO strategy_instances (
     instance_id,
     strategy_identifier,
-    version,
+    tag,
     status,
     config_hash,
     description,
@@ -92,19 +92,19 @@ VALUES (
 ON CONFLICT (instance_id) DO
 UPDATE SET
     strategy_identifier = EXCLUDED.strategy_identifier,
-    version = EXCLUDED.version,
+    tag = EXCLUDED.tag,
     status = EXCLUDED.status,
     config_hash = EXCLUDED.config_hash,
     description = EXCLUDED.description,
     metadata = EXCLUDED.metadata,
     updated_at = NOW()
-RETURNING id, strategy_identifier, version, status, config_hash, description, metadata, created_at, updated_at, instance_id
+RETURNING id, strategy_identifier, tag, status, config_hash, description, metadata, created_at, updated_at, instance_id
 `
 
 type UpsertStrategyInstanceParams struct {
 	InstanceID         string `db:"instance_id" json:"instance_id"`
 	StrategyIdentifier string `db:"strategy_identifier" json:"strategy_identifier"`
-	Version            string `db:"version" json:"version"`
+	Tag                string `db:"tag" json:"tag"`
 	Status             string `db:"status" json:"status"`
 	ConfigHash         string `db:"config_hash" json:"config_hash"`
 	Description        string `db:"description" json:"description"`
@@ -115,7 +115,7 @@ func (q *Queries) UpsertStrategyInstance(ctx context.Context, arg UpsertStrategy
 	row := q.db.QueryRow(ctx, upsertStrategyInstance,
 		arg.InstanceID,
 		arg.StrategyIdentifier,
-		arg.Version,
+		arg.Tag,
 		arg.Status,
 		arg.ConfigHash,
 		arg.Description,
@@ -125,7 +125,7 @@ func (q *Queries) UpsertStrategyInstance(ctx context.Context, arg UpsertStrategy
 	err := row.Scan(
 		&i.ID,
 		&i.StrategyIdentifier,
-		&i.Version,
+		&i.Tag,
 		&i.Status,
 		&i.ConfigHash,
 		&i.Description,

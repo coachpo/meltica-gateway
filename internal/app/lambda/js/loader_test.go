@@ -19,7 +19,7 @@ const sampleModule = `
 module.exports = {
   metadata: {
     name: "noop",
-    version: "1.0.0",
+    tag: "v1.0.0",
     displayName: "No-Op",
     description: "No operation strategy",
     config: [],
@@ -98,8 +98,8 @@ func TestLoaderRefreshAndList(t *testing.T) {
 	if modules[0].Metadata.Name != "noop" {
 		t.Fatalf("metadata name mismatch: %s", modules[0].Metadata.Name)
 	}
-	if modules[0].Version != "1.0.0" {
-		t.Fatalf("expected version 1.0.0, got %s", modules[0].Version)
+	if modules[0].Tag != "v1.0.0" {
+		t.Fatalf("expected tag v1.0.0, got %s", modules[0].Tag)
 	}
 	if len(modules[0].Metadata.Events) != 1 || modules[0].Metadata.Events[0] != schema.EventTypeTrade {
 		t.Fatalf("unexpected metadata events: %+v", modules[0].Metadata.Events)
@@ -109,6 +109,31 @@ func TestLoaderRefreshAndList(t *testing.T) {
 	}
 	if len(modules[0].Revisions) != 1 {
 		t.Fatalf("expected one revision summary, got %d", len(modules[0].Revisions))
+	}
+}
+
+func TestLoaderSupportsLegacyVersionMetadata(t *testing.T) {
+	legacyModule := strings.Replace(sampleModule, "tag:", "version:", 1)
+	dir := t.TempDir()
+	modulePath := writeVersionedModule(t, dir, "noop", "v1.0.0", []byte(legacyModule))
+	writeRegistry(t, dir, "noop", "v1.0.0", modulePath)
+
+	loader, err := NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	if err := loader.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	modules := loader.List()
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if modules[0].Tag != "v1.0.0" {
+		t.Fatalf("expected tag fallback, got %s", modules[0].Tag)
+	}
+	if modules[0].Metadata.Tag != "v1.0.0" {
+		t.Fatalf("expected metadata tag fallback, got %s", modules[0].Metadata.Tag)
 	}
 }
 
@@ -474,7 +499,7 @@ func TestWriteWithRegistryCreatesVersionedLayout(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	expectedPath := filepath.Join(dir, "noop", "1.0.0", "noop.js")
+	expectedPath := filepath.Join(dir, "noop", "v1.0.0", "noop.js")
 	if _, err := os.Stat(expectedPath); err != nil {
 		t.Fatalf("expected module written to %s: %v", expectedPath, err)
 	}
@@ -499,14 +524,14 @@ func TestWriteWithRegistryCreatesVersionedLayout(t *testing.T) {
 		if !strings.HasPrefix(hash, "sha256:") {
 			t.Fatalf("unexpected hash %s", hash)
 		}
-		expectedRel := filepath.ToSlash(filepath.Join("noop", "1.0.0", "noop.js"))
+		expectedRel := filepath.ToSlash(filepath.Join("noop", "v1.0.0", "noop.js"))
 		if loc.Path != expectedRel {
 			t.Fatalf("unexpected path %s", loc.Path)
 		}
 		if entry.Tags["latest"] != hash {
 			t.Fatalf("expected latest tag to point to %s, got %s", hash, entry.Tags["latest"])
 		}
-		if entry.Tags["1.0.0"] != hash {
+		if entry.Tags["v1.0.0"] != hash {
 			t.Fatalf("expected version tag mapping, got %+v", entry.Tags)
 		}
 	}

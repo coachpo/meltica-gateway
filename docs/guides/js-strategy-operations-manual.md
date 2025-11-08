@@ -6,7 +6,7 @@ This manual explains how to onboard, run, and maintain JavaScript trading strate
 
 ## 1. Core Concepts
 
-- **Strategy home**: All strategies live under `strategies/<name>/<tag>/<name>.js`. Every version is tracked in `strategies/registry.json`.
+- **Strategy home**: All strategies live under `strategies/<name>/<tag>/<name>.js`. Every tagged revision is tracked in `strategies/registry.json`.
 - **Execution engine**: The gateway loads strategies through the Goja JavaScript runtime. Each module is wrapped in Go code (`internal/app/lambda/js/*`) that exposes helper functions for logging, timing, provider selection, market data, and order submission.
 - **Selectors**: Anywhere you reference a strategy you can use:
   - `name` → whatever hash the registry maps to `tags.latest`.
@@ -41,6 +41,7 @@ Running instances always pin a hash; they only restart when refresh detects that
    module.exports = {
      metadata: {
        name: "my-strategy",
+       tag: "v1.2.0",
        displayName: "My Strategy",
        description: "Short blurb for operators",
        config: [{ name: "threshold", type: "float", default: 0.5 }],
@@ -61,11 +62,12 @@ Running instances always pin a hash; they only restart when refresh detects that
    };
    ```
 
+   - `metadata.tag` is required for registry writes; keep it semver-like (`vMAJOR.MINOR.PATCH`) so operators can reason about rollouts. Legacy `metadata.version` will be removed in a future release—rename it to `tag` when updating older modules.
    - Keep logic deterministic—long blocking calls inside JS pause the Goja goroutine.
    - Use injected helpers for logging, sleeps, provider selection, market state, and order submission.
 
 2. **Register the revision**
-   - Upload via `POST /strategies/modules` with `source`, `tag`, optional `aliases`, and `promoteLatest`.
+   - Upload via `POST /strategies/modules` with `source`, `tag`, optional `aliases`, and `promoteLatest`. The control plane copies the supplied tag into module metadata, so keep them synchronized.
    - Or drop the file into the directory and run `POST /strategies/refresh`.
    - Validation failures return HTTP `422` with a `diagnostics` array (stage, message, line/column, hint).
 
@@ -103,7 +105,7 @@ Running instances always pin a hash; they only restart when refresh detects that
 
 ---
 
-## 5. Versioning Workflows
+## 5. Tagging & Promotion Workflows
 
 ### Promoting a New Revision
 

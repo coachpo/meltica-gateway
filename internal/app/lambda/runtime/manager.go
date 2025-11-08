@@ -849,7 +849,7 @@ func convertModuleUsageSnapshots(usages []RevisionUsageSummary) []js.ModuleUsage
 func (m *Manager) RevisionUsageFor(strategy, hash string) RevisionUsageSummary {
 	spec := config.LambdaSpec{
 		ID:              "",
-		Strategy:        config.LambdaStrategySpec{Identifier: strategy, Config: nil, Selector: "", Tag: "", Hash: hash, Version: ""},
+		Strategy:        config.LambdaStrategySpec{Identifier: strategy, Config: nil, Selector: "", Tag: "", Hash: hash, LegacyVersion: ""},
 		ProviderSymbols: nil,
 		Providers:       nil,
 	}
@@ -1027,7 +1027,6 @@ func (m *Manager) refreshJavaScriptStrategies(ctx context.Context, targets Refre
 		spec.Strategy.Identifier = resolution.Name
 		spec.Strategy.Hash = resolution.Hash
 		spec.Strategy.Tag = resolution.Tag
-		spec.Strategy.Version = resolution.Module.Version
 		spec.Strategy.Selector = canonicalSelector(selector, resolution)
 		updates[id] = spec
 
@@ -1251,14 +1250,12 @@ func (m *Manager) ensureSpec(spec *config.LambdaSpec, allowReplace bool) error {
 		spec.Strategy.Identifier = res.Name
 		spec.Strategy.Hash = res.Hash
 		spec.Strategy.Tag = res.Tag
-		spec.Strategy.Version = res.Module.Version
 		spec.Strategy.Selector = canonicalSelector(rawIdentifier, res)
 	} else {
 		spec.Strategy.Identifier = strings.ToLower(rawIdentifier)
 		spec.Strategy.Selector = spec.Strategy.Identifier
 		spec.Strategy.Hash = ""
 		spec.Strategy.Tag = ""
-		spec.Strategy.Version = ""
 	}
 
 	name := strings.ToLower(strings.TrimSpace(spec.Strategy.Identifier))
@@ -1472,7 +1469,6 @@ type InstanceSummary struct {
 	StrategyIdentifier string                `json:"strategyIdentifier"`
 	StrategyTag        string                `json:"strategyTag,omitempty"`
 	StrategyHash       string                `json:"strategyHash,omitempty"`
-	StrategyVersion    string                `json:"strategyVersion,omitempty"`
 	StrategySelector   string                `json:"strategySelector,omitempty"`
 	Providers          []string              `json:"providers"`
 	AggregatedSymbols  []string              `json:"aggregatedSymbols"`
@@ -1512,12 +1508,12 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 		return InstanceSnapshot{
 			ID: "",
 			Strategy: config.LambdaStrategySpec{
-				Identifier: "",
-				Selector:   "",
-				Tag:        "",
-				Hash:       "",
-				Version:    "",
-				Config:     map[string]any{},
+				Identifier:    "",
+				Selector:      "",
+				Tag:           "",
+				Hash:          "",
+				Config:        map[string]any{},
+				LegacyVersion: "",
 			},
 			Providers:         []string{},
 			ProviderSymbols:   map[string]config.ProviderSymbols{},
@@ -1551,7 +1547,6 @@ func summaryOf(spec config.LambdaSpec, running bool, usage *RevisionUsageSummary
 		StrategyIdentifier: spec.Strategy.Identifier,
 		StrategyTag:        spec.Strategy.Tag,
 		StrategyHash:       spec.Strategy.Hash,
-		StrategyVersion:    spec.Strategy.Version,
 		StrategySelector:   spec.Strategy.Selector,
 		Providers:          providers,
 		AggregatedSymbols:  aggregated,
@@ -1568,12 +1563,12 @@ func snapshotOf(spec config.LambdaSpec, running bool, usage *RevisionUsageSummar
 	return InstanceSnapshot{
 		ID: spec.ID,
 		Strategy: config.LambdaStrategySpec{
-			Identifier: spec.Strategy.Identifier,
-			Config:     strategyConfig,
-			Selector:   spec.Strategy.Selector,
-			Tag:        spec.Strategy.Tag,
-			Hash:       spec.Strategy.Hash,
-			Version:    spec.Strategy.Version,
+			Identifier:    spec.Strategy.Identifier,
+			Config:        strategyConfig,
+			Selector:      spec.Strategy.Selector,
+			Tag:           spec.Strategy.Tag,
+			Hash:          spec.Strategy.Hash,
+			LegacyVersion: spec.Strategy.LegacyVersion,
 		},
 		Providers:         providers,
 		ProviderSymbols:   assignments,
@@ -1686,7 +1681,6 @@ func cloneSpec(spec config.LambdaSpec) config.LambdaSpec {
 	clone.Strategy.Selector = spec.Strategy.Selector
 	clone.Strategy.Tag = spec.Strategy.Tag
 	clone.Strategy.Hash = spec.Strategy.Hash
-	clone.Strategy.Version = spec.Strategy.Version
 	clone.Providers = append([]string(nil), spec.Providers...)
 	clone.ProviderSymbols = cloneProviderSymbols(spec.ProviderSymbols)
 	return clone
@@ -1763,7 +1757,7 @@ func (m *Manager) strategySnapshot(id string) (strategystore.Snapshot, bool) {
 
 	snapshot := strategystore.Snapshot{
 		ID:              spec.ID,
-		Strategy:        strategystore.Strategy{Identifier: spec.Strategy.Identifier, Selector: spec.Strategy.Selector, Tag: spec.Strategy.Tag, Hash: spec.Strategy.Hash, Version: spec.Strategy.Version, Config: copyMap(spec.Strategy.Config)},
+		Strategy:        strategystore.Strategy{Identifier: spec.Strategy.Identifier, Selector: spec.Strategy.Selector, Tag: spec.Strategy.Tag, Hash: spec.Strategy.Hash, Config: copyMap(spec.Strategy.Config)},
 		Providers:       append([]string(nil), spec.Providers...),
 		ProviderSymbols: cloneSymbolMap(spec.ProviderSymbols),
 		Running:         running,
@@ -1832,7 +1826,7 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshot strategystore.Sn
 func specFromSnapshot(snapshot strategystore.Snapshot) config.LambdaSpec {
 	spec := config.LambdaSpec{
 		ID:              snapshot.ID,
-		Strategy:        config.LambdaStrategySpec{Identifier: snapshot.Strategy.Identifier, Config: copyMap(snapshot.Strategy.Config), Selector: snapshot.Strategy.Selector, Tag: snapshot.Strategy.Tag, Hash: snapshot.Strategy.Hash, Version: snapshot.Strategy.Version},
+		Strategy:        config.LambdaStrategySpec{Identifier: snapshot.Strategy.Identifier, Config: copyMap(snapshot.Strategy.Config), Selector: snapshot.Strategy.Selector, Tag: snapshot.Strategy.Tag, Hash: snapshot.Strategy.Hash, LegacyVersion: snapshot.Strategy.LegacyVersion},
 		Providers:       append([]string(nil), snapshot.Providers...),
 		ProviderSymbols: buildProviderSymbols(snapshot.ProviderSymbols),
 	}
@@ -2008,7 +2002,7 @@ func (m *Manager) StrategySource(name string) ([]byte, error) {
 // UpsertStrategy writes or replaces a JavaScript strategy module.
 func (m *Manager) UpsertStrategy(source []byte, opts js.ModuleWriteOptions) (js.ModuleResolution, error) {
 	if m == nil || m.jsLoader == nil {
-		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, fmt.Errorf("strategy loader unavailable")
+		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, fmt.Errorf("strategy loader unavailable")
 	}
 	resolution, err := m.jsLoader.Store(source, opts)
 	if err == nil {
@@ -2016,7 +2010,7 @@ func (m *Manager) UpsertStrategy(source []byte, opts js.ModuleWriteOptions) (js.
 	}
 	m.recordStrategyValidationFailure(err)
 	if !errors.Is(err, js.ErrRegistryUnavailable) {
-		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, fmt.Errorf("strategy upsert: %w", err)
+		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, fmt.Errorf("strategy upsert: %w", err)
 	}
 	filename := opts.Filename
 	if strings.TrimSpace(filename) == "" {
@@ -2024,9 +2018,9 @@ func (m *Manager) UpsertStrategy(source []byte, opts js.ModuleWriteOptions) (js.
 	}
 	if err := m.jsLoader.Write(filename, source); err != nil {
 		m.recordStrategyValidationFailure(err)
-		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, fmt.Errorf("strategy upsert %q: %w", filename, err)
+		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, fmt.Errorf("strategy upsert %q: %w", filename, err)
 	}
-	return js.ModuleResolution{Name: "", Hash: "", Tag: "", Module: nil}, nil
+	return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, nil
 }
 
 // RemoveStrategy deletes the JavaScript strategy file by name.

@@ -98,7 +98,7 @@ type ProviderRoute struct {
 type StrategyInstance struct {
 	ID                 pgtype.UUID        `db:"id" json:"id"`
 	StrategyIdentifier string             `db:"strategy_identifier" json:"strategy_identifier"`
-	Version            string             `db:"version" json:"version"`
+	Tag                string             `db:"tag" json:"tag"`
 	Status             string             `db:"status" json:"status"`
 	ConfigHash         string             `db:"config_hash" json:"config_hash"`
 	Description        string             `db:"description" json:"description"`

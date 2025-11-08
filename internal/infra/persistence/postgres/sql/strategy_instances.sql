@@ -2,7 +2,7 @@
 INSERT INTO strategy_instances (
     instance_id,
     strategy_identifier,
-    version,
+    tag,
     status,
     config_hash,
     description,
@@ -12,7 +12,7 @@ INSERT INTO strategy_instances (
 VALUES (
     @instance_id::text,
     @strategy_identifier::text,
-    @version::text,
+    @tag::text,
     @status::text,
     @config_hash::text,
     COALESCE(@description::text, ''),
@@ -22,7 +22,7 @@ VALUES (
 ON CONFLICT (instance_id) DO
 UPDATE SET
     strategy_identifier = EXCLUDED.strategy_identifier,
-    version = EXCLUDED.version,
+    tag = EXCLUDED.tag,
     status = EXCLUDED.status,
     config_hash = EXCLUDED.config_hash,
     description = EXCLUDED.description,

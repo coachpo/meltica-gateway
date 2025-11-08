@@ -80,7 +80,7 @@ type Module struct {
 	Filename string
 	Path     string
 	Hash     string
-	Version  string
+	Tag      string
 	Tags     []string
 	Metadata strategies.Metadata
 	Program  *goja.Program
@@ -92,6 +92,7 @@ type ModuleResolution struct {
 	Name   string
 	Hash   string
 	Tag    string
+	Alias  string
 	Module *Module
 }
 
@@ -109,7 +110,7 @@ type ModuleSummary struct {
 	File       string              `json:"file"`
 	Path       string              `json:"path"`
 	Hash       string              `json:"hash"`
-	Version    string              `json:"version"`
+	Tag        string              `json:"tag"`
 	Tags       []string            `json:"tags"`
 	TagAliases map[string]string   `json:"tagAliases,omitempty"`
 	Revisions  []ModuleRevision    `json:"revisions,omitempty"`
@@ -121,9 +122,9 @@ type ModuleSummary struct {
 // ModuleRevision describes a specific strategy revision available to the loader.
 type ModuleRevision struct {
 	Hash    string `json:"hash"`
-	Tag     string `json:"tag,omitempty"`
+	Alias   string `json:"alias,omitempty"`
 	Path    string `json:"path"`
-	Version string `json:"version,omitempty"`
+	Tag     string `json:"tag,omitempty"`
 	Size    int64  `json:"size"`
 	Retired bool   `json:"retired,omitempty"`
 }
@@ -243,10 +244,10 @@ func (l *Loader) refreshFromRegistry(ctx context.Context, reg registry) error {
 				return fmt.Errorf("strategy loader: module hash mismatch for %s (%s != %s)", modulePath, module.Hash, normalizedHash)
 			}
 			module.Tags = collectTagsForHash(entry.Tags, loc.Tag, normalizedHash)
-			if module.Metadata.Version == "" {
-				module.Metadata.Version = loc.Tag
+			if module.Metadata.Tag == "" {
+				module.Metadata.Tag = loc.Tag
 			}
-			module.Version = module.Metadata.Version
+			module.Tag = module.Metadata.Tag
 			hashToModule[normalizedHash] = module
 			nextFiles[module.Path] = module
 			nextByHash[normalizedHash] = module
@@ -314,10 +315,10 @@ func (l *Loader) refreshLegacy(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("strategy loader: load module %q: %w", fullPath, err)
 		}
-		if module.Metadata.Version == "" {
-			module.Metadata.Version = "0.0.0"
+		if module.Metadata.Tag == "" {
+			module.Metadata.Tag = "0.0.0"
 		}
-		module.Version = module.Metadata.Version
+		module.Tag = module.Metadata.Tag
 		module.Tags = nil
 
 		lowerName := strings.ToLower(module.Name)
@@ -368,9 +369,9 @@ func (l *Loader) ListWithUsage(usages []ModuleUsageSnapshot) []ModuleSummary {
 			for hash, revModule := range revisions {
 				revision := ModuleRevision{
 					Hash:    hash,
-					Tag:     primaryTagForHash(l.tags[name], hash),
+					Alias:   primaryTagForHash(l.tags[name], hash),
 					Path:    revModule.Path,
-					Version: revModule.Version,
+					Tag:     revModule.Tag,
 					Size:    revModule.Size,
 					Retired: false,
 				}
@@ -382,6 +383,9 @@ func (l *Loader) ListWithUsage(usages []ModuleUsageSnapshot) []ModuleSummary {
 			sort.Slice(list, func(i, j int) bool {
 				if list[i].Tag != "" && list[j].Tag != "" && list[i].Tag != list[j].Tag {
 					return list[i].Tag < list[j].Tag
+				}
+				if list[i].Alias != "" && list[j].Alias != "" && list[i].Alias != list[j].Alias {
+					return list[i].Alias < list[j].Alias
 				}
 				return list[i].Hash < list[j].Hash
 			})
@@ -426,9 +430,9 @@ func (l *Loader) ModuleWithUsage(name string, usages []ModuleUsageSnapshot) (Mod
 		for hash, revModule := range revisions {
 			revision := ModuleRevision{
 				Hash:    hash,
-				Tag:     primaryTagForHash(l.tags[normalized], hash),
+				Alias:   primaryTagForHash(l.tags[normalized], hash),
 				Path:    revModule.Path,
-				Version: revModule.Version,
+				Tag:     revModule.Tag,
 				Size:    revModule.Size,
 				Retired: false,
 			}
@@ -440,6 +444,9 @@ func (l *Loader) ModuleWithUsage(name string, usages []ModuleUsageSnapshot) (Mod
 		sort.Slice(list, func(i, j int) bool {
 			if list[i].Tag != "" && list[j].Tag != "" && list[i].Tag != list[j].Tag {
 				return list[i].Tag < list[j].Tag
+			}
+			if list[i].Alias != "" && list[j].Alias != "" && list[i].Alias != list[j].Alias {
+				return list[i].Alias < list[j].Alias
 			}
 			return list[i].Hash < list[j].Hash
 		})
@@ -507,10 +514,16 @@ func (l *Loader) ResolveReference(identifier string) (ModuleResolution, error) {
 		if module == nil {
 			return empty, fmt.Errorf("strategy loader: hash %q not found", hash)
 		}
+		alias := pickDefaultTag(module)
+		canonical := module.Tag
+		if canonical == "" {
+			canonical = alias
+		}
 		resolution := ModuleResolution{
 			Name:   module.Name,
 			Hash:   hash,
-			Tag:    pickDefaultTag(module),
+			Tag:    canonical,
+			Alias:  alias,
 			Module: module,
 		}
 		l.storeResolutionLocked(key, resolution)
@@ -540,7 +553,7 @@ func (l *Loader) ResolveReference(identifier string) (ModuleResolution, error) {
 
 	var module *Module
 	var resolvedHash string
-	resolvedTag := tag
+	resolvedAlias := tag
 
 	switch {
 	case hash != "":
@@ -553,8 +566,8 @@ func (l *Loader) ResolveReference(identifier string) (ModuleResolution, error) {
 			return empty, fmt.Errorf("strategy loader: hash %q belongs to %s", normalized, module.Name)
 		}
 		resolvedHash = normalized
-		if resolvedTag == "" {
-			resolvedTag = pickDefaultTag(module)
+		if resolvedAlias == "" {
+			resolvedAlias = pickDefaultTag(module)
 		}
 	case tag != "":
 		var err error
@@ -562,24 +575,29 @@ func (l *Loader) ResolveReference(identifier string) (ModuleResolution, error) {
 		if err != nil {
 			return empty, err
 		}
-		resolvedTag = tag
+		resolvedAlias = tag
 	default:
 		module = l.byName[name]
 		if module == nil {
 			return empty, ErrModuleNotFound
 		}
 		resolvedHash = module.Hash
-		resolvedTag = pickDefaultTag(module)
+		resolvedAlias = pickDefaultTag(module)
 	}
 
 	if module == nil {
 		return empty, ErrModuleNotFound
 	}
 
+	canonical := module.Tag
+	if canonical == "" {
+		canonical = resolvedAlias
+	}
 	resolution := ModuleResolution{
 		Name:   module.Name,
 		Hash:   resolvedHash,
-		Tag:    resolvedTag,
+		Tag:    canonical,
+		Alias:  resolvedAlias,
 		Module: module,
 	}
 	l.storeResolutionLocked(key, resolution)
@@ -874,7 +892,7 @@ func (m *Module) toSummary(name string) ModuleSummary {
 		File:       m.Filename,
 		Path:       m.Path,
 		Hash:       m.Hash,
-		Version:    m.Version,
+		Tag:        m.Tag,
 		Tags:       append([]string(nil), m.Tags...),
 		TagAliases: nil,
 		Revisions:  nil,
@@ -917,15 +935,15 @@ func compileModule(fullPath string, info fs.FileInfo) (*Module, error) {
 		Filename: filepath.Base(fullPath),
 		Path:     fullPath,
 		Hash:     fmt.Sprintf("sha256:%s", hash),
-		Version:  "",
+		Tag:      "",
 		Tags:     nil,
 		Metadata: meta,
 		Program:  program,
 		Size:     info.Size(),
 	}
 	module.Metadata.Name = module.Name
-	if module.Metadata.Version != "" {
-		module.Version = module.Metadata.Version
+	if module.Metadata.Tag != "" {
+		module.Tag = module.Metadata.Tag
 	}
 	return module, nil
 }
@@ -988,7 +1006,12 @@ func normalizeMetadata(meta *strategies.Metadata) {
 		return
 	}
 	meta.Name = strings.ToLower(strings.TrimSpace(meta.Name))
-	meta.Version = strings.TrimSpace(meta.Version)
+	meta.Tag = strings.TrimSpace(meta.Tag)
+	meta.LegacyVersion = strings.TrimSpace(meta.LegacyVersion)
+	if meta.Tag == "" {
+		meta.Tag = meta.LegacyVersion
+	}
+	meta.LegacyVersion = ""
 	meta.DisplayName = strings.TrimSpace(meta.DisplayName)
 	meta.Description = strings.TrimSpace(meta.Description)
 
@@ -1106,7 +1129,7 @@ func (l *Loader) writeModuleWithRegistry(source []byte, opts ModuleWriteOptions,
 
 	tag := strings.TrimSpace(opts.Tag)
 	if tag == "" {
-		tag = strings.TrimSpace(module.Metadata.Version)
+		tag = strings.TrimSpace(module.Metadata.Tag)
 	}
 	if tag == "" {
 		_ = os.Remove(tempPath)
@@ -1191,13 +1214,14 @@ func (l *Loader) writeModuleWithRegistry(source []byte, opts ModuleWriteOptions,
 
 	module.Path = destPath
 	module.Filename = fmt.Sprintf("%s.js", name)
-	module.Metadata.Version = tag
-	module.Version = tag
+	module.Metadata.Tag = tag
+	module.Tag = tag
 
 	return ModuleResolution{
 		Name:   name,
 		Hash:   hash,
 		Tag:    tag,
+		Alias:  tag,
 		Module: module,
 	}, nil
 }
@@ -1590,8 +1614,8 @@ func pickDefaultTag(module *Module) string {
 			return tag
 		}
 	}
-	if module.Version != "" {
-		return module.Version
+	if module.Tag != "" {
+		return module.Tag
 	}
 	if len(module.Tags) > 0 {
 		return module.Tags[0]
