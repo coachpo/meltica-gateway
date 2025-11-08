@@ -65,3 +65,4 @@ node_modules
 !internal/infra/persistence/postgres/sql/**
 
 !sqlc.yaml
+!**/*.py
