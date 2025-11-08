@@ -8,8 +8,13 @@ import (
 	"sync"
 	"time"
 
+	json "github.com/goccy/go-json"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/infra/pool"
+	"github.com/coachpo/meltica/internal/infra/telemetry"
 )
 
 // Publisher is a helper for creating and emitting canonical events.
@@ -21,6 +26,12 @@ type Publisher struct {
 	seqMu        sync.Mutex
 	seq          map[string]uint64
 }
+
+var (
+	extensionMetricsOnce   sync.Once
+	extensionEventsCounter metric.Int64Counter
+	extensionPayloadBytes  metric.Int64Histogram
+)
 
 // NewPublisher creates a new shared event publisher.
 func NewPublisher(providerName string, events chan<- *schema.Event, pools *pool.PoolManager, clock func() time.Time) *Publisher {
@@ -114,6 +125,7 @@ func (p *Publisher) PublishExtension(ctx context.Context, symbol string, payload
 	if evt == nil {
 		return
 	}
+	p.recordExtensionTelemetry(ctx, symbol, payload)
 	p.emitEvent(ctx, evt)
 }
 
@@ -156,4 +168,58 @@ func (p *Publisher) nextSeq(evtType schema.EventType, symbol string) uint64 {
 	defer p.seqMu.Unlock()
 	p.seq[key]++
 	return p.seq[key]
+}
+
+func (p *Publisher) recordExtensionTelemetry(ctx context.Context, symbol string, payload any) {
+	ensureExtensionMetrics()
+	if extensionEventsCounter == nil {
+		return
+	}
+	ctx = ensurePublisherContext(ctx)
+	attrs := telemetry.EventAttributes(telemetry.Environment(), telemetry.EventTypeExtension, p.providerName, symbol)
+	extensionEventsCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+	if extensionPayloadBytes == nil {
+		return
+	}
+	size, err := extensionPayloadSize(payload)
+	if err != nil {
+		return
+	}
+	extensionPayloadBytes.Record(ctx, int64(size), metric.WithAttributes(attrs...))
+}
+
+func ensureExtensionMetrics() {
+	extensionMetricsOnce.Do(func() {
+		meter := otel.Meter("adapter.publisher")
+		extensionEventsCounter, _ = meter.Int64Counter("adapter.extension.events",
+			metric.WithDescription("Number of extension events emitted by adapters"),
+			metric.WithUnit("{event}"))
+		extensionPayloadBytes, _ = meter.Int64Histogram("adapter.extension.payload_bytes",
+			metric.WithDescription("Size of extension event payloads"),
+			metric.WithUnit("By"))
+	})
+}
+
+func ensurePublisherContext(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
+
+func extensionPayloadSize(payload any) (int, error) {
+	switch v := payload.(type) {
+	case nil:
+		return 0, nil
+	case []byte:
+		return len(v), nil
+	case json.RawMessage:
+		return len(v), nil
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return 0, err
+		}
+		return len(data), nil
+	}
 }

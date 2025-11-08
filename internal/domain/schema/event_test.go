@@ -64,6 +64,9 @@ func TestEventRouteMappings(t *testing.T) {
 		{route: RouteTypeTicker, event: EventTypeTicker},
 		{route: RouteTypeExecutionReport, event: EventTypeExecReport},
 		{route: RouteTypeKlineSummary, event: EventTypeKlineSummary},
+		{route: RouteTypeInstrumentUpdate, event: EventTypeInstrumentUpdate},
+		{route: RouteTypeRiskControl, event: EventTypeRiskControl},
+		{route: RouteTypeExtension, event: ExtensionEventType},
 	}
 
 	for _, pair := range pairs {

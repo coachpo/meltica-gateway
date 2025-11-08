@@ -108,17 +108,17 @@ func NewDurableBus(inner Bus, store outboxstore.Store, opts ...DurableOption) Bu
 		return inner
 	}
 	durable := &DurableBus{
-		inner:           inner,
-		store:           store,
-		logger:          log.New(os.Stdout, "eventbus/durable ", log.LstdFlags|log.Lmicroseconds),
-		replayInterval:  defaultReplayInterval,
-		replayBatchSize: defaultReplayBatchSize,
-		replayDisabled:  false,
-		pools:           nil,
+		inner:                    inner,
+		store:                    store,
+		logger:                   log.New(os.Stdout, "eventbus/durable ", log.LstdFlags|log.Lmicroseconds),
+		replayInterval:           defaultReplayInterval,
+		replayBatchSize:          defaultReplayBatchSize,
+		replayDisabled:           false,
+		pools:                    nil,
 		extensionPayloadCapBytes: DefaultExtensionPayloadCapBytes,
-		replayCtx:       nil,
-		replayCancel:    nil,
-		replayWG:        sync.WaitGroup{},
+		replayCtx:                nil,
+		replayCancel:             nil,
+		replayWG:                 sync.WaitGroup{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -151,10 +151,12 @@ func (b *DurableBus) Publish(ctx context.Context, evt *schema.Event) error {
 		return nil
 	}
 	if err := enforceExtensionPayloadCap(evt, b.extensionPayloadCapBytes); err != nil {
+		b.recycle(evt)
 		return err
 	}
 	if b.store == nil {
 		if b.inner == nil {
+			b.recycle(evt)
 			return fmt.Errorf("durable bus: inner bus unavailable")
 		}
 		if err := b.inner.Publish(ctx, evt); err != nil {
@@ -164,6 +166,7 @@ func (b *DurableBus) Publish(ctx context.Context, evt *schema.Event) error {
 	}
 	recordID, err := b.enqueueEvent(ctx, evt)
 	if err != nil {
+		b.recycle(evt)
 		return err
 	}
 	if err := b.inner.Publish(ctx, evt); err != nil {
@@ -260,6 +263,15 @@ func (b *DurableBus) replayPendingEvents() {
 		if err := b.store.MarkDelivered(ctx, record.ID); err != nil {
 			b.logf("outbox replay mark delivered failed (id=%d): %v", record.ID, err)
 		}
+	}
+}
+
+func (b *DurableBus) recycle(evt *schema.Event) {
+	if b == nil || evt == nil {
+		return
+	}
+	if b.pools != nil {
+		b.pools.ReturnEventInst(evt)
 	}
 }
 

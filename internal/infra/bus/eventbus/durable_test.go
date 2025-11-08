@@ -258,7 +258,7 @@ func TestDurableBusPublishExtensionPayloadOverCap(t *testing.T) {
 		EventID:  "ext-big",
 		Provider: "test",
 		Type:     schema.ExtensionEventType,
-		Payload: map[string]any{"data": strings.Repeat("x", 128)},
+		Payload:  map[string]any{"data": strings.Repeat("x", 128)},
 	}
 	if err := bus.Publish(context.Background(), tooLarge); err == nil {
 		t.Fatal("expected error for extension payload exceeding cap")
@@ -268,5 +268,40 @@ func TestDurableBusPublishExtensionPayloadOverCap(t *testing.T) {
 	}
 	if len(inner.published) != 0 {
 		t.Fatalf("expected no inner publishes, got %d", len(inner.published))
+	}
+}
+
+func TestDurableBusPublishExtensionPayloadOverCapReturnsEventToPool(t *testing.T) {
+	poolMgr := pool.NewPoolManager()
+	if err := poolMgr.RegisterPool("Event", 1, 0, func() any { return new(schema.Event) }); err != nil {
+		t.Fatalf("register pool: %v", err)
+	}
+	inner := &stubBus{}
+	store := &fakeOutboxStore{}
+	bus := NewDurableBus(inner, store, WithReplayDisabled(), WithDurablePoolManager(poolMgr), WithExtensionPayloadCapBytes(16))
+	ctx := context.Background()
+	evt, err := poolMgr.BorrowEventInst(ctx)
+	if err != nil {
+		t.Fatalf("borrow event: %v", err)
+	}
+	evt.EventID = "ext-leak"
+	evt.Provider = "test"
+	evt.Symbol = "BTC-USDT"
+	evt.Type = schema.ExtensionEventType
+	evt.Payload = map[string]any{"data": strings.Repeat("x", 128)}
+
+	if err := bus.Publish(ctx, evt); err == nil {
+		t.Fatal("expected error for extension payload exceeding cap")
+	}
+	reclaimed, ok, err := poolMgr.TryBorrowEventInst()
+	if err != nil {
+		t.Fatalf("try borrow event: %v", err)
+	}
+	if !ok || reclaimed == nil {
+		t.Fatalf("expected event to be returned to pool, ok=%t reclaimed=%v", ok, reclaimed)
+	}
+	poolMgr.ReturnEventInst(reclaimed)
+	if err := poolMgr.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown pool: %v", err)
 	}
 }

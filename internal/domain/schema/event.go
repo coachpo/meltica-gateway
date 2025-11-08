@@ -29,6 +29,8 @@ const (
 	RouteTypeInstrumentUpdate RouteType = "INSTRUMENT.UPDATE"
 	// RouteTypeRiskControl designates risk control notifications emitted from runtime safeguards.
 	RouteTypeRiskControl RouteType = "RISK.CONTROL"
+	// RouteTypeExtension designates custom extension payload passthrough streams.
+	RouteTypeExtension RouteType = "EXTENSION.EVENT"
 )
 
 var (
@@ -41,6 +43,7 @@ var (
 		RouteTypeKlineSummary:      EventTypeKlineSummary,
 		RouteTypeInstrumentUpdate:  EventTypeInstrumentUpdate,
 		RouteTypeRiskControl:       EventTypeRiskControl,
+		RouteTypeExtension:         ExtensionEventType,
 	}
 	eventTypeToRoutes = map[EventType]RouteType{
 		EventTypeBalanceUpdate:    RouteTypeAccountBalance,
@@ -51,6 +54,7 @@ var (
 		EventTypeKlineSummary:     RouteTypeKlineSummary,
 		EventTypeInstrumentUpdate: RouteTypeInstrumentUpdate,
 		EventTypeRiskControl:      RouteTypeRiskControl,
+		ExtensionEventType:        RouteTypeExtension,
 	}
 	routesRequiringAuthentication = map[RouteType]struct{}{
 		RouteTypeAccountBalance:  {},
