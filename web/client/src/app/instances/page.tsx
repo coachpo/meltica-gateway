@@ -295,6 +295,9 @@ export default function InstancesPage() {
   const [formMode, setFormMode] = useState<'json' | 'guided'>(
     () => persistedDialogState?.formMode ?? 'guided',
   );
+  const [lastEditedMode, setLastEditedMode] = useState<'json' | 'guided'>(
+    () => persistedDialogState?.formMode ?? 'guided',
+  );
   const [instanceJsonDraft, setInstanceJsonDraft] = useState<string>(
     () => persistedDialogState?.draft ?? DEFAULT_INSTANCE_JSON,
   );
@@ -319,6 +322,12 @@ export default function InstancesPage() {
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [historyDialogInstance, setHistoryDialogInstance] = useState<InstanceSummary | null>(null);
   const [historyTab, setHistoryTab] = useState<HistoryTab>('orders');
+  const markGuidedDirty = useCallback(() => {
+    setLastEditedMode('guided');
+  }, []);
+  const markJsonDirty = useCallback(() => {
+    setLastEditedMode('json');
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -384,7 +393,9 @@ export default function InstancesPage() {
         : 'text-xs text-muted-foreground';
 
   const submitDisabled =
-    dialogSaving || instanceLoading || (formMode === 'json' && jsonDiagnostics.status !== 'success');
+    dialogSaving ||
+    instanceLoading ||
+    (lastEditedMode === 'json' && jsonDiagnostics.status !== 'success');
 
   const ordersHistoryQuery = useInstanceOrdersQuery(
     historyDialogInstance?.id,
@@ -484,6 +495,7 @@ export default function InstancesPage() {
     setDialogSaving(false);
     setInstanceLoading(false);
     setFormMode('guided');
+    setLastEditedMode('guided');
     setInstanceJsonDraft(DEFAULT_INSTANCE_JSON);
   };
 
@@ -782,13 +794,19 @@ export default function InstancesPage() {
   }, [loadProviderDetail]);
 
   const toggleProviderSelection = (providerName: string, checked: boolean) => {
+    let changed = false;
     setSelectedProviders((prev) => {
       if (checked) {
         if (prev.includes(providerName)) {
           return prev;
         }
+        changed = true;
         return [...prev, providerName];
       }
+      if (!prev.includes(providerName)) {
+        return prev;
+      }
+      changed = true;
       return prev.filter((name) => name !== providerName);
     });
     if (checked) {
@@ -815,17 +833,22 @@ export default function InstancesPage() {
         return next;
       });
     }
+    if (changed) {
+      markGuidedDirty();
+    }
   };
 
   const handleConfigChange = (field: string, value: string) => {
     setConfigValues((prev) => ({ ...prev, [field]: value }));
     setFormError(null);
+    markGuidedDirty();
   };
 
   const handleSubmit = async () => {
+    const submissionMode = lastEditedMode ?? formMode;
     let payload: InstanceSpec | undefined;
 
-    if (formMode === 'json') {
+    if (submissionMode === 'json') {
       const result = parseInstanceSpecDraft(instanceJsonDraft, { strict: true });
       if (!result.spec) {
         setFormError(result.error ?? 'Invalid instance specification');
@@ -1056,6 +1079,7 @@ export default function InstancesPage() {
       populateFormFromSpec(instance, { setPrefilled: true });
       setInstanceJsonDraft(formatInstanceSpec(instance));
       setFormMode('json');
+      setLastEditedMode('json');
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to load instance');
       setPrefilledConfig(false);
@@ -1370,6 +1394,7 @@ export default function InstancesPage() {
                           onChange={(value) => {
                             setInstanceJsonDraft(value);
                             setFormError(null);
+                            markJsonDirty();
                           }}
                           mode="json"
                           allowHorizontalScroll
@@ -1414,6 +1439,7 @@ export default function InstancesPage() {
                       onChange={(e) => {
                         setFormError(null);
                         setNewInstance({ ...newInstance, id: e.target.value });
+                        markGuidedDirty();
                       }}
                       placeholder="my-strategy-instance"
                       disabled={dialogMode === 'edit'}
@@ -1443,6 +1469,7 @@ export default function InstancesPage() {
                         ) {
                           setStrategySelectorInput(value);
                         }
+                        markGuidedDirty();
                       }}
                     >
                       <SelectTrigger disabled={dialogMode === 'edit'}>
@@ -1473,6 +1500,7 @@ export default function InstancesPage() {
                             }));
                           }
                         }
+                        markGuidedDirty();
                       }}
                       placeholder="grid, grid:stable, or grid@sha256:abc123"
                       disabled={dialogMode === 'edit' && instanceLoading}
@@ -1651,12 +1679,20 @@ export default function InstancesPage() {
                                                       onChange={(event) => {
                                                         const { checked: symbolChecked } = event.target;
                                                         setFormError(null);
+                                                        let changed = false;
                                                         setProviderSymbols((prev) => {
                                                           const current = new Set(prev[providerName] ?? []);
                                                           if (symbolChecked) {
+                                                            if (current.has(symbol)) {
+                                                              return prev;
+                                                            }
                                                             current.add(symbol);
-                                                          } else {
+                                                            changed = true;
+                                                          } else if (current.has(symbol)) {
                                                             current.delete(symbol);
+                                                            changed = true;
+                                                          } else {
+                                                            return prev;
                                                           }
                                                           return {
                                                             ...prev,
@@ -1665,6 +1701,9 @@ export default function InstancesPage() {
                                                             ),
                                                           };
                                                         });
+                                                        if (changed) {
+                                                          markGuidedDirty();
+                                                        }
                                                       }}
                                                     />
                                                     <span>{symbol}</span>
