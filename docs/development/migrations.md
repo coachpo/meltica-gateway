@@ -22,6 +22,12 @@ export DATABASE_URL="postgresql://postgres:root@localhost:5432/meltica?sslmode=d
 make migrate
 ```
 
+### Gateway-assisted migrations
+
+- The compiled `gateway` binary automatically calls `runDatabaseMigrations` on startup whenever `database.runMigrations` is `true` in the loaded config (`config/app.yaml` and variants).
+- Those migrations are **not embedded** in the binary. The SQL files under `db/migrations/` (or the directory pointed to by `-path`) must be available on disk next to the binary so the bootstrap step can load them.
+- If you only have the gateway executable, you can still migrate by starting it once with the desired config (it exits or continues running afterward), or by disabling the flag and relying on the `cmd/migrate` CLI for manual control.
+
 ## Creating New Migrations
 
 Generate new migration files with the CLI once `golang-migrate` is installed:
