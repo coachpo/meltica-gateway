@@ -81,12 +81,11 @@ type RefreshOptions = {
 };
 
 type ModuleFormState = {
-  name: string;
-  filename: string;
-  tag: string;
-  aliases: string;
-  source: string;
-  promoteLatest: boolean;
+	name: string;
+	filename: string;
+	tag: string;
+	source: string;
+	promoteLatest: boolean;
 };
 
 const STRATEGY_DOCS_URL =
@@ -123,12 +122,11 @@ const STRATEGY_SOURCE_EDITOR_CONTAINER_CLASS =
   'relative w-full rounded-md border h-[320px] max-h-[60vh] lg:h-[440px]';
 
 const defaultFormState: ModuleFormState = {
-  name: '',
-  filename: '',
-  tag: '',
-  aliases: '',
-  source: '',
-  promoteLatest: true,
+	name: '',
+	filename: '',
+	tag: '',
+	source: '',
+	promoteLatest: true,
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -256,11 +254,11 @@ function friendlyDeletionMessage(message: string): string {
 
 function friendlySaveError(message: string): string {
   const lower = message.toLowerCase();
-  if (lower.includes('metadata version required')) {
-    return 'Version tag is required. Provide a tag (for example v1.2.0) or include metadata.version in the module source.';
+  if (lower.includes('metadata version required') || lower.includes('metadata tag required')) {
+    return 'Strategy tag is required. Provide a tag (for example v1.2.0) or include metadata.tag in the module source.';
   }
   if (lower.includes('tag') && lower.includes('already exists')) {
-    return 'Tag already exists for this strategy. Choose a new version tag or retire the conflicting revision first.';
+    return 'Tag already exists for this strategy. Choose a new tag or retire the conflicting revision first.';
   }
   return message;
 }
@@ -337,14 +335,6 @@ export default function StrategyModulesPage() {
     revision: StrategyModuleRevision;
   } | null>(null);
   const [revisionActionBusy, setRevisionActionBusy] = useState<string | null>(null);
-  const [aliasDialogTarget, setAliasDialogTarget] = useState<{
-    module: StrategyModuleSummary;
-    revision: StrategyModuleRevision;
-  } | null>(null);
-  const [aliasValue, setAliasValue] = useState('');
-  const [aliasPromoteLatest, setAliasPromoteLatest] = useState(false);
-  const [aliasError, setAliasError] = useState<string | null>(null);
-  const [aliasProcessing, setAliasProcessing] = useState(false);
   const [promoteTarget, setPromoteTarget] = useState<{
     module: StrategyModuleSummary;
     revision: StrategyModuleRevision;
@@ -414,6 +404,7 @@ export default function StrategyModulesPage() {
   const sourceEditorReadOnly = formPrefillLoading || formProcessing;
 
   const detailMetadata = detailModule?.metadata;
+  const detailModuleTag = detailModule?.tag ?? null;
   const detailDescription =
     typeof detailMetadata?.description === 'string' && detailMetadata.description.trim().length > 0
       ? detailMetadata.description
@@ -739,23 +730,13 @@ export default function StrategyModulesPage() {
     setUploadedFileInfo(null);
     setFormProcessing(false);
     setFormPrefillLoading(true);
-    const aliasKeys = Object.keys(module.tagAliases ?? {}).filter((tag) => {
-      if (tag === 'latest') {
-        return false;
-      }
-      if (module.version && tag === module.version) {
-        return false;
-      }
-      return true;
-    });
+    const canonicalTag = module.tag ?? null;
     setFormData({
       name: module.name,
       filename: module.file,
-      tag: module.version ?? '',
-      aliases: aliasKeys.join(', '),
+      tag: canonicalTag ?? '',
       source: '',
-      promoteLatest:
-        (module.tagAliases?.latest ?? module.hash) === module.hash || !module.tagAliases?.latest,
+      promoteLatest: true,
     });
     setFormOpen(true);
     try {
@@ -819,7 +800,7 @@ export default function StrategyModulesPage() {
     }
     const trimmedTag = formData.tag.trim();
     if (!trimmedTag) {
-      setFormError('Version tag is required. Provide a semantic version such as v1.2.0.');
+      setFormError('Tag is required. Provide a semantic version such as v1.2.0.');
       return false;
     }
     const trimmedFilename = formData.filename.trim();
@@ -845,10 +826,6 @@ export default function StrategyModulesPage() {
     const trimmedName = formData.name.trim();
     const trimmedFilename = formData.filename.trim();
     const trimmedTag = formData.tag.trim();
-    const aliases = formData.aliases
-      .split(',')
-      .map((alias) => alias.trim())
-      .filter((alias) => alias.length > 0);
     let finalSource = formData.source;
     if (formMode === 'create' && trimmedName) {
       const metadataNameRegex = /(metadata\s*:\s*{\s*name\s*:\s*['"])([^'"]*)(['"])/;
@@ -861,7 +838,6 @@ export default function StrategyModulesPage() {
       ...(trimmedName ? { name: trimmedName } : {}),
       ...(trimmedFilename ? { filename: trimmedFilename } : {}),
       ...(trimmedTag ? { tag: trimmedTag } : {}),
-      ...(aliases.length > 0 ? { aliases } : {}),
     };
     setFormProcessing(true);
     try {
@@ -1019,11 +995,9 @@ export default function StrategyModulesPage() {
   ) => `${module.name}:${revision.hash || revision.tag || 'latest'}:${action}`;
 
   const revisionLabel = (revision: StrategyModuleRevision) => {
-    if (revision.tag) {
-      return revision.tag;
-    }
-    if (revision.version) {
-      return revision.version;
+    const tag = revision.tag?.trim();
+    if (tag) {
+      return tag;
     }
     if (revision.hash) {
       return `${revision.hash.slice(0, 12)}…`;
@@ -1083,46 +1057,6 @@ export default function StrategyModulesPage() {
     } finally {
       setRevisionActionBusy(null);
       setRevisionToDelete(null);
-    }
-  };
-
-  const handleAliasSubmit = async () => {
-    if (!aliasDialogTarget) {
-      return;
-    }
-    const alias = aliasValue.trim();
-    if (!alias) {
-      setAliasError('Alias name is required.');
-      return;
-    }
-    if (alias.toLowerCase() === 'latest') {
-      setAliasError('Use “Promote latest” to update the latest alias.');
-      return;
-    }
-    setAliasProcessing(true);
-    setAliasError(null);
-    const { module, revision } = aliasDialogTarget;
-    try {
-      const selector = buildRevisionSelector(module, revision);
-      const source = await loadModuleSource(selector);
-      const payload = {
-        source,
-        name: module.name,
-        aliases: [alias],
-        promoteLatest: aliasPromoteLatest,
-        ...(revision.tag ? { tag: revision.tag } : {}),
-      };
-      await updateModuleMutation.mutateAsync({ identifier: selector, payload });
-      await refreshCatalog({ silent: true, notifySuccess: false });
-      setAliasDialogTarget(null);
-      setAliasValue('');
-      setAliasPromoteLatest(false);
-      setAliasError(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to add alias';
-      setAliasError(message);
-    } finally {
-      setAliasProcessing(false);
     }
   };
 
@@ -1390,8 +1324,7 @@ export default function StrategyModulesPage() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Display Name</TableHead>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Aliases</TableHead>
+                  <TableHead>Tag</TableHead>
                   <TableHead>Latest hash</TableHead>
                   <TableHead>Active usage</TableHead>
                   <TableHead>Size</TableHead>
@@ -1399,58 +1332,26 @@ export default function StrategyModulesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedModules.map((module) => (
-                  <TableRow key={module.name}>
+                {sortedModules.map((module) => {
+                  const moduleTag = module.tag ?? null;
+                  return (
+                    <TableRow key={module.name}>
                     <TableCell>
                       <span className="font-mono text-xs sm:text-sm">{module.name}</span>
                     </TableCell>
                     <TableCell>{module.metadata.displayName || '—'}</TableCell>
                     <TableCell>
-                      {module.version ? (
-                        <Badge variant="outline">{module.version}</Badge>
+                      {moduleTag ? (
+                        <Badge variant="outline">{moduleTag}</Badge>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap items-center gap-1">
-                        {Object.entries(module.tagAliases ?? {})
-                          .filter(([tag]) => tag !== 'latest')
-                          .map(([tag]) => (
-                            <Badge key={tag} variant="secondary" className="text-xs">
-                              {tag}
-                            </Badge>
-                          ))}
-                        {Object.keys(module.tagAliases ?? {}).filter((tag) => tag !== 'latest')
-                          .length === 0 ? (
-                            <span className="text-xs text-muted-foreground">No aliases</span>
-                          ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
                       <div className="space-y-2 text-xs">
                         <div>
                           <div className="flex items-center gap-2">
-                            <Badge variant="outline">Latest selector</Badge>
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                              onClick={() => copyHash(module.tagAliases?.latest ?? module.hash)}
-                            >
-                              <span className="font-mono">
-                                {(module.tagAliases?.latest ?? module.hash).slice(0, 12)}…
-                              </span>
-                              <Copy className="h-3 w-3" />
-                            </button>
-                          </div>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            Latest updates whenever you promote a revision. New instances using just
-                            <code className="mx-1">{module.name}</code> resolve to this hash.
-                          </p>
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline">Pinned by runtime</Badge>
+                            <Badge variant="outline">Hash</Badge>
                             <button
                               type="button"
                               className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
@@ -1575,7 +1476,8 @@ export default function StrategyModulesPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
                 </Table>
               </div>
@@ -1628,7 +1530,7 @@ export default function StrategyModulesPage() {
                   Provide the canonical strategy identifier. This cannot be changed after creation.
                 </p>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="strategy-tag">Tag</Label>
                   <Input
@@ -1646,22 +1548,6 @@ export default function StrategyModulesPage() {
                     the registry.
                   </p>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="strategy-aliases">Aliases</Label>
-                  <Input
-                    id="strategy-aliases"
-                    placeholder="stable, canary"
-                    value={formData.aliases}
-                    onChange={(event) => {
-                      setFormData((prev) => ({ ...prev, aliases: event.target.value }));
-                      clearValidationFeedback();
-                    }}
-                    disabled={formProcessing}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Comma-separated alias tags that should resolve to this revision.
-                  </p>
-                </div>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="strategy-filename">Filename (optional)</Label>
@@ -1676,8 +1562,7 @@ export default function StrategyModulesPage() {
                   }}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Leave blank to derive a versioned filename from the strategy name and tag. Manual filenames must end
-                  with {FILE_EXTENSION_HINT}.
+                  Leave blank to derive a filename from the strategy name and tag. Manual filenames must end with {FILE_EXTENSION_HINT}.
                 </p>
               </div>
               <div className="flex items-start gap-3">
@@ -2238,8 +2123,8 @@ sha256:def...`}
                     <p className="font-mono text-sm">{detailModule.file}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground uppercase">Version</p>
-                    <p className="font-mono text-sm">{detailModule.version || '—'}</p>
+                    <p className="text-xs text-muted-foreground uppercase">Tag</p>
+                    <p className="font-mono text-sm">{detailModuleTag || '—'}</p>
                   </div>
                 </div>
               </div>
@@ -2261,29 +2146,10 @@ sha256:def...`}
               </div>
               <div>
                 <h4 className="text-sm font-semibold">Pointer summary</h4>
-                <div className="mt-2 space-y-3 rounded-md border p-3 text-xs">
+                <div className="mt-2 rounded-md border p-3 text-xs">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline">Latest selector</Badge>
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                        onClick={() => copyHash(detailModule.tagAliases?.latest ?? detailModule.hash)}
-                      >
-                        <span className="font-mono">
-                          {(detailModule.tagAliases?.latest ?? detailModule.hash).slice(0, 18)}…
-                        </span>
-                        <Copy className="h-3 w-3" />
-                      </button>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      This is what a bare selector like <code className="mx-1">{detailModule.name}</code>{' '}
-                      resolves to today. Promote a revision to move the <code className="mx-1">latest</code> tag.
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline">Pinned by runtime</Badge>
+                      <Badge variant="outline">Hash</Badge>
                       <button
                         type="button"
                         className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
@@ -2294,7 +2160,7 @@ sha256:def...`}
                       </button>
                     </div>
                     <p className="text-[11px] text-muted-foreground">
-                      Instances currently running this module are pinned to this hash until they are refreshed.
+                      Instances referencing this module use this hash until they are refreshed with a new revision.
                     </p>
                   </div>
                 </div>
@@ -2311,7 +2177,7 @@ sha256:def...`}
                       <Table containerClassName="overflow-visible">
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Tag / version</TableHead>
+                          <TableHead>Tag</TableHead>
                           <TableHead>Hash</TableHead>
                           <TableHead>Size</TableHead>
                           <TableHead className="text-right">Actions</TableHead>
@@ -2323,19 +2189,17 @@ sha256:def...`}
                             revisionActionBusy === revisionKey(detailModule, revision, 'promote');
                           const deleteBusy =
                             revisionActionBusy === revisionKey(detailModule, revision, 'delete');
+                          const revisionTag = revision.tag?.trim() || null;
                           return (
                             <TableRow key={`${revision.hash}-${revision.tag ?? 'untagged'}`}>
                               <TableCell>
                                 <div className="flex flex-col gap-1">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    {revision.tag ? (
-                                      <Badge variant="secondary">{revision.tag}</Badge>
+                                    {revisionTag ? (
+                                      <Badge variant="secondary">{revisionTag}</Badge>
                                     ) : (
                                       <span className="text-xs text-muted-foreground">—</span>
                                     )}
-                                    {revision.version && revision.version !== revision.tag ? (
-                                      <Badge variant="outline">{revision.version}</Badge>
-                                    ) : null}
                                     {revision.retired ? (
                                       <Badge variant="warning">Retired</Badge>
                                     ) : null}
@@ -2631,92 +2495,6 @@ sha256:def...`}
           setTemplateConfirmOpen(false);
         }}
       />
-      <Dialog
-        open={Boolean(aliasDialogTarget)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setAliasDialogTarget(null);
-            setAliasValue('');
-            setAliasPromoteLatest(false);
-            setAliasError(null);
-            setAliasProcessing(false);
-          }
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add alias</DialogTitle>
-            <DialogDescription>
-              Point an additional tag to revision{' '}
-              {aliasDialogTarget ? revisionLabel(aliasDialogTarget.revision) : ''}.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid gap-2">
-              <Label htmlFor="revision-alias">Alias name</Label>
-              <Input
-                id="revision-alias"
-                value={aliasValue}
-                onChange={(event) => {
-                  setAliasValue(event.target.value);
-                  setAliasError(null);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !aliasProcessing) {
-                    event.preventDefault();
-                    void handleAliasSubmit();
-                  }
-                }}
-                placeholder="stable"
-                disabled={aliasProcessing}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="alias-promote-latest"
-                checked={aliasPromoteLatest}
-                onChange={(event) => setAliasPromoteLatest(event.target.checked)}
-                disabled={aliasProcessing}
-              />
-              <Label htmlFor="alias-promote-latest" className="text-sm font-normal">
-                Promote to <span className="font-semibold">latest</span> after assigning this alias
-              </Label>
-            </div>
-            {aliasError ? (
-              <p className="text-sm text-destructive">{aliasError}</p>
-            ) : null}
-          </div>
-          <DialogFooter className="gap-2 sm:gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setAliasDialogTarget(null);
-                setAliasValue('');
-                setAliasPromoteLatest(false);
-                setAliasError(null);
-              }}
-              disabled={aliasProcessing}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void handleAliasSubmit()}
-              disabled={aliasProcessing}
-            >
-              {aliasProcessing ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving…
-                </>
-              ) : (
-                'Save alias'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

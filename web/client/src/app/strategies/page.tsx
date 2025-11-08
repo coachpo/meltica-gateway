@@ -110,6 +110,8 @@ export default function StrategiesPage() {
         : 'Failed to load modules'
       : null;
 
+  const activeStrategyTag = activeStrategy?.tag ?? null;
+
   const handleDrawerChange = (open: boolean) => {
     setDrawerOpen(open);
     if (!open) {
@@ -222,8 +224,8 @@ export default function StrategiesPage() {
                   <div className="flex flex-wrap items-center gap-3">
                     <p className="text-sm text-muted-foreground">Identifier</p>
                     <Badge variant="outline">{activeStrategy.name}</Badge>
-                    {activeStrategy.version && (
-                      <Badge variant="secondary">v{activeStrategy.version}</Badge>
+                    {activeStrategyTag && (
+                      <Badge variant="secondary">{activeStrategyTag}</Badge>
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">{activeStrategy.description}</p>
@@ -310,29 +312,32 @@ export default function StrategiesPage() {
                     <p className="text-sm text-muted-foreground">No modules registered for this strategy.</p>
                   ) : (
                     <div className="space-y-3">
-                      {drawerModules.map((module) => (
-                        <div
-                          key={`${module.name}-${module.hash}`}
-                          className="rounded-md border p-3 text-sm"
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium text-foreground">{module.name}</p>
-                            {module.version && <Badge variant="secondary">v{module.version}</Badge>}
-                            {module.tags.length > 0 && (
-                              <Badge variant="outline">{module.tags.join(', ')}</Badge>
+                      {drawerModules.map((module) => {
+                        const moduleTag = module.tag ?? null;
+                        return (
+                          <div
+                            key={`${module.name}-${module.hash}`}
+                            className="rounded-md border p-3 text-sm"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium text-foreground">{module.name}</p>
+                              {moduleTag && <Badge variant="secondary">{moduleTag}</Badge>}
+                              {module.tags.length > 0 && (
+                                <Badge variant="outline">{module.tags.join(', ')}</Badge>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              Hash {module.hash} · Size {Math.round(module.size / 1024)} KB
+                            </div>
+                            {module.running && module.running.length > 0 && (
+                              <div className="text-xs text-muted-foreground mt-2">
+                                {module.running.reduce((sum, entry) => sum + entry.count, 0)} active instance
+                                {module.running.reduce((sum, entry) => sum + entry.count, 0) === 1 ? '' : 's'}
+                              </div>
                             )}
                           </div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            Hash {module.hash} · Size {Math.round(module.size / 1024)} KB
-                          </div>
-                          {module.running && module.running.length > 0 && (
-                            <div className="text-xs text-muted-foreground mt-2">
-                              {module.running.reduce((sum, entry) => sum + entry.count, 0)} active instance
-                              {module.running.reduce((sum, entry) => sum + entry.count, 0) === 1 ? '' : 's'}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </section>

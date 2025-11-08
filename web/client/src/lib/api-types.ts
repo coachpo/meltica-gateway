@@ -12,26 +12,24 @@ export interface paths {
             cookie?: never;
         };
         /** List available strategies */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description A list of strategies */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["StrategyListResponse"];
-                    };
-                };
-            };
+        get: operations["listStrategies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
+        /** Retrieve a single strategy by identifier */
+        get: operations["getStrategy"];
         put?: never;
         post?: never;
         delete?: never;
@@ -47,53 +45,101 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List strategy modules */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Strategy modules */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["StrategyModulesResponse"];
-                    };
-                };
-            };
-        };
+        /** List JavaScript strategy modules available to the runtime */
+        get: operations["listStrategyModules"];
         put?: never;
-        /** Create or update a strategy module */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
+        /** Upload or register a new strategy module revision */
+        post: operations["createStrategyModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies/modules/{selector}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy name, name:tag, or name@hash identifying the module */
+                selector: string;
             };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["StrategyModulePayload"];
-                };
-            };
-            responses: {
-                /** @description Updated module */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["StrategyModuleOperationResponse"];
-                    };
-                };
-            };
+            cookie?: never;
         };
+        /** Fetch metadata for a specific module selector */
+        get: operations["getStrategyModule"];
+        /** Update an existing module revision */
+        put: operations["updateStrategyModule"];
+        post?: never;
+        /** Remove a module revision */
+        delete: operations["deleteStrategyModule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies/modules/{selector}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download the raw JavaScript source for a module */
+        get: operations["getStrategyModuleSource"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies/modules/{selector}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect runtime usage for a module revision */
+        get: operations["getStrategyModuleUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reload strategies from disk, optionally targeting specific hashes */
+        post: operations["refreshStrategies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies/registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export registry.json merged with live usage */
+        get: operations["exportStrategyRegistry"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -107,27 +153,115 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List providers */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
+        /** List provider runtimes */
+        get: operations["listProviders"];
+        put?: never;
+        /** Create a provider */
+        post: operations["createProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/providers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
             };
-            requestBody?: never;
-            responses: {
-                /** @description Providers response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProvidersResponse"];
-                    };
-                };
-            };
+            cookie?: never;
         };
+        /** Fetch a provider */
+        get: operations["getProvider"];
+        /** Update a provider */
+        put: operations["updateProvider"];
+        post?: never;
+        /** Remove a provider */
+        delete: operations["deleteProvider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/providers/{name}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a provider asynchronously */
+        post: operations["startProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/providers/{name}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop a provider */
+        post: operations["stopProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/providers/{name}/balances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Retrieve provider balance snapshots */
+        get: operations["listProviderBalances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/adapters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List registered adapters */
+        get: operations["listAdapters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/adapters/{identifier}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Retrieve adapter metadata */
+        get: operations["getAdapter"];
         put?: never;
         post?: never;
         delete?: never;
@@ -144,29 +278,170 @@ export interface paths {
             cookie?: never;
         };
         /** List strategy instances */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
+        get: operations["listInstances"];
+        put?: never;
+        /** Create a strategy instance */
+        post: operations["createInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategy/instances/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
             };
-            requestBody?: never;
-            responses: {
-                /** @description Instances response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["InstancesResponse"];
-                    };
-                };
-            };
+            cookie?: never;
         };
+        /** Fetch an instance snapshot */
+        get: operations["getInstance"];
+        /** Update an instance */
+        put: operations["updateInstance"];
+        post?: never;
+        /** Delete an instance */
+        delete: operations["deleteInstance"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategy/instances/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start an instance */
+        post: operations["startInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategy/instances/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop an instance */
+        post: operations["stopInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategy/instances/{id}/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List recent orders for an instance */
+        get: operations["listInstanceOrders"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategy/instances/{id}/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List recent executions for an instance */
+        get: operations["listInstanceExecutions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/risk/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Retrieve runtime risk limits */
+        get: operations["getRiskLimits"];
+        /** Apply runtime risk limits */
+        put: operations["updateRiskLimits"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/context/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export providers, lambdas, and risk config */
+        get: operations["exportContext"];
+        put?: never;
+        /** Restore providers, lambdas, and risk config from a backup */
+        post: operations["restoreContext"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List pending outbox events */
+        get: operations["listOutbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/outbox/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a pending outbox event */
+        delete: operations["deleteOutbox"];
         options?: never;
         head?: never;
         patch?: never;
@@ -179,7 +454,7 @@ export interface components {
         StrategyConfig: {
             name: string;
             type: string;
-            description: string;
+            description?: string;
             default?: unknown;
             required: boolean;
         };
@@ -187,56 +462,43 @@ export interface components {
             name: string;
             displayName: string;
             description: string;
-            version?: string;
+            tag?: string;
             config: components["schemas"]["StrategyConfig"][];
             events: string[];
         };
         StrategyListResponse: {
             strategies: components["schemas"]["Strategy"][];
         };
-        StrategyDiagnostic: {
-            stage?: string;
-            message?: string;
-            line?: number;
-            column?: number;
-            hint?: string;
-        };
         StrategyModuleRevision: {
             hash: string;
             tag?: string;
             path: string;
-            version?: string;
+            /** Format: int64 */
             size: number;
             retired?: boolean;
         };
         ModuleRunningSummary: {
             hash: string;
-            instances: string[] | null;
+            instances?: string[] | null;
             count: number;
+            /** Format: date-time */
             firstSeen?: string | null;
+            /** Format: date-time */
             lastSeen?: string | null;
-            running?: boolean;
-        };
-        StrategyModuleResolution: {
-            name: string;
-            hash: string;
-            tag?: string;
-            version?: string;
-            file?: string;
-            path?: string;
         };
         StrategyModuleSummary: {
             name: string;
             file: string;
             path: string;
             hash: string;
-            version?: string;
+            tag?: string;
             tags: string[];
             tagAliases?: {
                 [key: string]: string;
             };
             revisions?: components["schemas"]["StrategyModuleRevision"][];
-            running?: components["schemas"]["ModuleRunningSummary"][] | null;
+            running?: components["schemas"]["ModuleRunningSummary"][];
+            /** Format: int64 */
             size: number;
             metadata: components["schemas"]["Strategy"];
         };
@@ -249,17 +511,41 @@ export interface components {
         };
         StrategyModulePayload: {
             filename?: string;
-            source: string;
             name?: string;
             tag?: string;
             aliases?: string[];
             promoteLatest?: boolean;
+            source: string;
+        };
+        StrategyModuleResolution: {
+            name?: string;
+            hash?: string;
+            tag?: string;
+            alias?: string;
+            file?: string;
+            path?: string;
         };
         StrategyModuleOperationResponse: {
             filename?: string;
             status: string;
             strategyDirectory: string;
-            module?: components["schemas"]["StrategyModuleResolution"] | null;
+            module?: components["schemas"]["StrategyModuleResolution"];
+        };
+        StrategyRefreshRequest: {
+            hashes?: string[];
+            strategies?: string[];
+        };
+        StrategyRefreshResult: {
+            selector: string;
+            strategy?: string;
+            hash?: string;
+            previousHash?: string;
+            instances?: string[];
+            reason?: string;
+        };
+        StrategyRefreshResponse: {
+            status: string;
+            results?: components["schemas"]["StrategyRefreshResult"][];
         };
         ProviderSettings: {
             [key: string]: unknown;
@@ -279,7 +565,7 @@ export interface components {
             dependentInstanceCount?: number | null;
         };
         Instrument: {
-            symbol: string;
+            symbol?: string;
             type?: string;
             baseAsset?: string | null;
             baseCurrency?: string | null;
@@ -288,45 +574,10 @@ export interface components {
             venue?: string | null;
             expiry?: string | null;
             contractValue?: number | null;
-            contractCurrency?: string | null;
-            strike?: number | null;
-            optionType?: string | null;
-            priceIncrement?: number | null;
-            quantityIncrement?: number | null;
-            pricePrecision?: number | null;
-            quantityPrecision?: number | null;
-            notionalPrecision?: number | null;
-            minNotional?: number | null;
-            minQuantity?: number | null;
-            maxQuantity?: number | null;
         };
-        SettingsSchema: {
-            name: string;
-            type: string;
-            default?: unknown;
-            description?: string | null;
-            required: boolean;
-        };
-        AdapterMetadata: {
-            identifier: string;
-            displayName: string;
-            venue: string;
-            description?: string;
-            capabilities: string[];
-            settingsSchema: components["schemas"]["SettingsSchema"][];
-        };
-        ProviderDetail: {
-            name: string;
-            adapter: components["schemas"]["AdapterMetadata"];
-            identifier: string;
-            instrumentCount: number;
-            settings: components["schemas"]["ProviderSettings"];
-            running: boolean;
-            status: components["schemas"]["ProviderStatus"];
-            startupError?: string;
-            dependentInstances?: string[] | null;
-            dependentInstanceCount?: number | null;
-            instruments: components["schemas"]["Instrument"][];
+        ProviderDetail: components["schemas"]["Provider"] & {
+            instruments?: components["schemas"]["Instrument"][];
+            adapter?: components["schemas"]["AdapterMetadata"];
         };
         ProvidersResponse: {
             providers: components["schemas"]["Provider"][];
@@ -344,15 +595,31 @@ export interface components {
         ProviderSymbols: {
             symbols: string[];
         };
+        AdapterMetadata: {
+            identifier: string;
+            displayName: string;
+            venue: string;
+            description?: string;
+            capabilities: string[];
+            settingsSchema: {
+                name: string;
+                type: string;
+                default?: unknown;
+                description?: string | null;
+                required: boolean;
+            }[];
+        };
+        AdaptersResponse: {
+            adapters: components["schemas"]["AdapterMetadata"][];
+        };
         LambdaStrategySpec: {
             identifier: string;
-            config: {
-                [key: string]: unknown;
-            };
             selector?: string;
             tag?: string;
             hash?: string;
-            version?: string;
+            config: {
+                [key: string]: unknown;
+            };
         };
         InstanceLinks: {
             self?: string;
@@ -361,9 +628,11 @@ export interface components {
         ModuleRevisionUsage: {
             strategy: string;
             hash: string;
-            instances: string[] | null;
+            instances?: string[] | null;
             count: number;
+            /** Format: date-time */
             firstSeen?: string | null;
+            /** Format: date-time */
             lastSeen?: string | null;
             running?: boolean;
         };
@@ -372,14 +641,15 @@ export interface components {
             strategyIdentifier: string;
             strategyTag?: string;
             strategyHash?: string;
-            strategyVersion?: string;
             strategySelector?: string;
             providers: string[];
             aggregatedSymbols: string[];
             running: boolean;
             baseline?: boolean;
             dynamic?: boolean;
+            /** Format: date-time */
             createdAt?: string | null;
+            /** Format: date-time */
             updatedAt?: string | null;
             metadata?: {
                 [key: string]: unknown;
@@ -400,25 +670,11 @@ export interface components {
         InstancesResponse: {
             instances: components["schemas"]["InstanceSummary"][];
         };
-        ExecutionRecord: {
-            orderId: string;
-            provider: string;
-            strategyInstance: string;
-            executionId: string;
-            quantity: string;
-            price: string;
-            fee?: string | null;
-            feeAsset?: string | null;
-            liquidity?: string | null;
-            tradedAt: number;
-            metadata?: {
-                [key: string]: unknown;
-            };
-            createdAt: number;
-        };
-        ExecutionHistoryResponse: {
-            executions: components["schemas"]["ExecutionRecord"][];
-            count: number;
+        InstanceActionResponse: {
+            id: string;
+            status: string;
+            /** @enum {string} */
+            action: "start" | "stop";
         };
         OrderRecord: {
             id: string;
@@ -445,6 +701,26 @@ export interface components {
             orders: components["schemas"]["OrderRecord"][];
             count: number;
         };
+        ExecutionRecord: {
+            orderId: string;
+            provider: string;
+            strategyInstance: string;
+            executionId: string;
+            quantity: string;
+            price: string;
+            fee?: string | null;
+            feeAsset?: string | null;
+            liquidity?: string | null;
+            tradedAt: number;
+            metadata?: {
+                [key: string]: unknown;
+            };
+            createdAt: number;
+        };
+        ExecutionHistoryResponse: {
+            executions: components["schemas"]["ExecutionRecord"][];
+            count: number;
+        };
         BalanceRecord: {
             provider: string;
             asset: string;
@@ -461,10 +737,31 @@ export interface components {
             balances: components["schemas"]["BalanceRecord"][];
             count: number;
         };
-        CircuitBreakerConfig: {
-            enabled: boolean;
-            threshold: number;
-            cooldown: string;
+        StrategyModuleUsageResponse: {
+            selector: string;
+            strategy: string;
+            hash: string;
+            usage: components["schemas"]["ModuleRevisionUsage"];
+            instances: components["schemas"]["InstanceSummary"][];
+            total: number;
+            offset: number;
+            limit?: number | null;
+        };
+        StrategyRegistryExport: {
+            registry: {
+                [key: string]: {
+                    tags: {
+                        [key: string]: string;
+                    };
+                    hashes: {
+                        [key: string]: {
+                            tag: string;
+                            path: string;
+                        };
+                    };
+                };
+            };
+            usage: components["schemas"]["ModuleRevisionUsage"][];
         };
         RiskConfig: {
             maxPositionSize: string;
@@ -477,176 +774,28 @@ export interface components {
             allowedOrderTypes: string[];
             killSwitchEnabled: boolean;
             maxRiskBreaches: number;
-            circuitBreaker: components["schemas"]["CircuitBreakerConfig"];
-        };
-        FanoutWorkersSetting: number | string;
-        EventbusRuntimeConfig: {
-            bufferSize: number;
-            fanoutWorkers: components["schemas"]["FanoutWorkersSetting"];
-        };
-        ObjectPoolRuntimeConfig: {
-            size: number;
-            waitQueueSize: number;
-        };
-        PoolRuntimeConfig: {
-            event: components["schemas"]["ObjectPoolRuntimeConfig"];
-            orderRequest: components["schemas"]["ObjectPoolRuntimeConfig"];
-        };
-        ApiServerConfig: {
-            addr: string;
-        };
-        TelemetryConfig: {
-            otlpEndpoint: string;
-            serviceName: string;
-            otlpInsecure: boolean;
-            enableMetrics: boolean;
-        };
-        RuntimeConfig: {
-            eventbus: components["schemas"]["EventbusRuntimeConfig"];
-            pools: components["schemas"]["PoolRuntimeConfig"];
-            risk: components["schemas"]["RiskConfig"];
-            apiServer: components["schemas"]["ApiServerConfig"];
-            telemetry: components["schemas"]["TelemetryConfig"];
-        };
-        /** @enum {string} */
-        RuntimeConfigSource: "runtime" | "file" | "bootstrap";
-        RuntimeConfigSnapshot: {
-            config: components["schemas"]["RuntimeConfig"];
-            source: components["schemas"]["RuntimeConfigSource"];
-            persistedAt?: string | null;
-            filePath?: string | null;
-            metadata?: {
-                [key: string]: unknown;
-            } | null;
-        };
-        ProviderRuntimeMetadata: {
-            name: string;
-            adapter: string;
-            identifier: string;
-            instrumentCount: number;
-            settings?: {
-                [key: string]: unknown;
-            } | null;
-            running: boolean;
-            status: components["schemas"]["ProviderStatus"];
-            startupError?: string;
-        };
-        LambdaInstanceSnapshot: {
-            id: string;
-            strategy: components["schemas"]["LambdaStrategySpec"];
-            providers: string[];
-            providerSymbols: {
-                [key: string]: components["schemas"]["ProviderSymbols"];
+            circuitBreaker: {
+                enabled: boolean;
+                threshold: number;
+                cooldown: string;
             };
-            aggregatedSymbols: string[];
-            running: boolean;
-            baseline?: boolean;
-            dynamic?: boolean;
-            createdAt?: string | null;
-            updatedAt?: string | null;
-            metadata?: {
-                [key: string]: unknown;
-            } | null;
-        };
-        ConfigBackup: {
-            version: string;
-            generatedAt: string;
-            environment: string;
-            meta: {
-                name?: string;
-                version?: string;
-                description?: string;
-            };
-            runtime: components["schemas"]["RuntimeConfig"];
-            providers: {
-                config: {
-                    [key: string]: {
-                        [key: string]: unknown;
-                    };
-                } | null;
-                runtime: components["schemas"]["ProviderRuntimeMetadata"][];
-            };
-            lambdas: {
-                instances: components["schemas"]["LambdaInstanceSnapshot"][];
-            };
-        };
-        RestoreConfigResponse: {
-            status: string;
-            providers: number;
-            lambdas: number;
         };
         ContextBackupPayload: {
             providers: {
                 [key: string]: unknown;
             }[];
             lambdas: components["schemas"]["InstanceSpec"][];
-            risk: {
-                [key: string]: unknown;
-            };
+            risk: components["schemas"]["RiskConfig"];
         };
         RestoreContextResponse: {
             status: string;
         };
-        StrategyRefreshRequest: {
-            hashes?: string[];
-            strategies?: string[];
+        OutboxQuery: {
+            limit?: number;
         };
-        StrategyRefreshResult: {
-            selector: string;
-            strategy?: string;
-            hash?: string;
-            previousHash?: string;
-            instances?: string[];
-            reason?: string;
-        };
-        StrategyRefreshResponse: {
-            status: string;
-            results?: components["schemas"]["StrategyRefreshResult"][];
-        };
-        StrategyModuleUsageResponse: {
-            selector: string;
-            strategy: string;
-            hash: string;
-            usage: components["schemas"]["ModuleRevisionUsage"];
-            instances: components["schemas"]["InstanceSummary"][];
-            total: number;
-            offset: number;
-            limit?: number | null;
-        };
-        StrategyRegistryLocation: {
-            tag: string;
-            path: string;
-        };
-        StrategyRegistryEntry: {
-            tags: {
-                [key: string]: string;
-            };
-            hashes: {
-                [key: string]: components["schemas"]["StrategyRegistryLocation"];
-            };
-        };
-        StrategyRegistryExport: {
-            registry: {
-                [key: string]: components["schemas"]["StrategyRegistryEntry"];
-            };
-            usage: components["schemas"]["ModuleRevisionUsage"][];
-        };
-        ApiErrorPayload: {
-            status?: string;
-            error: string;
-            message?: string;
-            diagnostics?: components["schemas"]["StrategyDiagnostic"][];
-        };
-        StrategyErrorResponse: components["schemas"]["ApiErrorPayload"];
-        StrategyValidationErrorResponse: components["schemas"]["StrategyErrorResponse"] & {
-            /** @constant */
-            error: "strategy_validation_failed";
-            message: string;
-        };
-        OutboxAggregateType: string;
         OutboxEvent: {
             id: number;
-            aggregateType: components["schemas"]["OutboxAggregateType"];
+            aggregateType: string;
             aggregateID: string;
             eventType: string;
             payload: {
@@ -670,18 +819,913 @@ export interface components {
             id: number;
             status: string;
         };
-        OutboxQuery: {
-            limit?: number;
-            delivered?: boolean;
-            aggregateType?: string;
-            aggregateID?: string;
+        ApiErrorPayload: {
+            error: string;
+            details?: {
+                [key: string]: unknown;
+            };
         };
     };
-    responses: never;
-    parameters: never;
+    responses: {
+        /** @description Error response */
+        Error: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ApiErrorPayload"];
+            };
+        };
+    };
+    parameters: {
+        InstanceId: string;
+        ProviderName: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
 }
 export type $defs = Record<string, never>;
-export type operations = Record<string, never>;
+export interface operations {
+    listStrategies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Strategy catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyListResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getStrategy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Canonical strategy identifier */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Strategy metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Strategy"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listStrategyModules: {
+        parameters: {
+            query?: {
+                /** @description Filter by strategy identifier */
+                strategy?: string;
+                /** @description Filter by revision hash */
+                hash?: string;
+                /** @description When true, only return modules that currently power running instances */
+                runningOnly?: boolean;
+                /** @description Maximum number of modules to return */
+                limit?: number;
+                /** @description Offset into the filtered module set */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Strategy module listing */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyModulesResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createStrategyModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyModulePayload"];
+            };
+        };
+        responses: {
+            /** @description Module staged and awaiting refresh */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyModuleOperationResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getStrategyModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy name, name:tag, or name@hash identifying the module */
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Module summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyModuleSummary"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateStrategyModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy name, name:tag, or name@hash identifying the module */
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyModulePayload"];
+            };
+        };
+        responses: {
+            /** @description Module updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyModuleOperationResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteStrategyModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy name, name:tag, or name@hash identifying the module */
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Module removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getStrategyModuleSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Module source contents */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/javascript": string;
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getStrategyModuleUsage: {
+        parameters: {
+            query?: {
+                /** @description Include dormant instances that still pin the revision */
+                includeStopped?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Usage and instance summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyModuleUsageResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    refreshStrategies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StrategyRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Refresh status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyRefreshResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    exportStrategyRegistry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Registry export */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyRegistryExport"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listProviders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvidersResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description Provider accepted for creation */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderDetail"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderDetail"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description Provider updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderDetail"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status?: string;
+                        name?: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    startProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider start requested */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderDetail"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    stopProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ProviderName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider stopped */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderDetail"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listProviderBalances: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of balances to return */
+                limit?: number;
+                /** @description Filter by asset ticker */
+                asset?: string;
+            };
+            header?: never;
+            path: {
+                name: components["parameters"]["ProviderName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider balances */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceHistoryResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdapters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Adapter metadata listing */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdaptersResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getAdapter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                identifier: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Adapter metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdapterMetadata"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listInstances: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Instance list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstancesResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstanceSpec"];
+            };
+        };
+        responses: {
+            /** @description Instance created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceSpec"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Instance snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceSpec"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstanceSpec"];
+            };
+        };
+        responses: {
+            /** @description Instance updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceSpec"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Instance removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status?: string;
+                        id?: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    startInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Instance start response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceActionResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    stopInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Instance stop response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceActionResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listInstanceOrders: {
+        parameters: {
+            query?: {
+                limit?: number;
+                provider?: string;
+                states?: string[];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Order history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderHistoryResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listInstanceExecutions: {
+        parameters: {
+            query?: {
+                limit?: number;
+                provider?: string;
+                orderId?: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Execution history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionHistoryResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getRiskLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Risk limits */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Present when limits were updated in this response */
+                        status?: string;
+                        limits?: components["schemas"]["RiskConfig"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateRiskLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskConfig"];
+            };
+        };
+        responses: {
+            /** @description Updated risk limits */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status?: string;
+                        limits?: components["schemas"]["RiskConfig"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    exportContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Context backup payload */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextBackupPayload"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    restoreContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContextBackupPayload"];
+            };
+        };
+        responses: {
+            /** @description Restore status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreContextResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listOutbox: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxListResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteOutbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxDeleteResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+}

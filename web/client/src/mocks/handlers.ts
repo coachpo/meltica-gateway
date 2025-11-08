@@ -21,7 +21,7 @@ const strategies: Strategy[] = [
     name: 'momentum',
     displayName: 'Momentum',
     description: 'Demo strategy',
-    version: '1.0.0',
+    tag: 'v1.0.0',
     config: [
       {
         name: 'lookback',

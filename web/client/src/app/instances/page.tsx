@@ -434,15 +434,13 @@ export default function InstancesPage() {
       const key = module.name.toLowerCase();
       const pinnedHash = module.hash || null;
       const latestHash = module.tagAliases?.latest ?? pinnedHash;
-      let latestTag: string | null = null;
-      if (latestHash) {
-        const aliasEntries = Object.entries(module.tagAliases ?? {}).filter(
+      let latestTag: string | null = module.tag ?? null;
+      if (!latestTag && latestHash) {
+        const aliasEntry = Object.entries(module.tagAliases ?? {}).find(
           ([tag, hash]) => tag !== 'latest' && hash === latestHash,
         );
-        if (aliasEntries.length > 0) {
-          latestTag = aliasEntries[0][0];
-        } else if (module.version) {
-          latestTag = module.version;
+        if (aliasEntry) {
+          latestTag = aliasEntry[0];
         }
       }
       map.set(key, {
@@ -1835,6 +1833,7 @@ export default function InstancesPage() {
           const pinnedHash = moduleStatus?.pinnedHash ?? null;
           const latestTag = moduleStatus?.latestTag ?? null;
           const selectorDisplay = instance.strategySelector || instance.strategyIdentifier;
+          const resolvedInstanceTag = instance.strategyTag?.trim() || null;
           const drift = Boolean(
             latestHash &&
               instance.strategyHash &&
@@ -1844,7 +1843,7 @@ export default function InstancesPage() {
           const usageSelector = canonicalUsageSelector(
             instance.strategyIdentifier,
             usageSummary?.hash ?? instance.strategyHash ?? null,
-            instance.strategyTag ?? null,
+            resolvedInstanceTag ?? null,
           );
           const usageLink = `/strategies/modules?usage=${encodeURIComponent(usageSelector)}`;
           const isBaseline = Boolean(instance.baseline);
@@ -1918,11 +1917,7 @@ export default function InstancesPage() {
                   </div>
                   <div>
                     <span className="font-medium">Tag:</span>{' '}
-                    <span className="text-muted-foreground">{instance.strategyTag || latestTag || '—'}</span>
-                  </div>
-                  <div>
-                    <span className="font-medium">Version:</span>{' '}
-                    <span className="text-muted-foreground">{instance.strategyVersion || '—'}</span>
+                    <span className="text-muted-foreground">{resolvedInstanceTag || latestTag || '—'}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">Hash:</span>

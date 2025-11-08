@@ -12,10 +12,10 @@ export const strategySchema = z.object({
   name: z.string(),
   displayName: z.string(),
   description: z.string(),
-  version: z.string().optional(),
+  tag: z.string().optional(),
   config: z.array(strategyConfigSchema),
   events: z.array(z.string()),
-});
+}).passthrough();
 
 export const strategyListSchema = z.object({
   strategies: z.array(strategySchema),
@@ -25,10 +25,9 @@ const strategyModuleRevisionSchema = z.object({
   hash: z.string(),
   tag: z.string().optional(),
   path: z.string(),
-  version: z.string().optional(),
   size: z.number(),
   retired: z.boolean().optional(),
-});
+}).passthrough();
 
 const moduleRunningSummarySchema = z.object({
   hash: z.string(),
@@ -45,17 +44,16 @@ const strategyModuleResolutionSchema = z.object({
   name: z.string(),
   hash: z.string(),
   tag: z.string().optional(),
-  version: z.string().optional(),
   file: z.string().optional(),
   path: z.string().optional(),
-});
+}).passthrough();
 
 export const strategyModuleSummarySchema = z.object({
   name: z.string(),
   file: z.string(),
   path: z.string(),
   hash: z.string(),
-  version: z.string().optional(),
+  tag: z.string().optional(),
   tags: z.array(z.string()),
   tagAliases: z.record(z.string(), z.string()).optional(),
   revisions: z.array(strategyModuleRevisionSchema).optional(),
@@ -65,7 +63,7 @@ export const strategyModuleSummarySchema = z.object({
     .default([]),
   size: z.number(),
   metadata: strategySchema,
-});
+}).passthrough();
 
 export const strategyModulesResponseSchema = z.object({
   modules: z.array(strategyModuleSummarySchema),
@@ -88,8 +86,7 @@ const lambdaStrategySpecSchema = z.object({
   selector: z.string().optional(),
   tag: z.string().optional(),
   hash: z.string().optional(),
-  version: z.string().optional(),
-});
+}).passthrough();
 
 const providerSymbolsSchema = z.object({
   symbols: z.array(z.string()),
@@ -100,7 +97,6 @@ export const instanceSummarySchema = z.object({
   strategyIdentifier: z.string(),
   strategyTag: z.string().optional(),
   strategyHash: z.string().optional(),
-  strategyVersion: z.string().optional(),
   strategySelector: z.string().optional(),
   providers: z.array(z.string()),
   aggregatedSymbols: z.array(z.string()),
@@ -130,7 +126,7 @@ export const instanceSummarySchema = z.object({
       usage: z.string().optional(),
     })
     .optional(),
-});
+}).passthrough();
 
 export const instanceSpecSchema = z.object({
   id: z.string(),
