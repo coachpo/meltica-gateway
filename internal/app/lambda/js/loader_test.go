@@ -112,31 +112,6 @@ func TestLoaderRefreshAndList(t *testing.T) {
 	}
 }
 
-func TestLoaderSupportsLegacyVersionMetadata(t *testing.T) {
-	legacyModule := strings.Replace(sampleModule, "tag:", "version:", 1)
-	dir := t.TempDir()
-	modulePath := writeVersionedModule(t, dir, "noop", "v1.0.0", []byte(legacyModule))
-	writeRegistry(t, dir, "noop", "v1.0.0", modulePath)
-
-	loader, err := NewLoader(dir)
-	if err != nil {
-		t.Fatalf("NewLoader: %v", err)
-	}
-	if err := loader.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
-	modules := loader.List()
-	if len(modules) != 1 {
-		t.Fatalf("expected 1 module, got %d", len(modules))
-	}
-	if modules[0].Tag != "v1.0.0" {
-		t.Fatalf("expected tag fallback, got %s", modules[0].Tag)
-	}
-	if modules[0].Metadata.Tag != "v1.0.0" {
-		t.Fatalf("expected metadata tag fallback, got %s", modules[0].Metadata.Tag)
-	}
-}
-
 func TestInstanceCall(t *testing.T) {
 	dir := t.TempDir()
 	modulePath := writeVersionedModule(t, dir, "noop", "v1.0.0", []byte(sampleModule))

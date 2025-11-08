@@ -849,7 +849,7 @@ func convertModuleUsageSnapshots(usages []RevisionUsageSummary) []js.ModuleUsage
 func (m *Manager) RevisionUsageFor(strategy, hash string) RevisionUsageSummary {
 	spec := config.LambdaSpec{
 		ID:              "",
-		Strategy:        config.LambdaStrategySpec{Identifier: strategy, Config: nil, Selector: "", Tag: "", Hash: hash, LegacyVersion: ""},
+		Strategy:        config.LambdaStrategySpec{Identifier: strategy, Config: nil, Selector: "", Tag: "", Hash: hash},
 		ProviderSymbols: nil,
 		Providers:       nil,
 	}
@@ -1508,12 +1508,11 @@ func (m *Manager) Instance(id string) (InstanceSnapshot, bool) {
 		return InstanceSnapshot{
 			ID: "",
 			Strategy: config.LambdaStrategySpec{
-				Identifier:    "",
-				Selector:      "",
-				Tag:           "",
-				Hash:          "",
-				Config:        map[string]any{},
-				LegacyVersion: "",
+				Identifier: "",
+				Selector:   "",
+				Tag:        "",
+				Hash:       "",
+				Config:     map[string]any{},
 			},
 			Providers:         []string{},
 			ProviderSymbols:   map[string]config.ProviderSymbols{},
@@ -1563,12 +1562,11 @@ func snapshotOf(spec config.LambdaSpec, running bool, usage *RevisionUsageSummar
 	return InstanceSnapshot{
 		ID: spec.ID,
 		Strategy: config.LambdaStrategySpec{
-			Identifier:    spec.Strategy.Identifier,
-			Config:        strategyConfig,
-			Selector:      spec.Strategy.Selector,
-			Tag:           spec.Strategy.Tag,
-			Hash:          spec.Strategy.Hash,
-			LegacyVersion: spec.Strategy.LegacyVersion,
+			Identifier: spec.Strategy.Identifier,
+			Config:     strategyConfig,
+			Selector:   spec.Strategy.Selector,
+			Tag:        spec.Strategy.Tag,
+			Hash:       spec.Strategy.Hash,
 		},
 		Providers:         providers,
 		ProviderSymbols:   assignments,
@@ -1826,7 +1824,7 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshot strategystore.Sn
 func specFromSnapshot(snapshot strategystore.Snapshot) config.LambdaSpec {
 	spec := config.LambdaSpec{
 		ID:              snapshot.ID,
-		Strategy:        config.LambdaStrategySpec{Identifier: snapshot.Strategy.Identifier, Config: copyMap(snapshot.Strategy.Config), Selector: snapshot.Strategy.Selector, Tag: snapshot.Strategy.Tag, Hash: snapshot.Strategy.Hash, LegacyVersion: snapshot.Strategy.LegacyVersion},
+		Strategy:        config.LambdaStrategySpec{Identifier: snapshot.Strategy.Identifier, Config: copyMap(snapshot.Strategy.Config), Selector: snapshot.Strategy.Selector, Tag: snapshot.Strategy.Tag, Hash: snapshot.Strategy.Hash},
 		Providers:       append([]string(nil), snapshot.Providers...),
 		ProviderSymbols: buildProviderSymbols(snapshot.ProviderSymbols),
 	}

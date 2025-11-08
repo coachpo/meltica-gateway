@@ -1007,11 +1007,6 @@ func normalizeMetadata(meta *strategies.Metadata) {
 	}
 	meta.Name = strings.ToLower(strings.TrimSpace(meta.Name))
 	meta.Tag = strings.TrimSpace(meta.Tag)
-	meta.LegacyVersion = strings.TrimSpace(meta.LegacyVersion)
-	if meta.Tag == "" {
-		meta.Tag = meta.LegacyVersion
-	}
-	meta.LegacyVersion = ""
 	meta.DisplayName = strings.TrimSpace(meta.DisplayName)
 	meta.Description = strings.TrimSpace(meta.Description)
 

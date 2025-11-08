@@ -14,14 +14,12 @@ type ConfigField struct {
 
 // Metadata captures descriptive information about a strategy.
 type Metadata struct {
-	Name string `json:"name"`
-	Tag  string `json:"tag,omitempty"`
-	// LegacyVersion captures incoming metadata.version values so we can map them to Tag.
-	LegacyVersion string             `json:"version,omitempty"`
-	DisplayName   string             `json:"displayName"`
-	Description   string             `json:"description,omitempty"`
-	Config        []ConfigField      `json:"config"`
-	Events        []schema.EventType `json:"events"`
+	Name        string             `json:"name"`
+	Tag         string             `json:"tag,omitempty"`
+	DisplayName string             `json:"displayName"`
+	Description string             `json:"description,omitempty"`
+	Config      []ConfigField      `json:"config"`
+	Events      []schema.EventType `json:"events"`
 }
 
 var dryRunConfigField = ConfigField{
