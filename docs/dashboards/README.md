@@ -91,6 +91,16 @@ WebSocket frame processing:
 
 ---
 
+### OKX-Provider-Overview.json
+Provider-specific lens for OKX adapters:
+- Eventbus throughput filtered to provider
+- Extension event rate by symbol and payload sizing
+- Publish latency and fanout percentiles for OKX traffic
+
+**Recommended for:** Monitoring OKX custom payload adoption and ensuring bus delivery health
+
+---
+
 ## 🚀 Quick Start
 
 1. **Import dashboards** into Grafana:
@@ -121,7 +131,14 @@ All dashboard queries are optimized for performance:
 - No expensive regex or nested queries
 - Proper use of `clamp_min()` to avoid division by zero
 
-## 📝 Recent Changes (2025-10-19)
+## 📝 Recent Changes
+
+### 2025-11-08
+- ✅ Added **Extension Events** row to `Meltica-Overview.json` showing per-provider throughput and average payload size using `adapter_extension_events` and `adapter_extension_payload_bytes_*`.
+- ✅ Added dedicated **Binance extension panels** to highlight per-symbol adoption and payload sizes on `Binance-Provider-Overview.json`.
+- ✅ Created `OKX-Provider-Overview.json` with OKX-specific event throughput, extension payload, and event bus latency panels.
+
+### 2025-10-19
 
 ### Removed Dashboards (Broken Metrics)
 - ❌ `meltica-alerting-sli.json` - Referenced non-existent error metrics
@@ -193,6 +210,10 @@ All dashboards use these verified metrics from `http://capy.lan:8889/metrics`:
 ### Control Bus
 - `meltica_controlbus_consumers_active` - Active consumers
 - `meltica_controlbus_queue_depth` - Command queue depth
+
+### Extension Events
+- `adapter_extension_events` - Adapter-level extension payload rate (labels: `environment`, `provider`, `symbol`)
+- `adapter_extension_payload_bytes_sum` / `_count` - Helpers for computing average payload sizes (same labels as above)
 
 ## 🐛 Troubleshooting
 
