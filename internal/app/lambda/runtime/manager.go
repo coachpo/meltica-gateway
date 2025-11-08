@@ -1212,7 +1212,7 @@ func (m *Manager) Create(spec config.LambdaSpec) (*core.BaseLambda, error) {
 	if len(spec.AllSymbols()) == 0 {
 		return nil, fmt.Errorf("strategy %s: instrument symbols required", spec.ID)
 	}
-	if err := m.ensureSpec(spec, false); err != nil {
+	if err := m.ensureSpec(&spec, false); err != nil {
 		return nil, fmt.Errorf("ensure spec %s: %w", spec.ID, err)
 	}
 	m.setBaselineInstance(spec.ID, false)
@@ -1221,7 +1221,10 @@ func (m *Manager) Create(spec config.LambdaSpec) (*core.BaseLambda, error) {
 	return nil, nil
 }
 
-func (m *Manager) ensureSpec(spec config.LambdaSpec, allowReplace bool) error {
+func (m *Manager) ensureSpec(spec *config.LambdaSpec, allowReplace bool) error {
+	if spec == nil {
+		return fmt.Errorf("lambda spec required")
+	}
 	if spec.Strategy.Config == nil {
 		spec.Strategy.Config = make(map[string]any)
 	}
@@ -1268,9 +1271,9 @@ func (m *Manager) ensureSpec(spec config.LambdaSpec, allowReplace bool) error {
 		m.mu.Unlock()
 		return ErrInstanceExists
 	}
-	strategy, hash, _ := revisionSignatureForSpec(spec)
+	strategy, hash, _ := revisionSignatureForSpec(*spec)
 	m.ensureRevisionUsageLocked(strategy, hash)
-	m.specs[spec.ID] = cloneSpec(spec)
+	m.specs[spec.ID] = cloneSpec(*spec)
 	m.mu.Unlock()
 
 	m.persistStrategy(spec.ID)
@@ -1447,7 +1450,7 @@ func (m *Manager) Update(ctx context.Context, spec config.LambdaSpec) error {
 	if current.Strategy.Identifier != spec.Strategy.Identifier {
 		return fmt.Errorf("strategy is immutable for %s", spec.ID)
 	}
-	if err := m.ensureSpec(spec, true); err != nil {
+	if err := m.ensureSpec(&spec, true); err != nil {
 		return err
 	}
 
@@ -1801,7 +1804,7 @@ func (m *Manager) restoreStrategySnapshot(ctx context.Context, snapshot strategy
 		return
 	}
 	spec := specFromSnapshot(snapshot)
-	if err := m.ensureSpec(spec, true); err != nil {
+	if err := m.ensureSpec(&spec, true); err != nil {
 		if m.logger != nil {
 			m.logger.Printf("strategy/%s: restore spec failed: %v", snapshot.ID, err)
 		}

@@ -505,13 +505,14 @@ export default function InstancesPage() {
         id: spec.id,
         strategyIdentifier: spec.strategy.identifier,
       });
+      const hashedSelector = spec.strategy.hash?.trim()
+        ? `${spec.strategy.identifier}@${spec.strategy.hash}`
+        : null;
+      const tagSelector = spec.strategy.tag?.trim()
+        ? `${spec.strategy.identifier}:${spec.strategy.tag}`
+        : null;
       const selectorValue =
-        spec.strategy.selector?.trim() ||
-        (spec.strategy.hash
-          ? `${spec.strategy.identifier}@${spec.strategy.hash}`
-          : spec.strategy.tag
-            ? `${spec.strategy.identifier}:${spec.strategy.tag}`
-            : spec.strategy.identifier);
+        hashedSelector || spec.strategy.selector?.trim() || tagSelector || spec.strategy.identifier;
       setStrategySelectorInput(selectorValue);
 
       const providerNames = Object.keys(spec.scope ?? {});

@@ -131,7 +131,7 @@ func TestManagerStrategyPersistenceLifecycle(t *testing.T) {
 	mgr := newTestManager(t, WithStrategyStore(store))
 	spec := baseLambdaSpec()
 
-	if err := mgr.ensureSpec(spec, false); err != nil {
+	if err := mgr.ensureSpec(&spec, false); err != nil {
 		t.Fatalf("ensureSpec: %v", err)
 	}
 	if len(store.saved) == 0 {
@@ -208,9 +208,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 				},
 				Providers: []string{"mock"},
 			}
-		if _, err := mgr.Create(spec); err != nil {
-			t.Fatalf("%s: Create: %v", tc.id, err)
-		}
+			if _, err := mgr.Create(spec); err != nil {
+				t.Fatalf("%s: Create: %v", tc.id, err)
+			}
 			stored, err := mgr.specForID(tc.id)
 			if err != nil {
 				t.Fatalf("%s: specForID: %v", tc.id, err)
@@ -233,9 +233,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("strategy immutable", func(t *testing.T) {
 		mgr := newTestManager(t)
 		spec := baseLambdaSpec()
-	if _, err := mgr.Create(spec); err != nil {
-		t.Fatalf("register spec: %v", err)
-	}
+		if _, err := mgr.Create(spec); err != nil {
+			t.Fatalf("register spec: %v", err)
+		}
 
 		spec.Strategy.Identifier = "delay"
 		if err := mgr.Update(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "strategy is immutable") {
@@ -246,9 +246,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("providers immutable", func(t *testing.T) {
 		mgr := newTestManager(t)
 		spec := baseLambdaSpec()
-	if _, err := mgr.Create(spec); err != nil {
-		t.Fatalf("register spec: %v", err)
-	}
+		if _, err := mgr.Create(spec); err != nil {
+			t.Fatalf("register spec: %v", err)
+		}
 
 		spec.ProviderSymbols = nil
 		spec.Providers = []string{"binance-spot"}
@@ -260,9 +260,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("scope immutable", func(t *testing.T) {
 		mgr := newTestManager(t)
 		spec := baseLambdaSpec()
-	if _, err := mgr.Create(spec); err != nil {
-		t.Fatalf("register spec: %v", err)
-	}
+		if _, err := mgr.Create(spec); err != nil {
+			t.Fatalf("register spec: %v", err)
+		}
 
 		spec.ProviderSymbols = map[string]config.ProviderSymbols{
 			"okx-spot": {Symbols: []string{"ETH-USDT"}},
@@ -275,9 +275,9 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("config mutable", func(t *testing.T) {
 		mgr := newTestManager(t)
 		spec := baseLambdaSpec()
-	if _, err := mgr.Create(spec); err != nil {
-		t.Fatalf("register spec: %v", err)
-	}
+		if _, err := mgr.Create(spec); err != nil {
+			t.Fatalf("register spec: %v", err)
+		}
 
 		spec.Strategy.Config = map[string]any{"logger_prefix": "[updated]"}
 		if err := mgr.Update(context.Background(), spec); err != nil {
