@@ -45,6 +45,9 @@ coverage/
 .cursor/
 .codex/
 
+# Cache
+.cache/
+
 # Ignore IDE directories
 .idea/
 .vscode/
