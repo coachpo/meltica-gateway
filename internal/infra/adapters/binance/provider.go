@@ -296,7 +296,8 @@ func (p *Provider) SubscribeRoute(route dispatcher.Route) error {
 		return nil
 	case schema.RouteTypeKlineSummary,
 		schema.RouteTypeInstrumentUpdate,
-		schema.RouteTypeRiskControl:
+		schema.RouteTypeRiskControl,
+		schema.RouteTypeExtension:
 		return nil
 	default:
 		// Unsupported routes are acknowledged but inert.
@@ -321,7 +322,8 @@ func (p *Provider) UnsubscribeRoute(route dispatcher.Route) error {
 		schema.RouteTypeExecutionReport,
 		schema.RouteTypeKlineSummary,
 		schema.RouteTypeInstrumentUpdate,
-		schema.RouteTypeRiskControl:
+		schema.RouteTypeRiskControl,
+		schema.RouteTypeExtension:
 		return nil
 	default:
 		return nil

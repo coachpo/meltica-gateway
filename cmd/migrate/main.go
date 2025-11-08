@@ -1,3 +1,4 @@
+// Package main provides a CLI for executing database schema migrations.
 package main
 
 import (
@@ -58,7 +59,7 @@ func run() error {
 	switch args[0] {
 	case "up":
 		if err := migrations.Apply(ctx, *dsn, *dir, logger); err != nil {
-			return err
+			return fmt.Errorf("apply migrations: %w", err)
 		}
 	case "down":
 		steps := 1
@@ -70,7 +71,7 @@ func run() error {
 			steps = n
 		}
 		if err := migrations.Rollback(ctx, *dsn, *dir, steps, logger); err != nil {
-			return err
+			return fmt.Errorf("rollback migrations: %w", err)
 		}
 	default:
 		return fmt.Errorf("unknown command %q (expected up or down)", args[0])

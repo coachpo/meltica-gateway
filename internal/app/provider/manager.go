@@ -214,14 +214,15 @@ func (m *Manager) Create(ctx context.Context, spec config.ProviderSpec, start bo
 		return empty, fmt.Errorf("%w: %s", ErrProviderExists, spec.Name)
 	}
 	state := &providerState{
-		spec:          spec,
-		instance:      nil,
-		subscriptions: nil,
-		cancel:        nil,
-		cachedRoutes:  nil,
-		running:       false,
-		status:        StatusPending,
-		startupErr:    nil,
+		spec:              spec,
+		instance:          nil,
+		subscriptions:     nil,
+		cancel:            nil,
+		cachedRoutes:      nil,
+		cachedInstruments: nil,
+		running:           false,
+		status:            StatusPending,
+		startupErr:        nil,
 	}
 	m.states[spec.Name] = state
 	m.mu.Unlock()
@@ -658,14 +659,15 @@ func (m *Manager) Restore(snapshot providerstore.Snapshot) {
 		return
 	}
 	m.states[name] = &providerState{
-		spec:          spec,
-		instance:      nil,
-		subscriptions: nil,
-		cancel:        nil,
-		cachedRoutes:  nil,
-		running:       false,
-		status:        normalizeRestoredStatus(status),
-		startupErr:    nil,
+		spec:              spec,
+		instance:          nil,
+		subscriptions:     nil,
+		cancel:            nil,
+		cachedRoutes:      nil,
+		cachedInstruments: nil,
+		running:           false,
+		status:            normalizeRestoredStatus(status),
+		startupErr:        nil,
 	}
 	m.mu.Unlock()
 	m.loadRoutes(name)

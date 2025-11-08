@@ -447,6 +447,8 @@ func rehydrateEventPayload(evt *schema.Event) {
 		if json.Unmarshal(data, &payload) == nil {
 			evt.Payload = payload
 		}
+	case schema.ExtensionEventType:
+		// Extension events retain arbitrary payloads.
 	}
 }
 

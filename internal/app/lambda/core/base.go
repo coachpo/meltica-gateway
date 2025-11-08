@@ -433,14 +433,16 @@ func (l *BaseLambda) handleEvent(ctx context.Context, typ schema.EventType, evt 
 		return
 	}
 
-	if typ == schema.ExtensionEventType {
-		// Extension events bypass symbol filtering to allow arbitrary payloads.
-	} else if typ == schema.EventTypeBalanceUpdate {
-		if !l.matchesBalanceCurrency(evt.Symbol) {
+	extensionEvent := typ == schema.ExtensionEventType
+	// Extension events bypass symbol filtering to allow arbitrary payloads.
+	if !extensionEvent {
+		if typ == schema.EventTypeBalanceUpdate {
+			if !l.matchesBalanceCurrency(evt.Symbol) {
+				return
+			}
+		} else if !l.matchesSymbol(evt) {
 			return
 		}
-	} else if !l.matchesSymbol(evt) {
-		return
 	}
 
 	switch typ {

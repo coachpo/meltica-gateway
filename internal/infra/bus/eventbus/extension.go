@@ -41,7 +41,7 @@ func extensionPayloadSize(payload any) (int, error) {
 	default:
 		data, err := json.Marshal(v)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("marshal extension payload: %w", err)
 		}
 		return len(data), nil
 	}

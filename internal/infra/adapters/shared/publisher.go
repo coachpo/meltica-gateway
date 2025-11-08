@@ -191,10 +191,10 @@ func (p *Publisher) recordExtensionTelemetry(ctx context.Context, symbol string,
 func ensureExtensionMetrics() {
 	extensionMetricsOnce.Do(func() {
 		meter := otel.Meter("adapter.publisher")
-		extensionEventsCounter, _ = meter.Int64Counter("adapter.extension.events",
+		extensionEventsCounter, _ = meter.Int64Counter("adapter_extension_events",
 			metric.WithDescription("Number of extension events emitted by adapters"),
 			metric.WithUnit("{event}"))
-		extensionPayloadBytes, _ = meter.Int64Histogram("adapter.extension.payload_bytes",
+		extensionPayloadBytes, _ = meter.Int64Histogram("adapter_extension_payload_bytes",
 			metric.WithDescription("Size of extension event payloads"),
 			metric.WithUnit("By"))
 	})
@@ -218,7 +218,7 @@ func extensionPayloadSize(payload any) (int, error) {
 	default:
 		data, err := json.Marshal(v)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("marshal extension payload: %w", err)
 		}
 		return len(data), nil
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
 
+// DefaultExtensionPayloadCapBytes is the fallback cap applied to extension event payload sizes.
 const DefaultExtensionPayloadCapBytes = 100 * 1024
 
 // SubscriptionID uniquely identifies a bus subscription.
