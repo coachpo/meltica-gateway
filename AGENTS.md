@@ -1,35 +1,5 @@
 # Repository & MCP Guidelines
 
-## Table of Contents
-
-- [Project Structure & Module Organization](#project-structure--module-organization)
-- [Build, Test, and Development Commands](#build-test-and-development-commands)
-- [Coding Style & Naming Conventions](#coding-style--naming-conventions)
-- [Testing Guidelines](#testing-guidelines)
-- [Commit & Pull Request Guidelines](#commit--pull-request-guidelines)
-- [Configuration & Telemetry Notes](#configuration--telemetry-notes)
-- [MCP Overview](#mcp-overview)
-- [MCP Calling Rules](#mcp-calling-rules)
-
-  - [When to Use MCP](#when-to-use-mcp)
-  - [How to Use MCP](#how-to-use-mcp)
-  - [Fallback Strategies](#fallback-strategies)
-  - [Should and Shouldn’t](#should-and-shouldnt)
-  - [MCP Tool Call Report](#mcp-tool-call-report)
-
-- [MCP Server Registry](#mcp-server-registry)
-
-  - [Code Analysis & Refactoring](#code-analysis--refactoring)
-  - [Documentation & Knowledge](#documentation--knowledge)
-  - [Task Management & Planning](#task-management--planning)
-  - [Browser Automation & Testing](#browser-automation--testing)
-  - [System Operations](#system-operations)
-  - [Design & UI Development](#design--ui-development)
-
-- [Server Entry Template & Documentation Standards](#server-entry-template--documentation-standards)
-
----
-
 ## Project Structure & Module Organization
 
 - **Gateway entrypoint:** `cmd/gateway` wires pools, event bus, and REST control plane.
@@ -108,16 +78,6 @@
 - Create local configs via `cp config/app.example.yaml config/app.yaml` and adjust provider aliases, pool sizes, and telemetry endpoints before running.
 - Control API defaults to `:8880`; document any port changes in PRs for dashboard alignment.
 - When altering telemetry/metrics, update `docs/dashboards/` and `TELEMETRY_POINTS.md` alongside code so operators can redeploy collectors.
-
----
-
-## MCP Overview
-
-**Model Context Protocol (MCP)** servers provide pluggable automation for analysis, documentation retrieval, planning, browser/system ops, and UI development. This project standardizes **when** to use MCP, **how** to call it, and **how** to report calls for traceability.
-
-- Servers are organized by functional category.
-- Use the **priority matrix** in each category to avoid overlap and reduce scope.
-- New server entries should use the **Server Entry Template** below.
 
 ---
 
@@ -215,16 +175,14 @@ Primary MCP → Secondary per Priority Matrix → Local tools → Conservative a
 
 **Abort If** credentials missing/expired, network restricted, destructive ops without approval, ambiguity prevents meaningful results, or retries exhausted.
 
-### Should and Shouldn’t
-
-**✅ Should**
+**Should**
 
 - Consult registry before each call; document intent and parameters
 - Use minimal scope and small result sets; respect server constraints
 - Backoff on rate/5xx; record retries/fallbacks
 - Persist key learnings via Memory server when applicable
 
-**❌ Shouldn’t**
+**Shouldn’t**
 
 - Call multiple MCPs in parallel
 - Broad scans (`path="."`) without filters
@@ -270,15 +228,9 @@ Status: <Success | Retry | Fallback>
 
 ---
 
-## MCP Server Registry
-
-> Use this registry to select the **single** best-fit server per interaction. Preference rules appear under **Priority Matrix** within each section.
-
 ### Code Analysis & Refactoring
 
 #### Serena
-
-**Repository:** [https://github.com/oraios/serena](https://github.com/oraios/serena)
 
 **Core Capabilities**
 
@@ -314,8 +266,6 @@ Status: <Success | Retry | Fallback>
 
 #### Context7
 
-**Repository:** [https://github.com/upstash/context7](https://github.com/upstash/context7)
-
 **Core Capabilities**
 
 - Version-specific docs retrieval from official sources
@@ -341,8 +291,6 @@ Status: <Success | Retry | Fallback>
 | `get-library-docs(id, tokens?, topic?)` | Fetch docs by topic     | Targeted lookup |
 
 #### DeepWiki
-
-**Repository:** [https://cognition.ai/blog/deepwiki-mcp-server](https://cognition.ai/blog/deepwiki-mcp-server)
 
 **Core Capabilities**
 
@@ -370,8 +318,6 @@ Status: <Success | Retry | Fallback>
 | `ask_question(repo, question)` | Semantic Q&A          | Direct extraction |
 
 #### DuckDuckGo Search
-
-**Repository:** [https://github.com/nickclyde/duckduckgo-mcp-server](https://github.com/nickclyde/duckduckgo-mcp-server)
 
 **Core Capabilities**
 
@@ -401,8 +347,6 @@ Status: <Success | Retry | Fallback>
 
 #### Sequential Thinking
 
-**Repository:** [https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking](https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking)
-
 **Core Capabilities**
 
 - Multi-step problem decomposition w/ revisions
@@ -426,8 +370,6 @@ Status: <Success | Retry | Fallback>
 | `sequentialthinking(...)` | Structured thinking with revisions | Complex planning |
 
 #### MCP Shrimp Task Manager
-
-**Repository:** [https://github.com/cjo4m06/mcp-shrimp-task-manager](https://github.com/cjo4m06/mcp-shrimp-task-manager)
 
 **Core Capabilities**
 
@@ -463,8 +405,6 @@ Status: <Success | Retry | Fallback>
 
 #### Memory
 
-**Repository:** [https://github.com/modelcontextprotocol/servers/tree/main/src/memory](https://github.com/modelcontextprotocol/servers/tree/main/src/memory)
-
 **Core Capabilities**
 
 - Persistent knowledge graph (entities, relations, observations)
@@ -499,9 +439,6 @@ Status: <Success | Retry | Fallback>
 
 #### Playwright MCP
 
-**Official:** [https://github.com/microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp)
-**Community:** [https://github.com/executeautomation/mcp-playwright](https://github.com/executeautomation/mcp-playwright)
-
 **Core Capabilities**
 
 - Cross-browser automation (Chromium/Firefox/WebKit)
@@ -526,8 +463,6 @@ Status: <Success | Retry | Fallback>
 - Optional: install, coordinate/vision, PDF, testing assertions, tracing
 
 #### Chrome DevTools MCP
-
-**Repository:** [https://github.com/ChromeDevTools/chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp)
 
 **Core Capabilities**
 
@@ -554,8 +489,6 @@ Status: <Success | Retry | Fallback>
 
 #### Desktop Commander
 
-**Repository:** [https://github.com/wonderwhy-er/DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP)
-
 **Core Capabilities**
 
 - Filesystem CRUD & search; process management; cross-platform shell
@@ -581,8 +514,6 @@ Status: <Success | Retry | Fallback>
 
 #### Figma
 
-**Repository:** [https://github.com/GLips/Figma-Context-MCP](https://github.com/GLips/Figma-Context-MCP)
-
 **Core Capabilities**
 
 - File structure parsing & node traversal
@@ -603,8 +534,6 @@ Status: <Success | Retry | Fallback>
 - `get_figma_data(...)`, `download_figma_images(...)`
 
 #### shadcn
-
-**Repository:** [https://github.com/Jpisnice/shadcn-ui-mcp-server](https://github.com/Jpisnice/shadcn-ui-mcp-server)
 
 **Core Capabilities**
 
