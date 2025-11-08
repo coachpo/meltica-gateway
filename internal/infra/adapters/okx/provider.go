@@ -626,7 +626,6 @@ func (p *Provider) handleTickers(envelope wsEnvelope) error {
 
 func (p *Provider) handleBooks(envelope wsEnvelope) error {
 	action := strings.ToLower(strings.TrimSpace(envelope.Action))
-	log.Printf("okx/handleBooks: received %s with %d data items", action, len(envelope.Data))
 
 	for _, raw := range envelope.Data {
 		var evt bookEvent
@@ -688,8 +687,6 @@ func (p *Provider) handleBooks(envelope wsEnvelope) error {
 			}
 
 			// Emit the snapshot directly
-			log.Printf("okx/handleBooks: emitting snapshot for %s with %d bids, %d asks, seq=%d",
-				symbol, len(payload.Bids), len(payload.Asks), seq)
 			p.publisher.PublishBookSnapshot(p.ctx, symbol, payload)
 
 			// Initialize assembler with this snapshot for future diffs
@@ -774,8 +771,6 @@ func (p *Provider) handleBooks(envelope wsEnvelope) error {
 		}
 
 		// Emit the updated snapshot
-		log.Printf("okx/handleBooks: emitting diff update for %s with %d bids, %d asks, seq=%d",
-			symbol, len(payload.Bids), len(payload.Asks), payload.FinalUpdateID)
 		p.publisher.PublishBookSnapshot(p.ctx, symbol, payload)
 	}
 	return nil
