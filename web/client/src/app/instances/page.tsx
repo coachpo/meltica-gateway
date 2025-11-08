@@ -275,33 +275,16 @@ export default function InstancesPage() {
     () => strategyModulesQuery.data?.modules ?? [],
     [strategyModulesQuery.data],
   );
-  const [persistedDialogState] = useState<PersistedDialogState | null>(() =>
-    loadPersistedDialogState(),
-  );
-  const [createDialogOpen, setCreateDialogOpen] = useState<boolean>(
-    () => persistedDialogState?.open ?? false,
-  );
-  const [dialogMode, setDialogMode] = useState<'create' | 'edit'>(
-    () => persistedDialogState?.mode ?? 'create',
-  );
-  const [editingInstanceId, setEditingInstanceId] = useState<string | null>(
-    () => persistedDialogState?.editingId ?? null,
-  );
-  const [prefilledConfig, setPrefilledConfig] = useState(
-    () => (persistedDialogState?.mode === 'edit' ? true : false),
-  );
+  const [createDialogOpen, setCreateDialogOpen] = useState<boolean>(false);
+  const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create');
+  const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
+  const [prefilledConfig, setPrefilledConfig] = useState(false);
   const [dialogSaving, setDialogSaving] = useState(false);
   const [instanceLoading, setInstanceLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<Record<string, boolean>>({});
-  const [formMode, setFormMode] = useState<'json' | 'guided'>(
-    () => persistedDialogState?.formMode ?? 'guided',
-  );
-  const [lastEditedMode, setLastEditedMode] = useState<'json' | 'guided'>(
-    () => persistedDialogState?.formMode ?? 'guided',
-  );
-  const [instanceJsonDraft, setInstanceJsonDraft] = useState<string>(
-    () => persistedDialogState?.draft ?? DEFAULT_INSTANCE_JSON,
-  );
+  const [formMode, setFormMode] = useState<'json' | 'guided'>('guided');
+  const [lastEditedMode, setLastEditedMode] = useState<'json' | 'guided'>('guided');
+  const [instanceJsonDraft, setInstanceJsonDraft] = useState<string>(DEFAULT_INSTANCE_JSON);
 
   const [newInstance, setNewInstance] = useState({
     id: '',
@@ -328,6 +311,28 @@ export default function InstancesPage() {
   }, []);
   const markJsonDirty = useCallback(() => {
     setLastEditedMode('json');
+  }, []);
+
+  useEffect(() => {
+    const persisted = loadPersistedDialogState();
+    if (!persisted) {
+      return;
+    }
+    setCreateDialogOpen(Boolean(persisted.open));
+    setDialogMode(persisted.mode ?? 'create');
+    setEditingInstanceId(persisted.editingId ?? null);
+    if (persisted.mode === 'edit') {
+      setPrefilledConfig(true);
+    }
+    if (typeof persisted.draft === 'string') {
+      setInstanceJsonDraft(persisted.draft);
+    }
+    if (persisted.formMode) {
+      setFormMode(persisted.formMode);
+      setLastEditedMode(persisted.formMode);
+    } else if (typeof persisted.draft === 'string' && persisted.draft.trim().length > 0) {
+      setLastEditedMode('json');
+    }
   }, []);
 
   useEffect(() => {

@@ -53,6 +53,7 @@ coverage/
 !deployments/**/*
 
 !web/**/*
+web/client/test-results/
 web/node_modules
 web/.next
 node_modules
@@ -64,4 +65,3 @@ node_modules
 !internal/infra/persistence/postgres/sql/**
 
 !sqlc.yaml
-

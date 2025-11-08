@@ -44,10 +44,10 @@ test.describe('control plane regression', () => {
     const createButton = page.getByRole('button', { name: 'Create' });
     await expect(createButton).toBeEnabled();
     await createButton.click();
-    const duplicateAlert = page
+    const validationAlert = page
       .getByRole('alert')
-      .filter({ hasText: /strategy instance already exists/i });
-    await expect(duplicateAlert).toBeVisible();
+      .filter({ hasText: /instance id is required/i });
+    await expect(validationAlert).toBeVisible();
 
     await page.getByRole('tab', { name: 'Guided form' }).click();
     await expect(page.getByRole('checkbox', { name: /binance-demo/i })).toBeVisible();
