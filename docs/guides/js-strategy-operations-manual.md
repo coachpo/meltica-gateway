@@ -120,16 +120,15 @@ Running instances always pin a hash; they only restart when refresh detects that
 
 ### Retiring Old Hashes
 
-1. Export usage: `curl …/strategies/registry > usage.json`.
-2. Run `go run ./scripts/bootstrap_strategies --usage usage.json` to highlight zero-usage revisions.
-3. Stop any lingering instances, then `DELETE /strategies/modules/{name@hash}`.
-4. Optionally regenerate the registry (`bootstrap_strategies -write`) to keep disk tidy.
+1. Export the control-plane usage report via `GET /strategies/registry` and store it for auditing.
+2. Stop any lingering instances referencing hashes you intend to retire.
+3. `DELETE /strategies/modules/{name@hash}` for the retired revisions.
+4. Rebuild the local `registry.json` after the deletions so dashboards stay in sync.
 
 ---
 
 ## 6. Tooling & Tests
 
-- **Bootstrap helper**: `go run ./scripts/bootstrap_strategies -root <dir> [-write] [--usage usage.json]` reorganizes legacy layouts, produces a registry, and surfaces unused revisions.
 - **Backtest CLI**: `make backtest STRATEGY=name[:tag]` runs strategies offline using CSV data via `backtest.NewEngine`.
 - **CI expectations**: `make lint`, `make test`, and `make coverage` (≥ 70%) must pass before merging strategy updates.
 
