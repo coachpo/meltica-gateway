@@ -45,7 +45,7 @@ Running instances always pin a hash; they only restart when refresh detects that
        displayName: "My Strategy",
        description: "Short blurb for operators",
        config: [{ name: "threshold", type: "float", default: 0.5 }],
-       events: ["Trade", "ExecReport"]
+       events: ["Trade", "ExecReport"],
      },
      create(env) {
        const log = (...args) => env.helpers.log("[MYSTRAT]", ...args);
@@ -56,22 +56,24 @@ Running instances always pin a hash; they only restart when refresh detects that
            if (!runtime.isTradingActive()) return;
            const provider = runtime.selectProvider(Date.now());
            log("selected provider", provider.name);
-         }
+         },
        };
-     }
+     },
    };
    ```
 
-   - `metadata.tag` is required for registry writes; keep it semver-like (`vMAJOR.MINOR.PATCH`) so operators can reason about rollouts. Legacy `metadata.version` will be removed in a future release—rename it to `tag` when updating older modules.
+   - `metadata.tag` is required for registry writes; keep it semver-like (`vMAJOR.MINOR.PATCH`) so operators can reason about rollouts.
    - Keep logic deterministic—long blocking calls inside JS pause the Goja goroutine.
    - Use injected helpers for logging, sleeps, provider selection, market state, and order submission.
 
 2. **Register the revision**
+
    - Upload via `POST /strategies/modules` with `source`, `tag`, optional `aliases`, and `promoteLatest`. The control plane copies the supplied tag into module metadata, so keep them synchronized.
    - Or drop the file into the directory and run `POST /strategies/refresh`.
    - Validation failures return HTTP `422` with a `diagnostics` array (stage, message, line/column, hint).
 
 3. **Launch or backtest**
+
    - Reference the strategy by name/tag/hash in lambda manifests, CLI invocations, or the backtest runner (`cmd/backtest -strategy name:tag`).
 
 4. **Validate**
@@ -82,19 +84,19 @@ Running instances always pin a hash; they only restart when refresh detects that
 
 ## 4. Operating the Catalogue (HTTP Surface)
 
-| Method | Path | Purpose |
-| ------ | ---- | ------- |
-| `GET` | `/strategies` | In-memory metadata overview. |
-| `GET` | `/strategies/{name}` | Single strategy metadata. |
-| `GET` | `/strategies/modules` | Module catalogue with hashes, tags, aliases, and `running` block (filter by `strategy`, `hash`, `runningOnly`, `limit`, `offset`). |
-| `POST` | `/strategies/modules` | Create a module; validates compilation before writing. |
-| `GET` | `/strategies/modules/{name}` | Metadata/file info, resolved by name. |
-| `GET` | `/strategies/modules/{name}/source` | Raw JS source. |
-| `PUT` | `/strategies/modules/{selector}` | Replace an existing revision (selector can be name, `name:tag`, or `name@hash`). |
-| `DELETE` | `/strategies/modules/{selector}` | Delete a revision (blocked while any instance references the hash). |
-| `GET` | `/strategies/modules/{selector}/usage` | Revision usage counters with paginated instances; `includeStopped=true` shows dormant pins. |
-| `POST` | `/strategies/refresh` | Reload modules from disk, optionally targeting specific hashes/strategies. |
-| `GET` | `/strategies/registry` | Export `registry.json` merged with live usage counters for tooling/dashboards. |
+| Method   | Path                                   | Purpose                                                                                                                            |
+| -------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/strategies`                          | In-memory metadata overview.                                                                                                       |
+| `GET`    | `/strategies/{name}`                   | Single strategy metadata.                                                                                                          |
+| `GET`    | `/strategies/modules`                  | Module catalogue with hashes, tags, aliases, and `running` block (filter by `strategy`, `hash`, `runningOnly`, `limit`, `offset`). |
+| `POST`   | `/strategies/modules`                  | Create a module; validates compilation before writing.                                                                             |
+| `GET`    | `/strategies/modules/{name}`           | Metadata/file info, resolved by name.                                                                                              |
+| `GET`    | `/strategies/modules/{name}/source`    | Raw JS source.                                                                                                                     |
+| `PUT`    | `/strategies/modules/{selector}`       | Replace an existing revision (selector can be name, `name:tag`, or `name@hash`).                                                   |
+| `DELETE` | `/strategies/modules/{selector}`       | Delete a revision (blocked while any instance references the hash).                                                                |
+| `GET`    | `/strategies/modules/{selector}/usage` | Revision usage counters with paginated instances; `includeStopped=true` shows dormant pins.                                        |
+| `POST`   | `/strategies/refresh`                  | Reload modules from disk, optionally targeting specific hashes/strategies.                                                         |
+| `GET`    | `/strategies/registry`                 | Export `registry.json` merged with live usage counters for tooling/dashboards.                                                     |
 
 ### Usage Index & Metrics
 
