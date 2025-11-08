@@ -173,7 +173,7 @@ export default function StrategiesPage() {
                       {strategy.config.slice(0, 4).map((cfg) => (
                         <li key={cfg.name} className="text-muted-foreground">
                           <span className="font-medium">{cfg.name}</span>
-                          {cfg.required && <span className="text-red-500">*</span>}
+                          {cfg.required && <span className="text-destructive">*</span>}
                           {' '}
                           ({cfg.type})
                         </li>
@@ -272,7 +272,7 @@ export default function StrategiesPage() {
                             <TableRow key={cfg.name}>
                               <TableCell className="font-medium">
                                 {cfg.name}
-                                {cfg.required && <span className="text-red-500">*</span>}
+                                {cfg.required && <span className="text-destructive">*</span>}
                               </TableCell>
                               <TableCell>{cfg.type}</TableCell>
                               <TableCell className="text-muted-foreground">

@@ -17,6 +17,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ChartLegend, StackedBarChart } from '@/components/ui/chart';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CircleStopIcon, Clock3Icon, PlayIcon, PlusIcon, TrashIcon, PencilIcon, Loader2Icon, Copy, RotateCcwIcon } from 'lucide-react';
@@ -387,7 +388,7 @@ export default function InstancesPage() {
 
   const jsonDiagnosticClass =
     jsonDiagnostics.status === 'success'
-      ? 'text-xs text-emerald-600 dark:text-emerald-400'
+      ? 'text-xs text-success'
       : jsonDiagnostics.status === 'error'
         ? 'text-xs text-destructive'
         : 'text-xs text-muted-foreground';
@@ -1853,6 +1854,18 @@ export default function InstancesPage() {
             ? formatProviderIssueMessage(providerAvailability)
             : null;
           const startBlocked = !instance.running && Boolean(providerIssueHint);
+          const totalProviders = instance.providers.length;
+          const missingCount = providerAvailability.missing.length;
+          const stoppedCount = providerAvailability.stopped.length;
+          const readyCount = Math.max(totalProviders - (missingCount + stoppedCount), 0);
+          const providerSegments =
+            totalProviders > 0
+              ? [
+                  { label: 'Ready', value: readyCount, color: 'success' as const },
+                  { label: 'Missing', value: missingCount, color: 'warning' as const },
+                  { label: 'Stopped', value: stoppedCount, color: 'destructive' as const },
+                ]
+              : [];
           return (
             <Card key={instance.id}>
               <CardHeader>
@@ -1860,29 +1873,10 @@ export default function InstancesPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <CardTitle>{instance.id}</CardTitle>
                     <div className="flex flex-wrap items-center justify-end gap-2">
-                      {isBaseline ? (
-                        <Badge className="border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100">
-                          Baseline
-                        </Badge>
-                      ) : null}
-                      {isDynamic && !isBaseline ? (
-                        <Badge className="border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">
-                          Dynamic
-                        </Badge>
-                      ) : null}
-                      {drift ? (
-                        <Badge variant="destructive" className="bg-amber-500 text-black hover:bg-amber-600">
-                          Out of date
-                        </Badge>
-                      ) : null}
-                      <Badge
-                        variant={instance.running ? 'default' : 'secondary'}
-                        className={
-                          instance.running
-                            ? 'bg-green-600 hover:bg-green-700'
-                            : 'bg-gray-500 hover:bg-gray-600'
-                        }
-                      >
+                      {isBaseline ? <Badge variant="warning">Baseline</Badge> : null}
+                      {isDynamic && !isBaseline ? <Badge variant="info">Dynamic</Badge> : null}
+                      {drift ? <Badge variant="warning">Out of date</Badge> : null}
+                      <Badge variant={instance.running ? 'success' : 'muted'}>
                         {instance.running ? 'Running' : 'Stopped'}
                       </Badge>
                     </div>
@@ -1892,11 +1886,17 @@ export default function InstancesPage() {
                     {instance.aggregatedSymbols.length} instrument
                     {instance.aggregatedSymbols.length === 1 ? '' : 's'}
                   </p>
+                  {providerSegments.length > 0 ? (
+                    <div className="space-y-1 text-[11px] text-muted-foreground">
+                      <StackedBarChart segments={providerSegments} />
+                      <ChartLegend segments={providerSegments} className="text-[11px]" />
+                    </div>
+                  ) : null}
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 {isBaseline ? (
-                  <Alert>
+                  <Alert variant="info">
                     <AlertDescription className="text-xs">
                       Baseline instances come from persisted specifications. Editing and deletion are disabled here.
                     </AlertDescription>
@@ -1996,7 +1996,7 @@ export default function InstancesPage() {
                   ) : null}
                 </div>
                 {drift ? (
-                  <Alert>
+                  <Alert variant="warning">
                     <AlertTitle>Revision drift detected</AlertTitle>
                     <AlertDescription>
                       Latest module hash {formatHash(latestHash, 18)} differs from the instance hash{' '}
@@ -2120,12 +2120,8 @@ export default function InstancesPage() {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {historyDialogInstance.baseline ? (
-                    <Badge className="border border-amber-200 bg-amber-50 text-amber-700">Baseline</Badge>
-                  ) : null}
-                  {historyDialogInstance.dynamic ? (
-                    <Badge className="border border-blue-200 bg-blue-50 text-blue-700">Dynamic</Badge>
-                  ) : null}
+                  {historyDialogInstance.baseline ? <Badge variant="warning">Baseline</Badge> : null}
+                  {historyDialogInstance.dynamic ? <Badge variant="info">Dynamic</Badge> : null}
                 </div>
               </div>
               <Tabs value={historyTab} onValueChange={(value) => setHistoryTab(value as HistoryTab)}>

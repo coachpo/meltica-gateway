@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { ChartLegend, StackedBarChart } from '@/components/ui/chart';
 import { XIcon } from 'lucide-react';
 import { useRiskLimitsQuery, useUpdateRiskLimitsMutation } from '@/lib/hooks';
 
@@ -223,29 +224,57 @@ export default function RiskPage() {
     }
   };
 
-  const missingFields = useMemo(() => {
+  const fieldCoverage = useMemo(() => {
     if (!presence) {
-      return [] as string[];
+      return { missing: [] as string[], total: 0, configured: 0 };
     }
-    const fields: string[] = [];
-    if (!presence.maxPositionSize) fields.push('Max position size');
-    if (!presence.maxNotionalValue) fields.push('Max notional value');
-    if (!presence.notionalCurrency) fields.push('Notional currency');
-    if (!presence.orderThrottle) fields.push('Order throttle');
-    if (!presence.orderBurst) fields.push('Order burst');
-    if (!presence.maxConcurrentOrders) fields.push('Max concurrent orders');
-    if (!presence.priceBandPercent) fields.push('Price band percent');
-    if (!presence.allowedOrderTypes) fields.push('Allowed order types');
-    if (!presence.killSwitchEnabled) fields.push('Kill switch');
-    if (!presence.maxRiskBreaches) fields.push('Max risk breaches');
+    const checks: { label: string; configured: boolean }[] = [
+      { label: 'Max position size', configured: presence.maxPositionSize },
+      { label: 'Max notional value', configured: presence.maxNotionalValue },
+      { label: 'Notional currency', configured: presence.notionalCurrency },
+      { label: 'Order throttle', configured: presence.orderThrottle },
+      { label: 'Order burst', configured: presence.orderBurst },
+      { label: 'Max concurrent orders', configured: presence.maxConcurrentOrders },
+      { label: 'Price band percent', configured: presence.priceBandPercent },
+      { label: 'Allowed order types', configured: presence.allowedOrderTypes },
+      { label: 'Kill switch', configured: presence.killSwitchEnabled },
+      { label: 'Max risk breaches', configured: presence.maxRiskBreaches },
+    ];
     if (!presence.circuitBreaker.enabled) {
-      fields.push('Circuit breaker');
+      checks.push({ label: 'Circuit breaker', configured: false });
     } else {
-      if (!presence.circuitBreaker.threshold) fields.push('Circuit breaker threshold');
-      if (!presence.circuitBreaker.cooldown) fields.push('Circuit breaker cooldown');
+      checks.push({ label: 'Circuit breaker', configured: true });
+      checks.push({
+        label: 'Circuit breaker threshold',
+        configured: presence.circuitBreaker.threshold,
+      });
+      checks.push({
+        label: 'Circuit breaker cooldown',
+        configured: presence.circuitBreaker.cooldown,
+      });
     }
-    return fields;
+    const missing = checks.filter((check) => !check.configured).map((check) => check.label);
+    return {
+      missing,
+      total: checks.length,
+      configured: checks.length - missing.length,
+    };
   }, [presence]);
+
+  const missingFields = fieldCoverage.missing;
+  const coverageSegments =
+    fieldCoverage.total > 0
+      ? [
+          { label: 'Configured', value: fieldCoverage.configured, color: 'success' as const },
+          {
+            label: 'Missing',
+            value: fieldCoverage.total - fieldCoverage.configured,
+            color: 'warning' as const,
+          },
+        ]
+      : [];
+  const coveragePercent =
+    fieldCoverage.total > 0 ? Math.round((fieldCoverage.configured / fieldCoverage.total) * 100) : 0;
 
   if (riskQuery.isLoading) {
     return <div>Loading risk limits...</div>;
@@ -287,7 +316,7 @@ export default function RiskPage() {
       </div>
 
       {actionMessage && (
-        <Alert>
+        <Alert variant="success">
           <AlertDescription>
             <div className="flex items-center justify-between gap-4">
               <span>{actionMessage}</span>
@@ -321,7 +350,7 @@ export default function RiskPage() {
       )}
 
       {missingFields.length > 0 && !editMode && (
-        <Alert>
+        <Alert variant="warning">
           <AlertDescription>
             <div className="space-y-2">
               <div className="font-medium text-foreground">Action recommended</div>
@@ -331,6 +360,23 @@ export default function RiskPage() {
             </div>
           </AlertDescription>
         </Alert>
+      )}
+
+      {fieldCoverage.total > 0 && (
+        <Card className="border-dashed bg-card/50">
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase text-muted-foreground">Configuration coverage</p>
+                <p className="text-3xl font-semibold">{coveragePercent}%</p>
+              </div>
+              <div className="min-w-[220px] flex-1">
+                <StackedBarChart segments={coverageSegments} />
+              </div>
+            </div>
+            <ChartLegend segments={coverageSegments} />
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid gap-6 md:grid-cols-2">

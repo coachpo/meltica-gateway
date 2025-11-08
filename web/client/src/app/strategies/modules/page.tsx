@@ -1145,7 +1145,7 @@ export default function StrategyModulesPage() {
               Upload, edit, and refresh JavaScript trading strategies available to the runtime.
             </p>
           </div>
-          <Alert className="max-w-4xl">
+          <Alert variant="info" className="max-w-4xl">
             <AlertTitle className="flex items-center gap-2 text-sm font-semibold">
               Revision pointers
             </AlertTitle>
@@ -1325,7 +1325,7 @@ export default function StrategyModulesPage() {
       </Card>
 
       {strategyDirectory ? (
-        <Alert>
+        <Alert variant="info">
           <AlertTitle>Strategy directory</AlertTitle>
           <AlertDescription className="mt-1 text-xs sm:text-sm">
             Sources are persisted under the configured strategy directory at{' '}
@@ -1986,10 +1986,7 @@ export default function StrategyModulesPage() {
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Badge
-                                variant={instance.running ? 'default' : 'secondary'}
-                                className={instance.running ? 'bg-green-600 hover:bg-green-700' : ''}
-                              >
+                              <Badge variant={instance.running ? 'success' : 'muted'}>
                                 {instance.running ? 'Running' : 'Stopped'}
                               </Badge>
                             </TableCell>
@@ -2340,9 +2337,7 @@ sha256:def...`}
                                       <Badge variant="outline">{revision.version}</Badge>
                                     ) : null}
                                     {revision.retired ? (
-                                      <Badge variant="destructive" className="bg-amber-500 text-black hover:bg-amber-600">
-                                        Retired
-                                      </Badge>
+                                      <Badge variant="warning">Retired</Badge>
                                     ) : null}
                                   </div>
                                   <p className="text-xs text-muted-foreground">

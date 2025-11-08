@@ -150,17 +150,17 @@ interface ToastItemProps {
 }
 
 function ToastItem({ toast, onDismiss }: ToastItemProps) {
-  const variantClass =
-    toast.variant === 'destructive'
-      ? 'border-destructive/60 bg-destructive/10 text-destructive dark:text-destructive-foreground'
-      : toast.variant === 'success'
-        ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
-        : 'border-border bg-card text-card-foreground';
+  const variantClass = cn(
+    'border-border bg-card text-card-foreground',
+    toast.variant === 'destructive' &&
+      'border-destructive/60 bg-destructive/10 text-destructive dark:text-destructive-foreground',
+    toast.variant === 'success' && 'border-success/50 bg-success/10 text-success',
+  );
 
   const titleClass = cn(
     'text-sm font-semibold',
     toast.variant === 'destructive' && 'text-destructive dark:text-destructive-foreground',
-    toast.variant === 'success' && 'text-emerald-900 dark:text-emerald-100',
+    toast.variant === 'success' && 'text-success',
   );
 
   const descriptionClass = cn(
@@ -168,7 +168,7 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
     toast.variant === 'destructive'
       ? 'text-destructive/80 dark:text-destructive-foreground/80'
       : toast.variant === 'success'
-        ? 'text-emerald-800 dark:text-emerald-200'
+        ? 'text-success'
         : 'text-muted-foreground',
   );
 

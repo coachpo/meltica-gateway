@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/table';
 import { useOutboxQuery, useDeleteOutboxEventMutation } from '@/lib/hooks';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ChartLegend, StackedBarChart } from '@/components/ui/chart';
 
 const LIMIT_OPTIONS = [25, 50, 100, 200, 500];
 
@@ -53,6 +54,12 @@ export default function OutboxPage() {
   const deleteMutation = useDeleteOutboxEventMutation(queryParams);
 
   const events = data?.events ?? [];
+  const deliveredCount = events.filter((event) => event.delivered).length;
+  const pendingCount = events.length - deliveredCount;
+  const statusSegments = [
+    { label: 'Delivered', value: deliveredCount, color: 'success' as const },
+    { label: 'Pending', value: pendingCount, color: 'warning' as const },
+  ];
 
   return (
     <div className="space-y-6">
@@ -130,65 +137,86 @@ export default function OutboxPage() {
           </AlertDescription>
         </Alert>
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Events</CardTitle>
-            <CardDescription>{events.length} events loaded</CardDescription>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Aggregate</TableHead>
-                  <TableHead>Event</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Attempts</TableHead>
-                  <TableHead>Available</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {events.map((event) => (
-                  <TableRow key={event.id}>
-                    <TableCell className="font-mono text-xs">{event.id}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{event.aggregateType}</span>
-                        <span className="text-xs text-muted-foreground">{event.aggregateID}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>{event.eventType}</TableCell>
-                    <TableCell>
-                      {event.delivered ? (
-                        <Badge variant="secondary">Delivered</Badge>
-                      ) : (
-                        <Badge variant="outline">Pending</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>{event.attempts}</TableCell>
-                    <TableCell className="text-sm">{formatTimestamp(event.availableAt)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={deleteMutation.isPending}
-                        onClick={() => deleteMutation.mutateAsync(event.id).catch(() => undefined)}
-                      >
-                        Delete
-                      </Button>
-                    </TableCell>
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Queue Snapshot</CardTitle>
+              <CardDescription>Delivery status for the current result set.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Total events</p>
+                  <p className="text-3xl font-semibold">{events.length}</p>
+                </div>
+                <div className="min-w-[220px] flex-1">
+                  <StackedBarChart segments={statusSegments} />
+                </div>
+              </div>
+              <ChartLegend segments={statusSegments} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Events</CardTitle>
+              <CardDescription>{events.length} events loaded</CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Aggregate</TableHead>
+                    <TableHead>Event</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Attempts</TableHead>
+                    <TableHead>Available</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {events.length === 0 && (
-              <p className="mt-4 text-sm text-muted-foreground">
-                No outbox events match the selected filters.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+                </TableHeader>
+                <TableBody>
+                  {events.map((event) => (
+                    <TableRow key={event.id}>
+                      <TableCell className="font-mono text-xs">{event.id}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{event.aggregateType}</span>
+                          <span className="text-xs text-muted-foreground">{event.aggregateID}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>{event.eventType}</TableCell>
+                      <TableCell>
+                        {event.delivered ? (
+                          <Badge variant="secondary">Delivered</Badge>
+                        ) : (
+                          <Badge variant="outline">Pending</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>{event.attempts}</TableCell>
+                      <TableCell className="text-sm">{formatTimestamp(event.availableAt)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={deleteMutation.isPending}
+                          onClick={() => deleteMutation.mutateAsync(event.id).catch(() => undefined)}
+                        >
+                          Delete
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              {events.length === 0 && (
+                <p className="mt-4 text-sm text-muted-foreground">
+                  No outbox events match the selected filters.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );

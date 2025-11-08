@@ -1017,7 +1017,7 @@ export default function ProvidersPage() {
                         <div key={setting.name} className="space-y-2">
                           <Label htmlFor={`setting-${setting.name}`}>
                             {labelText}
-                            {setting.required && <span className="text-red-500">*</span>}
+                            {setting.required && <span className="text-destructive">*</span>}
                           </Label>
                       <Input
                         id={`setting-${setting.name}`}

@@ -118,9 +118,9 @@ export default function ContextBackupPage() {
 
   const inputDiagnosticClass =
     inputDiagnostics.status === 'success'
-      ? 'text-xs text-emerald-600 dark:text-emerald-400'
+      ? 'text-xs text-success'
       : inputDiagnostics.status === 'warning'
-        ? 'text-xs text-amber-600 dark:text-amber-400'
+        ? 'text-xs text-warning'
         : inputDiagnostics.status === 'error'
           ? 'text-xs text-destructive'
           : 'text-xs text-muted-foreground';
@@ -296,7 +296,7 @@ export default function ContextBackupPage() {
         </p>
       </div>
 
-      <Alert>
+      <Alert variant="info">
         <AlertTitle>Restores resume in a stopped state</AlertTitle>
         <AlertDescription>
           Restored providers and lambdas return disabled. Start them manually after confirming their configuration. Sensitive fields matching

@@ -199,7 +199,7 @@ export default function AdaptersPage() {
                             <TableRow key={field.name}>
                               <TableCell className="font-medium">
                                 {field.name}
-                                {field.required && <span className="text-red-500">*</span>}
+                                {field.required && <span className="text-destructive">*</span>}
                               </TableCell>
                               <TableCell>{field.type}</TableCell>
                               <TableCell className="text-muted-foreground">
