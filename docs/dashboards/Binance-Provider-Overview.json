@@ -80,7 +80,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_meltica_provider_binance_orders_received{environment=\"$environment\"}[1m]))",
+          "expr": "sum(rate(meltica_provider_binance_orders_received{environment=\"$environment\"}[1m]))",
           "refId": "A"
         }
       ],
@@ -135,7 +135,7 @@
       },
       "targets": [
         {
-          "expr": "100 * sum(rate(meltica_meltica_provider_binance_orders_rejected{environment=\"$environment\"}[5m])) / clamp_min(sum(rate(meltica_meltica_provider_binance_orders_received{environment=\"$environment\"}[5m])), 1e-3)",
+          "expr": "100 * sum(rate(meltica_provider_binance_orders_rejected{environment=\"$environment\"}[5m])) / clamp_min(sum(rate(meltica_provider_binance_orders_received{environment=\"$environment\"}[5m])), 1e-3)",
           "refId": "A"
         }
       ],
@@ -200,17 +200,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(meltica_meltica_provider_binance_order_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(meltica_provider_binance_order_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
           "refId": "A",
           "legendFormat": "p95"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(meltica_meltica_provider_binance_order_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(meltica_provider_binance_order_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
           "refId": "B",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(meltica_meltica_provider_binance_order_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(meltica_provider_binance_order_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
           "refId": "C",
           "legendFormat": "p99"
         }
@@ -266,7 +266,7 @@
       },
       "targets": [
         {
-          "expr": "sum(meltica_meltica_provider_binance_venue_disruptions{environment=\"$environment\"})",
+          "expr": "sum(meltica_provider_binance_venue_disruptions{environment=\"$environment\"})",
           "refId": "A"
         }
       ],
@@ -305,7 +305,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_meltica_provider_binance_events_emitted{environment=\"$environment\"}[1m])) by (event_type)",
+          "expr": "sum(rate(meltica_provider_binance_events_emitted{environment=\"$environment\"}[1m])) by (event_type)",
           "legendFormat": "{{event_type}}",
           "refId": "A"
         }
@@ -345,7 +345,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_meltica_provider_binance_orders_received{environment=\"$environment\"}[1m])) by (symbol)",
+          "expr": "sum(rate(meltica_provider_binance_orders_received{environment=\"$environment\"}[1m])) by (symbol)",
           "legendFormat": "{{symbol}}",
           "refId": "A"
         }
@@ -385,7 +385,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_meltica_provider_binance_orders_rejected{environment=\"$environment\"}[5m])) by (reason)",
+          "expr": "sum(rate(meltica_provider_binance_orders_rejected{environment=\"$environment\"}[5m])) by (reason)",
           "legendFormat": "{{reason}}",
           "refId": "A"
         }
@@ -425,7 +425,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_meltica_provider_binance_venue_errors{environment=\"$environment\"}[5m])) by (result)",
+          "expr": "sum(rate(meltica_provider_binance_venue_errors{environment=\"$environment\"}[5m])) by (result)",
           "legendFormat": "{{result}}",
           "refId": "A"
         }
@@ -477,7 +477,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_meltica_provider_binance_balance_updates{environment=\"$environment\"}[1m]))",
+          "expr": "sum(rate(meltica_provider_binance_balance_updates{environment=\"$environment\"}[1m]))",
           "refId": "A"
         }
       ],
@@ -516,7 +516,7 @@
       },
       "targets": [
         {
-          "expr": "sum(meltica_meltica_provider_binance_balance_total{environment=\"$environment\"}) by (currency)",
+          "expr": "sum(meltica_provider_binance_balance_total{environment=\"$environment\"}) by (currency)",
           "legendFormat": "{{currency}}",
           "refId": "A"
         }
@@ -556,7 +556,7 @@
       },
       "targets": [
         {
-          "expr": "sum(meltica_meltica_provider_binance_balance_available{environment=\"$environment\"}) by (currency)",
+          "expr": "sum(meltica_provider_binance_balance_available{environment=\"$environment\"}) by (currency)",
           "legendFormat": "{{currency}}",
           "refId": "A"
         }
@@ -596,7 +596,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_meltica_provider_binance_orders_received{environment=\"$environment\"}[1m])) by (order_side)",
+          "expr": "sum(rate(meltica_provider_binance_orders_received{environment=\"$environment\"}[1m])) by (order_side)",
           "legendFormat": "{{order_side}}",
           "refId": "A"
         }
@@ -636,7 +636,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_meltica_provider_binance_orders_received{environment=\"$environment\"}[1m])) by (order_type)",
+          "expr": "sum(rate(meltica_provider_binance_orders_received{environment=\"$environment\"}[1m])) by (order_type)",
           "legendFormat": "{{order_type}}",
           "refId": "A"
         }
@@ -676,7 +676,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(meltica_meltica_provider_binance_orders_rejected{environment=\"$environment\"}[5m])) by (order_state)",
+          "expr": "sum(rate(meltica_provider_binance_orders_rejected{environment=\"$environment\"}[5m])) by (order_state)",
           "legendFormat": "{{order_state}}",
           "refId": "A"
         }
@@ -716,12 +716,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(meltica_meltica_provider_binance_ws_reconnects{environment=\"$environment\",result=\"success\"}[5m]))",
+          "expr": "sum(rate(meltica_provider_binance_ws_reconnects{environment=\"$environment\",result=\"success\"}[5m]))",
           "legendFormat": "success"
         },
         {
           "refId": "B",
-          "expr": "sum(rate(meltica_meltica_provider_binance_ws_reconnects{environment=\"$environment\",result=\"error\"}[5m]))",
+          "expr": "sum(rate(meltica_provider_binance_ws_reconnects{environment=\"$environment\",result=\"error\"}[5m]))",
           "legendFormat": "error"
         }
       ]
@@ -761,7 +761,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(meltica_meltica_provider_binance_ws_messages{environment=\"$environment\"}[1m])) by (message_type)",
+          "expr": "sum(rate(meltica_provider_binance_ws_messages{environment=\"$environment\"}[1m])) by (message_type)",
           "legendFormat": "{{message_type}}"
         }
       ]
@@ -796,7 +796,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(meltica_meltica_provider_binance_ws_active_subscriptions{environment=\"$environment\"})",
+          "expr": "sum(meltica_provider_binance_ws_active_subscriptions{environment=\"$environment\"})",
           "legendFormat": "active"
         }
       ]
@@ -836,7 +836,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum(rate(meltica_meltica_provider_binance_ws_ping_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(meltica_provider_binance_ws_ping_latency_bucket{environment=\"$environment\"}[5m])) by (le))",
           "legendFormat": "ping p95"
         }
       ]
@@ -973,14 +973,14 @@
         "datasource": {
           "uid": "$datasource"
         },
-        "definition": "label_values(meltica_meltica_provider_binance_events_emitted, environment)",
+        "definition": "label_values(meltica_provider_binance_events_emitted, environment)",
         "hide": 0,
         "includeAll": false,
         "label": "Environment",
         "multi": false,
         "name": "environment",
         "options": [],
-        "query": "label_values(meltica_meltica_provider_binance_events_emitted, environment)",
+        "query": "label_values(meltica_provider_binance_events_emitted, environment)",
         "refresh": 1,
         "sort": 1,
         "type": "query"
