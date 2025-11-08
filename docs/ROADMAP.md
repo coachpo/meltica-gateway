@@ -8,8 +8,10 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 
 #### POSTPONED
 
-- Persistent state and data backbone: order audit log, positions & real-time PnL tracking, historical tick storage, and crash recovery/checkpointing.
-- Real exchange connectivity: authenticated REST/WebSocket adapters, reconnection and rate-limit handling, and symbol normalization.
+- Persistent state and data backbone:
+  - [Done] Order/exec/balance audit trail persisted via the Postgres stores plus SQL migrations (`orders`, `executions`, `balances`, `events_outbox`).
+  - [Done] Provider/strategy snapshots + HTTP context backup/restore give crash recovery and checkpointing.
+  - [Pending] Positions with live PnL tracking and historical tick storage still need dedicated services.
 - Security of control surfaces & secrets: TLS and authn/z for control APIs; proper secrets management (vault/rotation).
 
 #### PLANNING
@@ -24,8 +26,12 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 
 #### POSTPONED
 
-- Reliability & scalability: durable messaging (e.g., NATS/Kafka), horizontal scaling, replay/backfill mechanisms.
-- Operations & monitoring: CI/CD, IaC/Kubernetes, centralized logging, alerting/SLOs, and runbooks.
+- Reliability & scalability:
+  - [Done] Durable in-process bus wrapped with the Postgres outbox (replay worker + persistence) gives guaranteed delivery/backfill.
+  - [Pending] Horizontal scale-out and external brokers (NATS/Kafka) are still open.
+- Operations & monitoring:
+  - [Done] OTLP telemetry provider + published Grafana dashboards/runbooks cover metrics and alert references.
+  - [Pending] CI/CD automation, IaC/Kubernetes manifests, and centralized log pipelines remain outstanding.
 - Multi-venue routing & failover: smart order routing across venues, liquidity splitting, venue selection/fallback.
 
 - Expanded testing: integration with real venues, chaos/property-based tests, and performance/latency regression.
@@ -50,6 +56,7 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 ### Urgent and important
 
 - [Done] Risk management and safety controls: pre-trade checks, position/notional limits, circuit breakers/kill switch, and order throttling.
+- [Done] Real exchange connectivity: authenticated REST/WebSocket adapters, reconnection and rate-limit handling, and symbol normalization.
 
 ### Urgent and not important
 
@@ -65,4 +72,4 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 
 ---
 
-Last updated: 2025-10-26
+Last updated: 2025-11-08
