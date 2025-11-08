@@ -254,8 +254,8 @@ function friendlyDeletionMessage(message: string): string {
 
 function friendlySaveError(message: string): string {
   const lower = message.toLowerCase();
-  if (lower.includes('metadata version required') || lower.includes('metadata tag required')) {
-    return 'Strategy tag is required. Provide a tag (for example v1.2.0) or include metadata.tag in the module source.';
+  if (lower.includes('metadata tag required')) {
+    return 'Strategy tag is required. Provide a tag (for example v1.2.0) and ensure metadata.tag is present in the module source.';
   }
   if (lower.includes('tag') && lower.includes('already exists')) {
     return 'Tag already exists for this strategy. Choose a new tag or retire the conflicting revision first.';

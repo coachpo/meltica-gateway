@@ -55,7 +55,7 @@ function absolute(value) {
 module.exports = {
   metadata: {
     name: "meanreversion",
-    version: "1.0.0",
+    tag: "1.0.0",
     displayName: "Mean Reversion",
     description: "Trades when price deviates from its moving average.",
     config: [

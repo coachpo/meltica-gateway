@@ -51,7 +51,7 @@ function toNumber(value) {
 module.exports = {
   metadata: {
     name: 'marketmaking',
-    version: '1.0.0',
+    tag: '1.0.0',
     displayName: 'Market Making',
     description: 'Quotes bid/ask orders around the mid price to capture spread.',
     config: [

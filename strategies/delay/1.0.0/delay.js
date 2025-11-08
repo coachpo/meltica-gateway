@@ -57,7 +57,7 @@ function randomDelay(minMs, maxMs) {
 module.exports = {
   metadata: {
     name: "delay",
-    version: "1.0.0",
+    tag: "1.0.0",
     displayName: "Delay",
     description: "Simulates processing latency with a configurable random delay window.",
     config: [

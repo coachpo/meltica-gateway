@@ -1128,7 +1128,7 @@ func (l *Loader) writeModuleWithRegistry(source []byte, opts ModuleWriteOptions,
 	}
 	if tag == "" {
 		_ = os.Remove(tempPath)
-		return empty, fmt.Errorf("strategy loader: metadata version required for registry writes")
+		return empty, fmt.Errorf("strategy loader: metadata tag required for registry writes")
 	}
 	if err := validatePathSegment(tag); err != nil {
 		_ = os.Remove(tempPath)

@@ -1,7 +1,7 @@
 module.exports = {
   metadata: {
     name: "logging",
-    version: "1.0.0",
+    tag: "1.0.0",
     displayName: "Logging",
     description: "Emits detailed logs for all inbound events.",
     config: [

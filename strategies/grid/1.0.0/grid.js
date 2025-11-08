@@ -52,7 +52,7 @@ function normalizePrice(value) {
 module.exports = {
   metadata: {
     name: "grid",
-    version: "1.0.0",
+    tag: "1.0.0",
     displayName: "Grid",
     description: "Places a symmetric buy/sell grid around the reference price.",
     config: [

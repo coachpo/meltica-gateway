@@ -1,7 +1,7 @@
 module.exports = {
   metadata: {
     name: "extension-listener",
-    version: "1.0.0",
+    tag: "1.0.0",
     displayName: "Extension Listener",
     description: "Logs custom Extension events and echoes payload metadata.",
     config: [

@@ -101,7 +101,7 @@ function strategyPosition(initial = 0) {
 module.exports = {
   metadata: {
     name: "momentum",
-    version: "1.0.0",
+    tag: "1.0.0",
     displayName: "Momentum",
     description: "Trades in the direction of recent price momentum.",
     config: [

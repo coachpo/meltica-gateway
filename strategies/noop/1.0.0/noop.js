@@ -1,7 +1,7 @@
 module.exports = {
   metadata: {
     name: "noop",
-    version: "1.0.0",
+    tag: "1.0.0",
     displayName: "No-Op",
     description: "Pass-through strategy that performs no actions.",
     config: [
