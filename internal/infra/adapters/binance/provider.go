@@ -31,6 +31,8 @@ import (
 	"github.com/coachpo/meltica/internal/infra/telemetry"
 )
 
+const extensionHeartbeatInterval = 30 * time.Second
+
 // Provider implements the Binance spot market adapter.
 type Provider struct {
 	name   string
@@ -224,6 +226,8 @@ func (p *Provider) Start(ctx context.Context) error {
 	} else if strings.TrimSpace(p.opts.Config.APISecret) == "" {
 		log.Printf("binance/provider: API secret not configured; private subscriptions (balances, execution reports) require both API key and secret for %s", p.name)
 	}
+
+	p.startExtensionEmitter()
 
 	go func() {
 		<-runCtx.Done()
@@ -773,6 +777,34 @@ func (p *Provider) startUserDataStream() {
 	go func() {
 		defer p.userStreamWG.Done()
 		p.runUserDataStream(ctx)
+	}()
+}
+
+func (p *Provider) startExtensionEmitter() {
+	if p == nil || p.publisher == nil {
+		return
+	}
+	ctx := p.ctx
+	if ctx == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(extensionHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				symbol := fmt.Sprintf("%s-extension", strings.ToUpper(strings.TrimSpace(p.name)))
+				payload := map[string]any{
+					"kind":      "extension_heartbeat",
+					"provider":  p.name,
+					"emittedAt": now.UTC().Format(time.RFC3339Nano),
+				}
+				p.publisher.PublishExtension(ctx, symbol, payload)
+			}
+		}
 	}()
 }
 
