@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
-"""Bootstrap utility for strategy modules.
 
-This tool mirrors the legacy Go version but is implemented in Python. It scans the
-strategies directory, normalizes module layouts, writes registry.json, and optionally
-reports unused revisions using a usage export sourced from a file or HTTP endpoint.
-"""
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import subprocess
@@ -20,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 
-DEFAULT_ROOT = "strategies"
+DEFAULT_ROOT = "."
 DEFAULT_VERSION = "v1.0.0"
 DEFAULT_USAGE_OUTPUT = "usage.json"
 NODE_METADATA_SCRIPT = textwrap.dedent(
@@ -273,42 +267,58 @@ def report_usage(usage: List[dict], registry: Dict[str, Dict[str, object]]) -> N
         print(f"  - {name} {tag} [{hash_value}]")
 
 
-def parse_args(argv: List[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Normalize strategies and emit registry manifest")
-    parser.add_argument("--root", default=DEFAULT_ROOT, help="Path to strategies directory")
-    parser.add_argument("--write", action="store_true", help="Apply filesystem moves to normalize layout")
-    parser.add_argument(
-        "--usage",
-        help="Path to usage export JSON or URL (e.g. http://localhost:8880/strategies/registry)",
-    )
-    parser.add_argument(
-        "--usage-output",
-        default=DEFAULT_USAGE_OUTPUT,
-        help="When --usage is a URL, write the downloaded payload to this path",
-    )
-    return parser.parse_args(argv)
+def rebuild_registry_once(root: Path, write: bool) -> Dict[str, Dict[str, object]]:
+    modules = discover_modules(root)
+    if not modules:
+        raise BootstrapError(f"no JavaScript strategies found under {root}")
+    registry = build_registry(modules, root, write)
+    write_registry(root, registry)
+    print(f"registry.json generated for {len(registry)} strategies under {root}")
+    if not write:
+        print("filesystem left untouched (pass --write to reorganize)")
+    return registry
 
 
-def main(argv: List[str]) -> int:
+def prompt_with_default(label: str, default: Optional[str] = None) -> str:
+    suffix = f" [{default}]" if default else ""
     try:
-        args = parse_args(argv)
-        root = ensure_dir(args.root)
-        modules = discover_modules(root)
-        if not modules:
-            raise BootstrapError(f"no JavaScript strategies found under {root}")
-        registry = build_registry(modules, root, args.write)
-        write_registry(root, registry)
-        print(f"registry.json generated for {len(registry)} strategies under {root}")
-        if not args.write:
-            print("filesystem left untouched (pass --write to reorganize)")
-        usage_entries = read_usage(args.usage, args.usage_output)
-        if usage_entries:
-            report_usage(usage_entries, registry)
+        value = input(f"{label}{suffix}: ").strip()
+    except EOFError:
+        print()
+        return default or ""
+    return value or (default or "")
+
+
+def prompt_bool(label: str, default: bool = False) -> bool:
+    default_label = "Y/n" if default else "y/N"
+    try:
+        value = input(f"{label} ({default_label}): ").strip().lower()
+    except EOFError:
+        print()
+        return default
+    if not value:
+        return default
+    return value in {"y", "yes"}
+
+
+def main() -> int:
+    print("=== Onboard Strategies ===")
+    root_input = prompt_with_default("Strategies root", DEFAULT_ROOT)
+    root = ensure_dir(root_input or DEFAULT_ROOT)
+    normalize = prompt_bool("Normalize layout before writing registry?", default=True)
+    if not prompt_bool("Proceed with onboarding?", default=True):
+        print("Aborted by operator.")
         return 0
+    try:
+        rebuild_registry_once(root, write=normalize)
     except BootstrapError as exc:
-        print(f"bootstrap: {exc}", file=sys.stderr)
+        print(f"bootstrap: {exc}")
         return 1
+    if not normalize:
+        print("(Layout left untouched; rerun and answer 'y' to reorganize if needed.)")
+    print("Done.")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())

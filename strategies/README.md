@@ -8,29 +8,19 @@ this README becomes the entry point for contributors and operators.
 
 - `<strategy>/<tag>/<strategy>.js` — versioned strategy sources.
 - `registry.json` — manifest consumed by the control plane.
-- `bootstrap_strategies.py` — utility script for normalizing layouts, rebuilding the
-  manifest, and auditing usage exports.
+- `bootstrape.py` — minimal helper for onboarding strategies (registry rebuilds and
+  optional layout normalization).
 
 ## Bootstrap Helper
 
 ```
-python3 bootstrap_strategies.py \
-  --root strategies \
-  --usage http://localhost:8880/strategies/registry \
-  --usage-output usage.json
+python3 bootstrape.py
 ```
 
-Key flags:
-
-- `--root`: strategy directory to scan (defaults to `strategies`).
-- `--write`: move unversioned files into `<name>/<version>/<name>.js` before writing the
-  registry.
-- `--usage`: either a local JSON file or a URL; when provided the script prints a report
-  of revisions with zero running instances.
-- `--usage-output`: where to store the downloaded payload when `--usage` is a URL
-  (defaults to `usage.json`).
-
-The script requires Python 3.9+ and Node.js (used to evaluate each module’s exported
+The helper runs a single onboarding flow: point it at the strategies root, decide
+whether to normalize unversioned files before writing `registry.json`, confirm, and it
+will rebuild the manifest. Any response of “no” to the confirmation aborts the run. The
+script requires Python 3.9+ and Node.js (used to evaluate each module’s exported
 `metadata`).
 
 ## Typical Workflow
