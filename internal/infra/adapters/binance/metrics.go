@@ -55,35 +55,35 @@ func newProviderMetrics(p *Provider) *providerMetrics {
 		balanceAvailable: nil,
 	}
 
-	pm.ordersReceived, _ = meter.Int64Counter("provider.binance.orders.received",
+	pm.ordersReceived, _ = meter.Int64Counter("meltica_provider_binance_orders_received",
 		metric.WithDescription("Total Binance execution reports received by Meltica"),
 		metric.WithUnit("{report}"))
 
-	pm.ordersRejected, _ = meter.Int64Counter("provider.binance.orders.rejected",
+	pm.ordersRejected, _ = meter.Int64Counter("meltica_provider_binance_orders_rejected",
 		metric.WithDescription("Total Binance order rejections observed by Meltica"),
 		metric.WithUnit("{reject}"))
 
-	pm.orderLatency, _ = meter.Float64Histogram("provider.binance.order.latency",
+	pm.orderLatency, _ = meter.Float64Histogram("meltica_provider_binance_order_latency",
 		metric.WithDescription("Latency between Binance execution report timestamp and ingestion"),
 		metric.WithUnit("ms"))
 
-	pm.eventsEmitted, _ = meter.Int64Counter("provider.binance.events.emitted",
+	pm.eventsEmitted, _ = meter.Int64Counter("meltica_provider_binance_events_emitted",
 		metric.WithDescription("Canonical Meltica events emitted by the Binance adapter"),
 		metric.WithUnit("{event}"))
 
-	pm.balanceUpdates, _ = meter.Int64Counter("provider.binance.balance.updates",
+	pm.balanceUpdates, _ = meter.Int64Counter("meltica_provider_binance_balance_updates",
 		metric.WithDescription("Binance balance updates emitted by the adapter"),
 		metric.WithUnit("{update}"))
 
-	pm.venueErrors, _ = meter.Int64Counter("provider.binance.venue.errors",
+	pm.venueErrors, _ = meter.Int64Counter("meltica_provider_binance_venue_errors",
 		metric.WithDescription("Errors reported by the Binance adapter"),
 		metric.WithUnit("{error}"))
 
-	pm.venueDisruptions, _ = meter.Int64Counter("provider.binance.venue.disruptions",
+	pm.venueDisruptions, _ = meter.Int64Counter("meltica_provider_binance_venue_disruptions",
 		metric.WithDescription("Binance venue disruptions detected by the adapter"),
 		metric.WithUnit("{disruption}"))
 
-	pm.balanceTotal, _ = meter.Float64ObservableGauge("provider.binance.balance.total",
+	pm.balanceTotal, _ = meter.Float64ObservableGauge("meltica_provider_binance_balance_total",
 		metric.WithDescription("Total balances tracked for Binance account"),
 		metric.WithUnit("USD"),
 		metric.WithFloat64Callback(func(_ context.Context, observer metric.Float64Observer) error {
@@ -97,7 +97,7 @@ func newProviderMetrics(p *Provider) *providerMetrics {
 			return nil
 		}))
 
-	pm.balanceAvailable, _ = meter.Float64ObservableGauge("provider.binance.balance.available",
+	pm.balanceAvailable, _ = meter.Float64ObservableGauge("meltica_provider_binance_balance_available",
 		metric.WithDescription("Available balances tracked for Binance account"),
 		metric.WithUnit("USD"),
 		metric.WithFloat64Callback(func(_ context.Context, observer metric.Float64Observer) error {
@@ -241,31 +241,31 @@ func newStreamMetrics(provider, stream string) *streamMetrics {
 		subscriptions:    nil,
 	}
 
-	sm.reconnects, _ = meter.Int64Counter("provider.binance.ws.reconnects",
+	sm.reconnects, _ = meter.Int64Counter("meltica_provider_binance_ws_reconnects",
 		metric.WithDescription("Number of Binance websocket reconnect attempts"),
 		metric.WithUnit("{reconnect}"))
 
-	sm.controlMessages, _ = meter.Int64Counter("provider.binance.ws.control.messages",
+	sm.controlMessages, _ = meter.Int64Counter("meltica_provider_binance_ws_control_messages",
 		metric.WithDescription("Control messages sent by Binance websocket stream managers"),
 		metric.WithUnit("{message}"))
 
-	sm.messagesReceived, _ = meter.Int64Counter("provider.binance.ws.messages",
+	sm.messagesReceived, _ = meter.Int64Counter("meltica_provider_binance_ws_messages",
 		metric.WithDescription("Stream messages received from Binance websocket connections"),
 		metric.WithUnit("{message}"))
 
-	sm.messageBytes, _ = meter.Int64Histogram("provider.binance.ws.message.bytes",
+	sm.messageBytes, _ = meter.Int64Histogram("meltica_provider_binance_ws_message_bytes",
 		metric.WithDescription("Size of Binance websocket stream messages"),
 		metric.WithUnit("By"))
 
-	sm.pingCount, _ = meter.Int64Counter("provider.binance.ws.pings",
+	sm.pingCount, _ = meter.Int64Counter("meltica_provider_binance_ws_pings",
 		metric.WithDescription("Ping frames sent by Binance websocket stream managers"),
 		metric.WithUnit("{ping}"))
 
-	sm.pingLatency, _ = meter.Float64Histogram("provider.binance.ws.ping.latency",
+	sm.pingLatency, _ = meter.Float64Histogram("meltica_provider_binance_ws_ping_latency",
 		metric.WithDescription("Latency of ping frames on Binance websocket connections"),
 		metric.WithUnit("ms"))
 
-	sm.subscriptions, _ = meter.Int64UpDownCounter("provider.binance.ws.active_subscriptions",
+	sm.subscriptions, _ = meter.Int64UpDownCounter("meltica_provider_binance_ws_active_subscriptions",
 		metric.WithDescription("Active Binance websocket stream subscriptions tracked by the adapter"),
 		metric.WithUnit("{stream}"))
 

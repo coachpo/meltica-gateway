@@ -98,12 +98,8 @@ func (b *MemoryBus) Publish(ctx context.Context, evt *schema.Event) error {
 	eventType := string(evt.Type)
 	start := time.Now()
 	result := "success"
-	shouldRecord := false
 
 	defer func() {
-		if !shouldRecord {
-			return
-		}
 		attrs := telemetry.OperationResultAttributes(telemetry.Environment(), provider, "eventbus.publish", result)
 		if eventType != "" {
 			attrs = append(attrs, telemetry.AttrEventType.String(eventType))
@@ -114,17 +110,12 @@ func (b *MemoryBus) Publish(ctx context.Context, evt *schema.Event) error {
 		if b.publishDuration != nil {
 			b.publishDuration.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(attrs...))
 		}
-		if b.eventsPublishedCounter != nil {
-			b.eventsPublishedCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
-		}
 	}()
 
 	if evt.Type == "" {
 		result = "invalid_event_type"
 		return errs.New("eventbus/publish", errs.CodeInvalid, errs.WithMessage("event type required"))
 	}
-
-	shouldRecord = true
 
 	if err := enforceExtensionPayloadCap(evt, b.cfg.ExtensionPayloadCapBytes); err != nil {
 		result = "extension_payload_cap"
