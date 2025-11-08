@@ -4,13 +4,15 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 
 ## Open Items — Urgency & Importance Sorting
 
-### Urgent and important - IGNORED
+### Urgent and important
+
+#### POSTPONED
 
 - Persistent state and data backbone: order audit log, positions & real-time PnL tracking, historical tick storage, and crash recovery/checkpointing.
 - Real exchange connectivity: authenticated REST/WebSocket adapters, reconnection and rate-limit handling, and symbol normalization.
 - Security of control surfaces & secrets: TLS and authn/z for control APIs; proper secrets management (vault/rotation).
 
-### Urgent and important - PLANNING
+#### PLANNING
 
 - Robust OMS/execution: order state machine, amend/bulk operations, advanced order types (stop/stop-limit/OCO), and execution analytics (slippage/latency).
 
@@ -20,16 +22,28 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 
 ### Not urgent and important
 
+#### POSTPONED
+
 - Reliability & scalability: durable messaging (e.g., NATS/Kafka), horizontal scaling, replay/backfill mechanisms.
 - Operations & monitoring: CI/CD, IaC/Kubernetes, centralized logging, alerting/SLOs, and runbooks.
 - Multi-venue routing & failover: smart order routing across venues, liquidity splitting, venue selection/fallback.
-- Portfolio/accounting enhancements: portfolio/position management and fee accounting.
+
 - Expanded testing: integration with real venues, chaos/property-based tests, and performance/latency regression.
+
+#### PLANNING
+
+- Portfolio/accounting enhancements: portfolio/position management and fee accounting.
 
 ### Not urgent and not important
 
+#### POSTPONED
+
 - Advanced performance tuning: lock-free structures, CPU pinning/NUMA (HFT-focused).
 - ML/optimization features: parameter optimization, walk-forward analysis, and model/feature-store integration.
+
+#### PLANNING
+
+- None
 
 ## Completed Items — Urgency & Importance Sorting
 
