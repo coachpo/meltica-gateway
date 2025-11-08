@@ -144,6 +144,14 @@ export const instanceSpecSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
+export const instanceActionResponseSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  action: z.enum(['start', 'stop']),
+});
+
+export type InstanceActionResponse = z.infer<typeof instanceActionResponseSchema>;
+
 const moduleRevisionUsageSchema = z.object({
   strategy: z.string(),
   hash: z.string(),

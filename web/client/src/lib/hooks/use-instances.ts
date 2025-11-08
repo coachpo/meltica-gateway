@@ -16,6 +16,7 @@ import {
   type OrderHistoryFilters,
 } from '@/lib/api/instances';
 import { fetchProviderBalances } from '@/lib/api/providers';
+import type { InstanceActionResponse } from '@/lib/api/schemas';
 import type {
   BalanceRecord,
   ExecutionHistoryResponse,
@@ -168,14 +169,14 @@ export function useStartInstanceMutation() {
   const queryClient = useQueryClient();
   const { notifySuccess, notifyError } = useApiNotifications();
 
-  return useMutation<InstanceSpec, unknown, string>({
+  return useMutation<InstanceActionResponse, unknown, string>({
     mutationFn: (identifier) => startInstance(identifier),
-    onSuccess: (instance) => {
+    onSuccess: (response) => {
       notifySuccess({
         title: 'Instance starting',
-        description: `${instance.id} is starting.`,
+        description: `${response.id} is starting.`,
       });
-      invalidateInstanceCaches(queryClient, instance.id);
+      invalidateInstanceCaches(queryClient, response.id);
     },
     onError: (error) => {
       notifyError({
@@ -191,14 +192,14 @@ export function useStopInstanceMutation() {
   const queryClient = useQueryClient();
   const { notifySuccess, notifyError } = useApiNotifications();
 
-  return useMutation<InstanceSpec, unknown, string>({
+  return useMutation<InstanceActionResponse, unknown, string>({
     mutationFn: (identifier) => stopInstance(identifier),
-    onSuccess: (instance) => {
+    onSuccess: (response) => {
       notifySuccess({
         title: 'Instance stopping',
-        description: `${instance.id} is stopping.`,
+        description: `${response.id} is stopping.`,
       });
-      invalidateInstanceCaches(queryClient, instance.id);
+      invalidateInstanceCaches(queryClient, response.id);
     },
     onError: (error) => {
       notifyError({

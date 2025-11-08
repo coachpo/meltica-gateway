@@ -179,22 +179,17 @@ const HISTORY_LIMITS: Record<HistoryTab, number> = {
 };
 
 const DEFAULT_INSTANCE_SPEC: InstanceSpec = {
-  id: 'my-strategy-instance',
+  id: '',
   strategy: {
-    identifier: 'grid',
-    selector: 'grid',
-    config: {
-      dry_run: true,
-    },
+    identifier: '',
+    selector: '',
+    config: {},
   },
-  scope: {
-    'your-provider': {
-      symbols: ['BTC-USDT'],
-    },
-  },
+  scope: {},
 };
 
-const DEFAULT_INSTANCE_JSON = formatInstanceSpec(DEFAULT_INSTANCE_SPEC);
+const EMPTY_INSTANCE_JSON_TEMPLATE = formatInstanceSpec(DEFAULT_INSTANCE_SPEC);
+const DEFAULT_INSTANCE_JSON = '';
 
 const DIALOG_STATE_KEY = 'instances:dialog-state';
 
@@ -298,7 +293,7 @@ export default function InstancesPage() {
   const [instanceLoading, setInstanceLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<Record<string, boolean>>({});
   const [formMode, setFormMode] = useState<'json' | 'guided'>(
-    () => persistedDialogState?.formMode ?? 'json',
+    () => persistedDialogState?.formMode ?? 'guided',
   );
   const [instanceJsonDraft, setInstanceJsonDraft] = useState<string>(
     () => persistedDialogState?.draft ?? DEFAULT_INSTANCE_JSON,
@@ -488,7 +483,7 @@ export default function InstancesPage() {
     setPrefilledConfig(false);
     setDialogSaving(false);
     setInstanceLoading(false);
-    setFormMode('json');
+    setFormMode('guided');
     setInstanceJsonDraft(DEFAULT_INSTANCE_JSON);
   };
 
@@ -705,10 +700,17 @@ export default function InstancesPage() {
       if (spec) {
         setInstanceJsonDraft(formatInstanceSpec(spec));
       } else if (!instanceJsonDraft.trim()) {
-        setInstanceJsonDraft(DEFAULT_INSTANCE_JSON);
+        setInstanceJsonDraft(EMPTY_INSTANCE_JSON_TEMPLATE);
       }
       setFormError(null);
     } else {
+      const trimmedDraft = instanceJsonDraft.trim();
+      if (!trimmedDraft) {
+        populateFormFromSpec(DEFAULT_INSTANCE_SPEC);
+        setFormError(null);
+        setFormMode(value);
+        return;
+      }
       const result = parseInstanceSpecDraft(instanceJsonDraft, { strict: false });
       if (result.error) {
         setFormError(result.error);
@@ -717,6 +719,7 @@ export default function InstancesPage() {
       if (result.spec) {
         populateFormFromSpec(result.spec);
       }
+      setFormError(null);
     }
     setFormMode(value);
   };

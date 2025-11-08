@@ -6,9 +6,11 @@ import type {
 } from '@/lib/types';
 import {
   executionHistoryResponseSchema,
+  instanceActionResponseSchema,
   instanceSpecSchema,
   instancesResponseSchema,
   orderHistoryResponseSchema,
+  type InstanceActionResponse,
 } from './schemas';
 import { requestJson } from './http';
 
@@ -68,19 +70,19 @@ export async function deleteInstance(id: string): Promise<void> {
   });
 }
 
-export async function startInstance(id: string): Promise<InstanceSpec> {
+export async function startInstance(id: string): Promise<InstanceActionResponse> {
   return requestJson({
     path: `/strategy/instances/${encodeURIComponent(id)}/start`,
     method: 'POST',
-    schema: instanceSpecSchema,
+    schema: instanceActionResponseSchema,
   });
 }
 
-export async function stopInstance(id: string): Promise<InstanceSpec> {
+export async function stopInstance(id: string): Promise<InstanceActionResponse> {
   return requestJson({
     path: `/strategy/instances/${encodeURIComponent(id)}/stop`,
     method: 'POST',
-    schema: instanceSpecSchema,
+    schema: instanceActionResponseSchema,
   });
 }
 
