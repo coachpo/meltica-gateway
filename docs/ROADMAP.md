@@ -9,8 +9,6 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 #### POSTPONED
 
 - Persistent state and data backbone:
-  - [Done] Order/exec/balance audit trail persisted via the Postgres stores plus SQL migrations (`orders`, `executions`, `balances`, `events_outbox`).
-  - [Done] Provider/strategy snapshots + HTTP context backup/restore give crash recovery and checkpointing.
   - [Pending] Positions with live PnL tracking and historical tick storage still need dedicated services.
 - Security of control surfaces & secrets: TLS and authn/z for control APIs; proper secrets management (vault/rotation).
 
@@ -27,10 +25,8 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 #### POSTPONED
 
 - Reliability & scalability:
-  - [Done] Durable in-process bus wrapped with the Postgres outbox (replay worker + persistence) gives guaranteed delivery/backfill.
   - [Pending] Horizontal scale-out and external brokers (NATS/Kafka) are still open.
 - Operations & monitoring:
-  - [Done] OTLP telemetry provider + published Grafana dashboards/runbooks cover metrics and alert references.
   - [Pending] CI/CD automation, IaC/Kubernetes manifests, and centralized log pipelines remain outstanding.
 - Multi-venue routing & failover: smart order routing across venues, liquidity splitting, venue selection/fallback.
 
@@ -57,6 +53,7 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 
 - [Done] Risk management and safety controls: pre-trade checks, position/notional limits, circuit breakers/kill switch, and order throttling.
 - [Done] Real exchange connectivity: authenticated REST/WebSocket adapters, reconnection and rate-limit handling, and symbol normalization.
+- [Done] Core persistence backbone: Postgres-backed order/execution/balance stores plus provider/strategy snapshots with HTTP context backup/restore.
 
 ### Urgent and not important
 
@@ -65,6 +62,8 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 ### Not urgent and important
 
 - [Done] Backtesting and historical replay: validate strategies before live deployment; simulation with fees, slippage, and latency.
+- [Done] Durable in-process bus with Postgres outbox replay for guaranteed delivery/backfill.
+- [Done] Telemetry & dashboards: OTLP metric exporter, published Grafana packs, and accompanying runbooks for operators.
 
 ### Not urgent and not important
 
