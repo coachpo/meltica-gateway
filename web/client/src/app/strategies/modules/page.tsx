@@ -410,6 +410,19 @@ export default function StrategyModulesPage() {
       : null;
   const detailEvents = Array.isArray(detailMetadata?.events) ? detailMetadata.events : [];
   const detailConfig = Array.isArray(detailMetadata?.config) ? detailMetadata.config : [];
+  const detailTagAliases = useMemo(() => {
+    if (!detailModule?.tagAliases) {
+      return [] as Array<{ alias: string; hash: string }>;
+    }
+    return Object.entries(detailModule.tagAliases)
+      .filter(([alias, hash]) => alias.trim().length > 0 && hash.trim().length > 0)
+      .map(([alias, hash]) => ({ alias: alias.trim(), hash: hash.trim() }))
+      .sort((a, b) => {
+        if (a.alias === 'latest') return -1;
+        if (b.alias === 'latest') return 1;
+        return a.alias.localeCompare(b.alias);
+      });
+  }, [detailModule?.tagAliases]);
 
   const resetUsageState = useCallback(() => {
     setUsageOffset(0);
@@ -1323,7 +1336,7 @@ export default function StrategyModulesPage() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Display Name</TableHead>
-                  <TableHead>Tag</TableHead>
+                  <TableHead>Tags</TableHead>
                   <TableHead>Latest hash</TableHead>
                   <TableHead>Active usage</TableHead>
                   <TableHead>Size</TableHead>
@@ -1332,7 +1345,9 @@ export default function StrategyModulesPage() {
               </TableHeader>
               <TableBody>
                 {sortedModules.map((module) => {
-                  const moduleTag = module.tag ?? null;
+                  const moduleTags = Array.isArray(module.tags)
+                    ? module.tags.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+                    : [];
                   return (
                     <TableRow key={module.name}>
                     <TableCell>
@@ -1340,8 +1355,14 @@ export default function StrategyModulesPage() {
                     </TableCell>
                     <TableCell>{module.metadata.displayName || '—'}</TableCell>
                     <TableCell>
-                      {moduleTag ? (
-                        <Badge variant="outline">{moduleTag}</Badge>
+                      {moduleTags.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {moduleTags.map((tag) => (
+                            <Badge key={tag} variant="outline">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
@@ -2157,6 +2178,53 @@ sha256:def...`}
                       Instances referencing this module use this hash until they are refreshed with a new revision.
                     </p>
                   </div>
+                </div>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold">Tags</h4>
+                <div className="mt-2 rounded-md border">
+                  {detailTagAliases.length > 0 ? (
+                    <Table containerClassName="overflow-hidden text-xs">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-1/3">Tag</TableHead>
+                          <TableHead>Hash</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {detailTagAliases.map(({ alias, hash }) => (
+                          <TableRow key={alias}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Badge variant={alias === 'latest' ? 'secondary' : 'outline'}>
+                                  {alias}
+                                </Badge>
+                                {alias === detailModuleTag ? (
+                                  <span className="text-[11px] text-muted-foreground">
+                                    default
+                                  </span>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                onClick={() => copyHash(hash)}
+                              >
+                                <span className="font-mono">{hash.slice(0, 24)}…</span>
+                                <Copy className="h-3 w-3" />
+                              </button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <p className="px-3 py-4 text-xs text-muted-foreground">
+                      No tag aliases are registered for this strategy.
+                    </p>
+                  )}
                 </div>
               </div>
               <div>
