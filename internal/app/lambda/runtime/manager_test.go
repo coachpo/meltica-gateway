@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/coachpo/meltica/internal/app/lambda/js"
+	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/domain/strategystore"
 	"github.com/coachpo/meltica/internal/infra/config"
 )
@@ -27,6 +28,22 @@ func newTestManager(t *testing.T, opts ...Option) *Manager {
 	}
 	return manager
 }
+
+const managerTagModule = `
+module.exports = {
+  metadata: {
+    name: "tagdemo",
+    tag: "v1.0.0",
+    displayName: "Tag Demo",
+    description: "Tag demo",
+    config: [],
+    events: ["` + string(schema.EventTypeTrade) + `"]
+  },
+  create: function () {
+    return {};
+  }
+};
+`
 
 func TestManagerRefreshJavaScriptStrategies(t *testing.T) {
 	dir := t.TempDir()
@@ -161,6 +178,73 @@ func TestManagerStrategyPersistenceLifecycle(t *testing.T) {
 	}
 }
 
+func TestManagerAssignStrategyTag(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "registry.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write registry stub: %v", err)
+	}
+	loader, err := js.NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	if _, err := loader.Store([]byte(managerTagModule), js.ModuleWriteOptions{PromoteLatest: true}); err != nil {
+		t.Fatalf("Store module: %v", err)
+	}
+	cfg := config.AppConfig{Strategies: config.StrategiesConfig{Directory: dir}}
+	mgr, err := NewManager(cfg, nil, nil, nil, log.New(io.Discard, "", 0), nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if err := mgr.RefreshJavaScriptStrategies(context.Background()); err != nil {
+		t.Fatalf("Refresh strategies: %v", err)
+	}
+	res, err := mgr.ResolveStrategySelector("tagdemo")
+	if err != nil {
+		t.Fatalf("ResolveStrategySelector: %v", err)
+	}
+	if _, err := mgr.AssignStrategyTag(context.Background(), "tagdemo", "prod", res.Hash, false); err != nil {
+		t.Fatalf("AssignStrategyTag: %v", err)
+	}
+	if _, err := mgr.ResolveStrategySelector("tagdemo:prod"); err != nil {
+		t.Fatalf("expected prod alias to resolve, got %v", err)
+	}
+}
+
+func TestManagerDeleteStrategyTagForce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "registry.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write registry stub: %v", err)
+	}
+	loader, err := js.NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	if _, err := loader.Store([]byte(managerTagModule), js.ModuleWriteOptions{PromoteLatest: true}); err != nil {
+		t.Fatalf("Store v1: %v", err)
+	}
+	v2Source := strings.Replace(managerTagModule, "v1.0.0", "v2.0.0", 1)
+	if _, err := loader.Store([]byte(v2Source), js.ModuleWriteOptions{PromoteLatest: true}); err != nil {
+		t.Fatalf("Store v2: %v", err)
+	}
+	cfg := config.AppConfig{Strategies: config.StrategiesConfig{Directory: dir}}
+	mgr, err := NewManager(cfg, nil, nil, nil, log.New(io.Discard, "", 0), nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if err := mgr.RefreshJavaScriptStrategies(context.Background()); err != nil {
+		t.Fatalf("Refresh strategies: %v", err)
+	}
+	if _, err := mgr.DeleteStrategyTag("tagdemo", "v1.0.0", false); err == nil {
+		t.Fatalf("expected guard rail preventing orphan deletion")
+	}
+	if _, err := mgr.DeleteStrategyTag("tagdemo", "v1.0.0", true); err != nil {
+		t.Fatalf("DeleteStrategyTag force: %v", err)
+	}
+	if _, err := mgr.ResolveStrategySelector("tagdemo:v1.0.0"); err == nil {
+		t.Fatalf("expected selector to fail after tag removal")
+	}
+}
+
 func TestManagerUpdateImmutableFields(t *testing.T) {
 	t.Run("strategy selector resolution", func(t *testing.T) {
 		mgr := newTestManager(t)
@@ -177,24 +261,24 @@ func TestManagerUpdateImmutableFields(t *testing.T) {
 			expectTag  string
 			expectSel  string
 		}{
-		{
-			id:         "delay-default",
-			identifier: "delay",
-			expectTag:  canonicalTag,
-			expectSel:  "delay",
-		},
-		{
-			id:         "delay-tag",
-			identifier: "delay:" + canonicalTag,
-			expectTag:  canonicalTag,
-			expectSel:  "delay:" + canonicalTag,
-		},
-		{
-			id:         "delay-hash",
-			identifier: "delay@" + hash,
-			expectTag:  canonicalTag,
-			expectSel:  "delay@" + hash,
-		},
+			{
+				id:         "delay-default",
+				identifier: "delay",
+				expectTag:  canonicalTag,
+				expectSel:  "delay",
+			},
+			{
+				id:         "delay-tag",
+				identifier: "delay:" + canonicalTag,
+				expectTag:  canonicalTag,
+				expectSel:  "delay:" + canonicalTag,
+			},
+			{
+				id:         "delay-hash",
+				identifier: "delay@" + hash,
+				expectTag:  canonicalTag,
+				expectSel:  "delay@" + hash,
+			},
 		}
 
 		for _, tc := range testCases {

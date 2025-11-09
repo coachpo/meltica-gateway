@@ -101,7 +101,13 @@ type ModuleWriteOptions struct {
 	Filename      string
 	Tag           string
 	Aliases       []string
+	ReassignTags  []string
 	PromoteLatest bool
+}
+
+// TagDeleteOptions configures how tag removals should behave.
+type TagDeleteOptions struct {
+	AllowOrphan bool
 }
 
 // ModuleSummary exposes immutable module details for control APIs.
@@ -374,7 +380,11 @@ func (l *Loader) ListWithUsage(usages []ModuleUsageSnapshot) []ModuleSummary {
 					Retired: false,
 				}
 				if usage, ok := usageIndex.lookup(name, hash); ok {
-					revision.Retired = usage.Count == 0
+					inactive := usage.Count == 0
+					if inactive && hashHasActiveAlias(l.tags[name], hash) {
+						inactive = false
+					}
+					revision.Retired = inactive
 				}
 				list = append(list, revision)
 			}
@@ -435,7 +445,11 @@ func (l *Loader) ModuleWithUsage(name string, usages []ModuleUsageSnapshot) (Mod
 				Retired: false,
 			}
 			if usage, ok := usageIndex.lookup(normalized, hash); ok {
-				revision.Retired = usage.Count == 0
+				inactive := usage.Count == 0
+				if inactive && hashHasActiveAlias(l.tags[normalized], hash) {
+					inactive = false
+				}
+				revision.Retired = inactive
 			}
 			list = append(list, revision)
 		}
@@ -805,6 +819,108 @@ func (l *Loader) Store(source []byte, opts ModuleWriteOptions) (ModuleResolution
 	return resolution, nil
 }
 
+// AssignTag moves or creates the supplied tag alias for an existing revision hash and returns the previous hash, if any.
+func (l *Loader) AssignTag(name, tag, hash string) (string, error) {
+	if l == nil {
+		return "", fmt.Errorf("strategy loader: nil receiver")
+	}
+	reg, err := loadRegistry(l.root)
+	if err != nil {
+		return "", fmt.Errorf("strategy loader: load registry: %w", err)
+	}
+	if reg == nil {
+		return "", ErrRegistryUnavailable
+	}
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "" {
+		return "", fmt.Errorf("strategy loader: strategy name required")
+	}
+	entry, ok := reg[lower]
+	if !ok {
+		return "", ErrModuleNotFound
+	}
+	if entry.Hashes == nil {
+		return "", fmt.Errorf("strategy loader: no revisions found for %s", lower)
+	}
+	normalizedHash := normalizeHash(hash)
+	if normalizedHash == "" {
+		return "", fmt.Errorf("strategy loader: hash required")
+	}
+	if _, ok := entry.Hashes[normalizedHash]; !ok {
+		return "", fmt.Errorf("strategy loader: hash %s not found for %s", normalizedHash, lower)
+	}
+	normalizedTag := strings.TrimSpace(tag)
+	if normalizedTag == "" {
+		return "", fmt.Errorf("strategy loader: tag required")
+	}
+	if err := validatePathSegment(normalizedTag); err != nil {
+		return "", fmt.Errorf("strategy loader: %w", err)
+	}
+	if entry.Tags == nil {
+		entry.Tags = make(map[string]string)
+	}
+	previous := entry.Tags[normalizedTag]
+	entry.Tags[normalizedTag] = normalizedHash
+	reg[lower] = entry
+	if err := writeRegistryFile(l.root, reg); err != nil {
+		return "", err
+	}
+	l.applyRegistryTagUpdate(lower, entry)
+	return previous, nil
+}
+
+// DeleteTag removes a tag alias without deleting the revision it referenced and returns the hash previously mapped to the tag.
+func (l *Loader) DeleteTag(name, tag string) (string, error) {
+	return l.deleteTag(name, tag, TagDeleteOptions{})
+}
+
+// DeleteTagWithOptions removes a tag alias honoring the supplied guardrail options.
+func (l *Loader) DeleteTagWithOptions(name, tag string, opts TagDeleteOptions) (string, error) {
+	return l.deleteTag(name, tag, opts)
+}
+
+func (l *Loader) deleteTag(name, tag string, opts TagDeleteOptions) (string, error) {
+	if l == nil {
+		return "", fmt.Errorf("strategy loader: nil receiver")
+	}
+	reg, err := loadRegistry(l.root)
+	if err != nil {
+		return "", fmt.Errorf("strategy loader: load registry: %w", err)
+	}
+	if reg == nil {
+		return "", ErrRegistryUnavailable
+	}
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "" {
+		return "", fmt.Errorf("strategy loader: strategy name required")
+	}
+	entry, ok := reg[lower]
+	if !ok {
+		return "", ErrModuleNotFound
+	}
+	normalizedTag := strings.TrimSpace(tag)
+	if normalizedTag == "" {
+		return "", fmt.Errorf("strategy loader: tag required")
+	}
+	if strings.EqualFold(normalizedTag, "latest") {
+		return "", fmt.Errorf("strategy loader: tag %q cannot be removed; reassign it instead", normalizedTag)
+	}
+	hash, ok := entry.Tags[normalizedTag]
+	if !ok {
+		return "", fmt.Errorf("strategy loader: tag %q not found for %s", normalizedTag, lower)
+	}
+	if !opts.AllowOrphan && countTagReferences(entry.Tags, normalizedTag, hash) == 0 {
+		return "", fmt.Errorf("strategy loader: removing tag %q would orphan hash %s", normalizedTag, hash)
+	}
+	delete(entry.Tags, normalizedTag)
+	reg[lower] = entry
+	if err := writeRegistryFile(l.root, reg); err != nil {
+		return "", err
+	}
+	l.applyRegistryTagUpdate(lower, entry)
+	return hash, nil
+}
+
 func loadRegistry(root string) (registry, error) {
 	path := filepath.Join(root, "registry.json")
 	// #nosec G304 -- path is derived from controlled loader root and fixed filename
@@ -862,6 +978,19 @@ func primaryTagForHash(tags map[string]string, hash string) string {
 		return "latest"
 	}
 	return ""
+}
+
+func hashHasActiveAlias(tags map[string]string, hash string) bool {
+	if len(tags) == 0 {
+		return false
+	}
+	normalized := strings.TrimSpace(hash)
+	for _, candidate := range tags {
+		if strings.TrimSpace(candidate) == normalized {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneStringMap(src map[string]string) map[string]string {
@@ -1147,32 +1276,15 @@ func (l *Loader) writeModuleWithRegistry(source []byte, opts ModuleWriteOptions,
 		entry.Hashes = make(map[string]registryLocation)
 	}
 
-	if existingHash, ok := entry.Tags[tag]; ok && existingHash != hash {
-		_ = os.Remove(tempPath)
-		return empty, fmt.Errorf("strategy loader: tag %q already exists for %s (hash %s)", tag, name, existingHash)
-	}
-
-	dir := filepath.Join(l.root, name, tag)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		_ = os.Remove(tempPath)
-		return empty, fmt.Errorf("strategy loader: ensure directory %q: %w", dir, err)
-	}
-	destPath := filepath.Join(dir, fmt.Sprintf("%s.js", name))
-
-	if _, err := os.Stat(destPath); err == nil {
-		if err := os.Remove(destPath); err != nil {
-			_ = os.Remove(tempPath)
-			return empty, fmt.Errorf("strategy loader: replace %q: %w", destPath, err)
-		}
-	}
-	if err := os.Rename(tempPath, destPath); err != nil {
-		_ = os.Remove(tempPath)
-		return empty, fmt.Errorf("strategy loader: persist %q: %w", destPath, err)
-	}
-
-	relPath, err := filepath.Rel(l.root, destPath)
+	destPath, relPath, reused, err := l.persistRevisionFile(name, hash, tempPath, entry)
 	if err != nil {
-		return empty, fmt.Errorf("strategy loader: relative path: %w", err)
+		_ = os.Remove(tempPath)
+		return empty, err
+	}
+	if !reused {
+		// temp file already moved inside persistRevisionFile
+	} else {
+		_ = os.Remove(tempPath)
 	}
 
 	entry.Tags[tag] = hash
@@ -1193,6 +1305,16 @@ func (l *Loader) writeModuleWithRegistry(source []byte, opts ModuleWriteOptions,
 			continue
 		}
 		entry.Tags[alias] = hash
+	}
+	for _, move := range opts.ReassignTags {
+		move = strings.TrimSpace(move)
+		if move == "" {
+			continue
+		}
+		if err := validatePathSegment(move); err != nil {
+			continue
+		}
+		entry.Tags[move] = hash
 	}
 
 	if opts.PromoteLatest || entry.Tags["latest"] == "" {
@@ -1217,6 +1339,95 @@ func (l *Loader) writeModuleWithRegistry(source []byte, opts ModuleWriteOptions,
 		Alias:  tag,
 		Module: module,
 	}, nil
+}
+
+func (l *Loader) persistRevisionFile(name, hash, tempPath string, entry registryEntry) (string, string, bool, error) {
+	if loc, ok := entry.Hashes[hash]; ok {
+		fullPath := filepath.Join(l.root, filepath.Clean(loc.Path))
+		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+			return fullPath, filepath.ToSlash(filepath.Clean(loc.Path)), true, nil
+		}
+	}
+
+	digest, err := hashDirectoryComponent(hash)
+	if err != nil {
+		return "", "", false, err
+	}
+	dir := filepath.Join(l.root, name, digest)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", "", false, fmt.Errorf("strategy loader: ensure directory %q: %w", dir, err)
+	}
+	destPath := filepath.Join(dir, fmt.Sprintf("%s.js", name))
+
+	if err := os.Rename(tempPath, destPath); err != nil {
+		return "", "", false, fmt.Errorf("strategy loader: persist %q: %w", destPath, err)
+	}
+	relPath, err := filepath.Rel(l.root, destPath)
+	if err != nil {
+		return "", "", false, fmt.Errorf("strategy loader: relative path: %w", err)
+	}
+	return destPath, filepath.ToSlash(relPath), false, nil
+}
+
+func hashDirectoryComponent(hash string) (string, error) {
+	normalized := normalizeHash(hash)
+	if normalized == "" {
+		return "", fmt.Errorf("strategy loader: invalid hash for revision path")
+	}
+	digest := strings.TrimPrefix(normalized, "sha256:")
+	if digest == "" {
+		digest = normalized
+	}
+	if len(digest) != 64 || !isHex(digest) {
+		return "", fmt.Errorf("strategy loader: unsupported hash digest %q", hash)
+	}
+	return digest, nil
+}
+
+func (l *Loader) applyRegistryTagUpdate(name string, entry registryEntry) {
+	if l == nil {
+		return
+	}
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.tags == nil {
+		l.tags = make(map[string]map[string]string)
+	}
+	l.tags[lower] = cloneStringMap(entry.Tags)
+	if modules, ok := l.modulesByName[lower]; ok {
+		for hash, module := range modules {
+			if module == nil {
+				continue
+			}
+			module.Tags = collectTagsForHash(entry.Tags, module.Tag, hash)
+		}
+		if latestHash := strings.TrimSpace(entry.Tags["latest"]); latestHash != "" {
+			if module, ok := modules[latestHash]; ok && module != nil {
+				l.byName[lower] = module
+			}
+		}
+	}
+	l.clearResolutionCacheLocked()
+}
+
+func countTagReferences(tags map[string]string, skipTag, hash string) int {
+	if len(tags) == 0 {
+		return 0
+	}
+	count := 0
+	for alias, candidate := range tags {
+		if alias == skipTag {
+			continue
+		}
+		if strings.TrimSpace(candidate) == hash {
+			count++
+		}
+	}
+	return count
 }
 
 func writeRegistryFile(root string, reg registry) error {

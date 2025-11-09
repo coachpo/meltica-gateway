@@ -283,6 +283,8 @@ type Manager struct {
 	revisionGauge            metric.Int64ObservableGauge
 	revisionLifecycleMetric  metric.Int64Counter
 	uploadValidationFailures metric.Int64Counter
+	tagAssignmentCounter     metric.Int64Counter
+	tagDeleteCounter         metric.Int64Counter
 }
 
 // Option configures manager behaviour.
@@ -408,6 +410,24 @@ func (m *Manager) setupMetrics() {
 		m.uploadValidationFailures = failures
 	} else if m.logger != nil {
 		m.logger.Printf("lambda manager: register validation failure counter: %v", err)
+	}
+	assigned, err := meter.Int64Counter("strategy_tag_reassigned_total",
+		metric.WithDescription("Tag reassignments per strategy"),
+		metric.WithUnit("{event}"),
+	)
+	if err == nil {
+		m.tagAssignmentCounter = assigned
+	} else if m.logger != nil {
+		m.logger.Printf("lambda manager: register tag reassignment counter: %v", err)
+	}
+	deleted, err := meter.Int64Counter("strategy_tag_deleted_total",
+		metric.WithDescription("Tag deletion events per strategy"),
+		metric.WithUnit("{event}"),
+	)
+	if err == nil {
+		m.tagDeleteCounter = deleted
+	} else if m.logger != nil {
+		m.logger.Printf("lambda manager: register tag deletion counter: %v", err)
 	}
 }
 
@@ -2019,6 +2039,63 @@ func (m *Manager) UpsertStrategy(source []byte, opts js.ModuleWriteOptions) (js.
 		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, fmt.Errorf("strategy upsert %q: %w", filename, err)
 	}
 	return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, nil
+}
+
+// AssignStrategyTag re-points the supplied tag alias to the provided revision hash.
+func (m *Manager) AssignStrategyTag(ctx context.Context, name, tag, hash string, refresh bool) (string, error) {
+	if m == nil || m.jsLoader == nil {
+		return "", fmt.Errorf("strategy loader unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	previous, err := m.jsLoader.AssignTag(name, tag, hash)
+	if err != nil {
+		return "", fmt.Errorf("assign tag %s:%s: %w", name, tag, err)
+	}
+	if m.logger != nil {
+		m.logger.Printf("strategy tag %s:%s moved from %s to %s", name, tag, previous, hash)
+	}
+	if refresh && !strings.EqualFold(previous, hash) {
+		_, refreshErr := m.RefreshJavaScriptStrategiesWithTargets(ctx, RefreshTargets{Strategies: []string{name}})
+		if refreshErr != nil {
+			return previous, fmt.Errorf("refresh after tag move: %w", refreshErr)
+		}
+	}
+	if m.tagAssignmentCounter != nil && !strings.EqualFold(previous, hash) {
+		env := telemetry.Environment()
+		m.tagAssignmentCounter.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("environment", env),
+			attribute.String("strategy", strings.ToLower(strings.TrimSpace(name))),
+			attribute.String("tag", strings.ToLower(strings.TrimSpace(tag))),
+		))
+	}
+	return previous, nil
+}
+
+// DeleteStrategyTag removes a tag alias while honoring guard rails.
+func (m *Manager) DeleteStrategyTag(name, tag string, allowOrphan bool) (string, error) {
+	if m == nil || m.jsLoader == nil {
+		return "", fmt.Errorf("strategy loader unavailable")
+	}
+	opts := js.TagDeleteOptions{AllowOrphan: allowOrphan}
+	hash, err := m.jsLoader.DeleteTagWithOptions(name, tag, opts)
+	if err != nil {
+		return "", fmt.Errorf("delete tag %s:%s: %w", name, tag, err)
+	}
+	if m.logger != nil {
+		m.logger.Printf("strategy tag %s:%s removed (hash %s)", name, tag, hash)
+	}
+	if m.tagDeleteCounter != nil {
+		env := telemetry.Environment()
+		m.tagDeleteCounter.Add(context.Background(), 1, metric.WithAttributes(
+			attribute.String("environment", env),
+			attribute.String("strategy", strings.ToLower(strings.TrimSpace(name))),
+			attribute.String("tag", strings.ToLower(strings.TrimSpace(tag))),
+			attribute.Bool("allowOrphan", allowOrphan),
+		))
+	}
+	return hash, nil
 }
 
 // RemoveStrategy deletes the JavaScript strategy file by name.

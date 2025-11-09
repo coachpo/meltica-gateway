@@ -499,7 +499,9 @@ func TestWriteWithRegistryCreatesVersionedLayout(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	expectedPath := filepath.Join(dir, "noop", "v1.0.0", "noop.js")
+	hashSum := sha256.Sum256([]byte(sampleModule))
+	digest := hex.EncodeToString(hashSum[:])
+	expectedPath := filepath.Join(dir, "noop", digest, "noop.js")
 	if _, err := os.Stat(expectedPath); err != nil {
 		t.Fatalf("expected module written to %s: %v", expectedPath, err)
 	}
@@ -524,7 +526,7 @@ func TestWriteWithRegistryCreatesVersionedLayout(t *testing.T) {
 		if !strings.HasPrefix(hash, "sha256:") {
 			t.Fatalf("unexpected hash %s", hash)
 		}
-		expectedRel := filepath.ToSlash(filepath.Join("noop", "v1.0.0", "noop.js"))
+		expectedRel := filepath.ToSlash(filepath.Join("noop", digest, "noop.js"))
 		if loc.Path != expectedRel {
 			t.Fatalf("unexpected path %s", loc.Path)
 		}
@@ -563,6 +565,138 @@ func TestDeleteWithRegistrySelector(t *testing.T) {
 	}
 	if len(reg) != 0 {
 		t.Fatalf("expected registry cleared, got %+v", reg)
+	}
+}
+
+func TestStoreAllowsTagReassignment(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "registry.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write registry stub: %v", err)
+	}
+	loader, err := NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	first, err := loader.Store([]byte(sampleModule), ModuleWriteOptions{PromoteLatest: true})
+	if err != nil {
+		t.Fatalf("Store v1: %v", err)
+	}
+	updatedSource := strings.Replace(sampleModule, "\"ok\"", "\"updated\"", 1)
+	second, err := loader.Store([]byte(updatedSource), ModuleWriteOptions{PromoteLatest: true})
+	if err != nil {
+		t.Fatalf("Store updated: %v", err)
+	}
+	if first.Hash == second.Hash {
+		t.Fatalf("expected distinct hashes for updated module")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "registry.json"))
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	var reg registry
+	if err := json.Unmarshal(data, &reg); err != nil {
+		t.Fatalf("decode registry: %v", err)
+	}
+	entry, ok := reg[first.Name]
+	if !ok {
+		t.Fatalf("expected registry entry for %s", first.Name)
+	}
+	if len(entry.Hashes) != 2 {
+		t.Fatalf("expected both hashes preserved, got %d", len(entry.Hashes))
+	}
+	if entry.Tags[first.Tag] != second.Hash {
+		t.Fatalf("expected tag %s to point to %s, got %s", first.Tag, second.Hash, entry.Tags[first.Tag])
+	}
+	if _, ok := entry.Hashes[first.Hash]; !ok {
+		t.Fatalf("expected registry to retain first hash")
+	}
+	if _, ok := entry.Hashes[second.Hash]; !ok {
+		t.Fatalf("expected registry to record second hash")
+	}
+}
+
+func TestAssignTagUpdatesSummariesWithoutRefresh(t *testing.T) {
+	dir := t.TempDir()
+	modulePath := writeVersionedModule(t, dir, "noop", "v1.0.0", []byte(sampleModule))
+	writeRegistry(t, dir, "noop", "v1.0.0", modulePath)
+	loader, err := NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	if err := loader.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	resolution, err := loader.ResolveReference("noop")
+	if err != nil {
+		t.Fatalf("ResolveReference noop: %v", err)
+	}
+	if _, err := loader.AssignTag("noop", "prod", resolution.Hash); err != nil {
+		t.Fatalf("AssignTag prod: %v", err)
+	}
+	modules := loader.List()
+	if len(modules) != 1 {
+		t.Fatalf("expected one module summary, got %d", len(modules))
+	}
+	if modules[0].TagAliases["prod"] != resolution.Hash {
+		t.Fatalf("expected prod alias to map to %s, got %s", resolution.Hash, modules[0].TagAliases["prod"])
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "registry.json"))
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	var reg registry
+	if err := json.Unmarshal(data, &reg); err != nil {
+		t.Fatalf("decode registry: %v", err)
+	}
+	if reg["noop"].Tags["prod"] != resolution.Hash {
+		t.Fatalf("expected registry alias prod -> %s", resolution.Hash)
+	}
+}
+
+func TestDeleteTagGuardRails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "registry.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write registry stub: %v", err)
+	}
+	loader, err := NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	first, err := loader.Store([]byte(sampleModule), ModuleWriteOptions{PromoteLatest: true})
+	if err != nil {
+		t.Fatalf("Store v1: %v", err)
+	}
+	v2Source := strings.Replace(sampleModule, "tag: \"v1.0.0\"", "tag: \"v2.0.0\"", 1)
+	v2Source = strings.Replace(v2Source, "No operation strategy", "Updated release", 1)
+	second, err := loader.Store([]byte(v2Source), ModuleWriteOptions{PromoteLatest: true})
+	if err != nil {
+		t.Fatalf("Store v2: %v", err)
+	}
+	if _, err := loader.AssignTag(first.Name, "prod", second.Hash); err != nil {
+		t.Fatalf("AssignTag prod -> v2: %v", err)
+	}
+	if _, err := loader.DeleteTag(first.Name, "latest"); err == nil {
+		t.Fatalf("expected error deleting latest tag")
+	}
+	if _, err := loader.DeleteTag(first.Name, first.Tag); err == nil {
+		t.Fatalf("expected error deleting sole selector for %s", first.Hash)
+	}
+	if _, err := loader.DeleteTag(first.Name, "prod"); err != nil {
+		t.Fatalf("DeleteTag prod: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "registry.json"))
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	var reg registry
+	if err := json.Unmarshal(data, &reg); err != nil {
+		t.Fatalf("decode registry: %v", err)
+	}
+	if _, ok := reg[first.Name].Tags["prod"]; ok {
+		t.Fatalf("expected prod alias removed")
+	}
+	if reg[first.Name].Tags["latest"] != second.Hash {
+		t.Fatalf("expected latest to remain pointed at %s", second.Hash)
 	}
 }
 
@@ -607,8 +741,8 @@ func TestLoaderListWithUsage(t *testing.T) {
 	if len(zeroUsage[0].Running) != 0 {
 		t.Fatalf("expected no running entries for zero usage")
 	}
-	if !zeroUsage[0].Revisions[0].Retired {
-		t.Fatalf("expected revision marked retired when count == 0")
+	if zeroUsage[0].Revisions[0].Retired {
+		t.Fatalf("expected revision not retired while a tag still references it")
 	}
 
 	moduleSummary, err := loader.ModuleWithUsage("noop", []ModuleUsageSnapshot{usageSnapshot})

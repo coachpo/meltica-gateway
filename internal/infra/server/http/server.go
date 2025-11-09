@@ -94,8 +94,14 @@ type strategyModulePayload struct {
 	Name          string   `json:"name,omitempty"`
 	Tag           string   `json:"tag,omitempty"`
 	Aliases       []string `json:"aliases,omitempty"`
+	ReassignTags  []string `json:"reassignTags,omitempty"`
 	PromoteLatest *bool    `json:"promoteLatest,omitempty"`
 	Source        string   `json:"source"`
+}
+
+type strategyTagPayload struct {
+	Hash    string `json:"hash"`
+	Refresh *bool  `json:"refresh,omitempty"`
 }
 
 type strategyRefreshPayload struct {
@@ -428,6 +434,7 @@ func (s *httpServer) createStrategyModule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	aliases := sanitizeAliases(payload.Aliases)
+	reassign := sanitizeAliases(payload.ReassignTags)
 	promote := true
 	if payload.PromoteLatest != nil {
 		promote = *payload.PromoteLatest
@@ -437,6 +444,7 @@ func (s *httpServer) createStrategyModule(w http.ResponseWriter, r *http.Request
 		Filename:      strings.TrimSpace(payload.Filename),
 		Tag:           strings.TrimSpace(payload.Tag),
 		Aliases:       aliases,
+		ReassignTags:  reassign,
 		PromoteLatest: promote,
 	}
 	if opts.Filename == "" && nameHint != "" {
@@ -461,10 +469,30 @@ func (s *httpServer) handleStrategyModule(w http.ResponseWriter, r *http.Request
 		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 		return
 	}
-	segments := strings.Split(trimmed, "/")
+	segments := splitPathSegments(trimmed)
 	name := strings.TrimSpace(segments[0])
 	if name == "" {
 		writeError(w, http.StatusNotFound, "module identifier required")
+		return
+	}
+	if len(segments) >= 3 && strings.EqualFold(segments[1], "tags") {
+		tag := strings.TrimSpace(segments[2])
+		if tag == "" {
+			writeError(w, http.StatusNotFound, "tag identifier required")
+			return
+		}
+		if len(segments) != 3 {
+			writeError(w, http.StatusNotFound, "invalid module tag path")
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			s.assignStrategyModuleTag(w, r, name, tag)
+		case http.MethodDelete:
+			s.deleteStrategyModuleTag(w, r, name, tag)
+		default:
+			methodNotAllowed(w, http.MethodPut, http.MethodDelete)
+		}
 		return
 	}
 	if len(segments) == 2 {
@@ -495,6 +523,21 @@ func (s *httpServer) handleStrategyModule(w http.ResponseWriter, r *http.Request
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 	}
+}
+
+func splitPathSegments(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, "/")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
 }
 
 func (s *httpServer) getStrategyModule(w http.ResponseWriter, name string) {
@@ -621,6 +664,7 @@ func (s *httpServer) updateStrategyModule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	aliases := sanitizeAliases(payload.Aliases)
+	reassign := sanitizeAliases(payload.ReassignTags)
 	promote := true
 	if payload.PromoteLatest != nil {
 		promote = *payload.PromoteLatest
@@ -630,6 +674,7 @@ func (s *httpServer) updateStrategyModule(w http.ResponseWriter, r *http.Request
 		Filename:      strings.TrimSpace(payload.Filename),
 		Tag:           strings.TrimSpace(payload.Tag),
 		Aliases:       aliases,
+		ReassignTags:  reassign,
 		PromoteLatest: promote,
 	}
 	if opts.Filename == "" && nameHint != "" {
@@ -657,6 +702,72 @@ func (s *httpServer) deleteStrategyModule(w http.ResponseWriter, name string) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *httpServer) assignStrategyModuleTag(w http.ResponseWriter, r *http.Request, name, tag string) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+	limitRequestBody(w, r)
+	defer func() { _ = r.Body.Close() }()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var payload strategyTagPayload
+	if err := decoder.Decode(&payload); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	hash := strings.TrimSpace(payload.Hash)
+	if hash == "" {
+		writeError(w, http.StatusBadRequest, "hash required")
+		return
+	}
+	refresh := true
+	if payload.Refresh != nil {
+		refresh = *payload.Refresh
+	}
+	previous, err := s.manager.AssignStrategyTag(r.Context(), name, tag, hash, refresh)
+	if err != nil {
+		s.writeStrategyModuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "tag_assigned",
+		"strategy":     name,
+		"tag":          tag,
+		"hash":         hash,
+		"previousHash": previous,
+		"refresh":      refresh,
+	})
+}
+
+func (s *httpServer) deleteStrategyModuleTag(w http.ResponseWriter, r *http.Request, name, tag string) {
+	if s.manager == nil {
+		writeError(w, http.StatusServiceUnavailable, "strategy manager unavailable")
+		return
+	}
+	allowOrphan := false
+	if raw := r.URL.Query().Get("allowOrphan"); raw != "" {
+		val, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "allowOrphan must be a boolean")
+			return
+		}
+		allowOrphan = val
+	}
+	hash, err := s.manager.DeleteStrategyTag(name, tag, allowOrphan)
+	if err != nil {
+		s.writeStrategyModuleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":      "tag_deleted",
+		"strategy":    name,
+		"tag":         tag,
+		"hash":        hash,
+		"allowOrphan": allowOrphan,
+	})
 }
 
 func (s *httpServer) getStrategyModuleSource(w http.ResponseWriter, _ *http.Request, name string) {
