@@ -112,6 +112,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/strategies/modules/{name}/tags/{tag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy name */
+                name: string;
+                /** @description Tag alias to mutate */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Reassign a tag alias to a different hash */
+        put: operations["assignStrategyModuleTag"];
+        post?: never;
+        /** Remove a tag alias from the registry */
+        delete: operations["deleteStrategyModuleTag"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/strategies/refresh": {
         parameters: {
             query?: never;
@@ -514,6 +537,7 @@ export interface components {
             name?: string;
             tag?: string;
             aliases?: string[];
+            reassignTags?: string[];
             promoteLatest?: boolean;
             source: string;
         };
@@ -530,6 +554,19 @@ export interface components {
             status: string;
             strategyDirectory: string;
             module?: components["schemas"]["StrategyModuleResolution"];
+        };
+        StrategyTagAssignmentRequest: {
+            hash: string;
+            refresh?: boolean;
+        };
+        StrategyTagMutationResponse: {
+            status: string;
+            strategy: string;
+            tag: string;
+            hash?: string;
+            previousHash?: string;
+            allowOrphan?: boolean;
+            refresh?: boolean;
         };
         StrategyRefreshRequest: {
             hashes?: string[];
@@ -1070,6 +1107,65 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrategyModuleUsageResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    assignStrategyModuleTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy name */
+                name: string;
+                /** @description Tag alias to mutate */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyTagAssignmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Tag reassigned */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyTagMutationResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteStrategyModuleTag: {
+        parameters: {
+            query?: {
+                /** @description Force removal even if this is the last alias referencing the hash */
+                allowOrphan?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Strategy name */
+                name: string;
+                /** @description Tag alias to mutate */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tag removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyTagMutationResponse"];
                 };
             };
             default: components["responses"]["Error"];

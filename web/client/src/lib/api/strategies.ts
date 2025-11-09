@@ -8,6 +8,8 @@ import type {
   StrategyRefreshRequest,
   StrategyRefreshResponse,
   StrategyRegistryExport,
+  StrategyTagMutationResponse,
+  StrategyTagAssignmentRequest,
 } from '@/lib/types';
 import {
   strategyListSchema,
@@ -18,6 +20,7 @@ import {
   strategyRegistryExportSchema,
   strategySchema,
   strategyRefreshResponseSchema,
+  strategyTagMutationResponseSchema,
 } from './schemas';
 import { requestJson, requestText } from './http';
 
@@ -110,6 +113,36 @@ export async function deleteStrategyModule(identifier: string): Promise<void> {
     path: `/strategies/modules/${encodeURIComponent(identifier)}`,
     method: 'DELETE',
   });
+}
+
+export interface DeleteStrategyTagOptions {
+	allowOrphan?: boolean;
+}
+
+export async function assignStrategyTag(
+	strategy: string,
+	tag: string,
+	payload: StrategyTagAssignmentRequest,
+): Promise<StrategyTagMutationResponse> {
+	return requestJson({
+		path: `/strategies/modules/${encodeURIComponent(strategy)}/tags/${encodeURIComponent(tag)}`,
+		method: 'PUT',
+		body: payload,
+		schema: strategyTagMutationResponseSchema,
+	});
+}
+
+export async function deleteStrategyTag(
+	strategy: string,
+	tag: string,
+	options?: DeleteStrategyTagOptions,
+): Promise<StrategyTagMutationResponse> {
+	return requestJson({
+		path: `/strategies/modules/${encodeURIComponent(strategy)}/tags/${encodeURIComponent(tag)}`,
+		method: 'DELETE',
+		searchParams: options,
+		schema: strategyTagMutationResponseSchema,
+	});
 }
 
 export async function refreshStrategyCatalog(

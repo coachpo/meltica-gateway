@@ -80,6 +80,16 @@ export const strategyModuleOperationResponseSchema = z.object({
   module: strategyModuleResolutionSchema.nullable().optional(),
 });
 
+export const strategyTagMutationResponseSchema = z.object({
+  status: z.string(),
+  strategy: z.string(),
+  tag: z.string(),
+  hash: z.string().optional(),
+  previousHash: z.string().optional(),
+  allowOrphan: z.boolean().optional(),
+  refresh: z.boolean().optional(),
+});
+
 const lambdaStrategySpecSchema = z.object({
   identifier: z.string(),
   config: z.record(z.string(), z.unknown()),

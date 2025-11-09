@@ -12,6 +12,8 @@ import {
   useRefreshStrategiesMutation,
   useExportStrategyRegistryQuery,
   useStrategyModuleSourceLoader,
+  useAssignStrategyTagMutation,
+  useDeleteStrategyTagMutation,
 } from '@/lib/hooks';
 import { StrategyValidationError } from '@/lib/api';
 import type {
@@ -70,6 +72,7 @@ import {
   UploadCloud,
   ListFilter,
   Target,
+  Tag,
 } from 'lucide-react';
 
 type ModuleFormMode = 'create' | 'edit';
@@ -339,6 +342,18 @@ export default function StrategyModulesPage() {
     revision: StrategyModuleRevision;
   } | null>(null);
   const [templateConfirmOpen, setTemplateConfirmOpen] = useState(false);
+  const [tagEditorState, setTagEditorState] = useState<{
+    module: StrategyModuleSummary;
+    revision: StrategyModuleRevision;
+  } | null>(null);
+  const [tagEditorValue, setTagEditorValue] = useState('');
+  const [tagEditorRefresh, setTagEditorRefresh] = useState(true);
+  const [tagEditorError, setTagEditorError] = useState<string | null>(null);
+  const [tagDeleteTarget, setTagDeleteTarget] = useState<{
+    module: StrategyModuleSummary;
+    tag: string;
+  } | null>(null);
+  const [tagDeleteAllowOrphan, setTagDeleteAllowOrphan] = useState(false);
   const moduleQueryParams = useMemo(
     () => ({
       strategy: filters.strategy.trim() || undefined,
@@ -355,6 +370,8 @@ export default function StrategyModulesPage() {
   const createModuleMutation = useCreateStrategyModuleMutation();
   const updateModuleMutation = useUpdateStrategyModuleMutation();
   const deleteModuleMutation = useDeleteStrategyModuleMutation();
+  const assignTagMutation = useAssignStrategyTagMutation();
+  const deleteTagMutation = useDeleteStrategyTagMutation();
   const modulesQuery = useStrategyModulesQuery(moduleQueryParams, true);
   const { refetch: refetchModules } = modulesQuery;
   const modules = useMemo(
@@ -410,6 +427,9 @@ export default function StrategyModulesPage() {
       : null;
   const detailEvents = Array.isArray(detailMetadata?.events) ? detailMetadata.events : [];
   const detailConfig = Array.isArray(detailMetadata?.config) ? detailMetadata.config : [];
+  const detailRunningSummaries = Array.isArray(detailModule?.running)
+    ? detailModule.running.filter((entry) => typeof entry?.hash === 'string')
+    : [];
   const detailTagAliases = useMemo(() => {
     if (!detailModule?.tagAliases) {
       return [] as Array<{ alias: string; hash: string }>;
@@ -423,6 +443,19 @@ export default function StrategyModulesPage() {
         return a.alias.localeCompare(b.alias);
       });
   }, [detailModule?.tagAliases]);
+
+  const openTagEditor = useCallback((module: StrategyModuleSummary, revision: StrategyModuleRevision) => {
+    setTagEditorState({ module, revision });
+    setTagEditorValue(revision.tag ?? '');
+    setTagEditorRefresh(true);
+    setTagEditorError(null);
+  }, []);
+
+  const closeTagEditor = useCallback(() => {
+    setTagEditorState(null);
+    setTagEditorValue('');
+    setTagEditorError(null);
+  }, []);
 
   const resetUsageState = useCallback(() => {
     setUsageOffset(0);
@@ -605,6 +638,53 @@ export default function StrategyModulesPage() {
     },
     [refetchModules, refreshStrategiesMutation, showToast],
   );
+
+  const handleAssignTag = useCallback(async () => {
+    if (!tagEditorState) {
+      return;
+    }
+    const trimmedTag = tagEditorValue.trim();
+    if (!trimmedTag) {
+      setTagEditorError('Tag name is required.');
+      return;
+    }
+    const hash = tagEditorState.revision?.hash;
+    if (!hash) {
+      setTagEditorError('Revision hash unavailable.');
+      return;
+    }
+    setTagEditorError(null);
+    try {
+      await assignTagMutation.mutateAsync({
+        strategy: tagEditorState.module.name,
+        tag: trimmedTag,
+        hash,
+        refresh: tagEditorRefresh,
+      });
+      await refetchModules();
+      closeTagEditor();
+    } catch (err) {
+      setTagEditorError(err instanceof Error ? err.message : 'Failed to update tag.');
+    }
+  }, [assignTagMutation, tagEditorRefresh, tagEditorState, tagEditorValue, refetchModules, closeTagEditor]);
+
+  const handleDeleteTag = useCallback(async () => {
+    if (!tagDeleteTarget) {
+      return;
+    }
+    try {
+      await deleteTagMutation.mutateAsync({
+        strategy: tagDeleteTarget.module.name,
+        tag: tagDeleteTarget.tag,
+        allowOrphan: tagDeleteAllowOrphan,
+      });
+      await refetchModules();
+      setTagDeleteTarget(null);
+      setTagDeleteAllowOrphan(false);
+    } catch {
+      // Errors surfaced via toast; keep dialog open for retry.
+    }
+  }, [deleteTagMutation, refetchModules, tagDeleteAllowOrphan, tagDeleteTarget]);
 
   const handleExportRegistry = useCallback(async () => {
     try {
@@ -2189,35 +2269,77 @@ sha256:def...`}
                         <TableRow>
                           <TableHead className="w-1/3">Tag</TableHead>
                           <TableHead>Hash</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {detailTagAliases.map(({ alias, hash }) => (
-                          <TableRow key={alias}>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Badge variant={alias === 'latest' ? 'secondary' : 'outline'}>
-                                  {alias}
-                                </Badge>
-                                {alias === detailModuleTag ? (
-                                  <span className="text-[11px] text-muted-foreground">
-                                    default
-                                  </span>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                                onClick={() => copyHash(hash)}
-                              >
-                                <span className="font-mono">{hash.slice(0, 24)}…</span>
-                                <Copy className="h-3 w-3" />
-                              </button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {detailTagAliases.map(({ alias, hash }) => {
+                          const isLatest = alias === 'latest';
+                          return (
+                            <TableRow key={alias}>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={isLatest ? 'secondary' : 'outline'}>
+                                    {alias}
+                                  </Badge>
+                                  {alias === detailModuleTag ? (
+                                    <span className="text-[11px] text-muted-foreground">
+                                      default
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                  onClick={() => copyHash(hash)}
+                                >
+                                  <span className="font-mono">{hash.slice(0, 24)}…</span>
+                                  <Copy className="h-3 w-3" />
+                                </button>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex justify-end gap-1">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2"
+                                    onClick={() => {
+                                      const revision = detailModule.revisions?.find((rev) => rev.hash === hash);
+                                      const targetRevision =
+                                        revision ?? {
+                                          hash,
+                                          tag: alias,
+                                          path: detailModule.path,
+                                          size: detailModule.size,
+                                          retired: false,
+                                        };
+                                      openTagEditor(detailModule, targetRevision);
+                                      setTagEditorValue(alias);
+                                    }}
+                                  >
+                                    <Pencil className="mr-1 h-3 w-3" /> Move
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-destructive"
+                                    disabled={isLatest}
+                                    onClick={() => {
+                                      setTagDeleteAllowOrphan(false);
+                                      setTagDeleteTarget({ module: detailModule, tag: alias });
+                                    }}
+                                  >
+                                    <Trash2 className="mr-1 h-3 w-3" /> Remove
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   ) : (
@@ -2252,6 +2374,12 @@ sha256:def...`}
                           const deleteBusy =
                             revisionActionBusy === revisionKey(detailModule, revision, 'delete');
                           const revisionTag = revision.tag?.trim() || null;
+                          const revisionRunningEntry = detailRunningSummaries.find(
+                            (entry) => entry.hash === revision.hash,
+                          );
+                          const revisionInUse =
+                            (revisionRunningEntry?.count ?? 0) > 0 ||
+                            (revisionRunningEntry?.instances ?? []).length > 0;
                           return (
                             <TableRow key={`${revision.hash}-${revision.tag ?? 'untagged'}`}>
                               <TableCell>
@@ -2264,6 +2392,9 @@ sha256:def...`}
                                     )}
                                     {revision.retired ? (
                                       <Badge variant="warning">Retired</Badge>
+                                    ) : null}
+                                    {revisionInUse ? (
+                                      <Badge variant="destructive">In use</Badge>
                                     ) : null}
                                   </div>
                                   <p className="text-xs text-muted-foreground">
@@ -2305,9 +2436,20 @@ sha256:def...`}
                                     type="button"
                                     variant="ghost"
                                     size="sm"
+                                    className="h-8 px-2"
+                                    onClick={() => openTagEditor(detailModule, revision)}
+                                    disabled={deleteBusy || promoteBusy}
+                                  >
+                                    <Tag className="mr-1 h-3 w-3" /> Tag
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
                                     className="h-8 px-2 text-destructive"
                                     onClick={() => setRevisionToDelete({ module: detailModule, revision })}
-                                    disabled={deleteBusy || promoteBusy}
+                                    disabled={deleteBusy || promoteBusy || revisionInUse}
+                                    title={revisionInUse ? PINNED_REVISION_MESSAGE : undefined}
                                   >
                                     {deleteBusy ? (
                                       <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -2317,6 +2459,11 @@ sha256:def...`}
                                     Delete
                                   </Button>
                                 </div>
+                                {revisionInUse ? (
+                                  <p className="mt-1 text-right text-[11px] text-muted-foreground">
+                                    {PINNED_REVISION_MESSAGE}
+                                  </p>
+                                ) : null}
                               </TableCell>
                             </TableRow>
                           );
@@ -2541,6 +2688,113 @@ sha256:def...`}
           applyTemplateSource();
           setTemplateConfirmOpen(false);
         }}
+      />
+      <Dialog
+        open={Boolean(tagEditorState)}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeTagEditor();
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Assign tag</DialogTitle>
+            <DialogDescription>
+              Move an existing tag or create a new alias that points to the selected revision.
+            </DialogDescription>
+          </DialogHeader>
+          {tagEditorState ? (
+            <div className="space-y-4">
+              <div className="rounded-md border p-3 text-xs">
+                <p className="font-semibold">{tagEditorState.module.name}</p>
+                <p className="mt-1 font-mono text-muted-foreground">{tagEditorState.revision.hash}</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tag-editor-input">Tag name</Label>
+                <Input
+                  id="tag-editor-input"
+                  value={tagEditorValue}
+                  onChange={(event) => setTagEditorValue(event.target.value)}
+                  placeholder="prod"
+                  autoComplete="off"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Reusing a tag reassigns it, similar to Docker image tags.
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="tag-editor-refresh"
+                  checked={tagEditorRefresh}
+                  onChange={(event) => setTagEditorRefresh(event.target.checked)}
+                />
+                <Label htmlFor="tag-editor-refresh" className="text-sm">
+                  Refresh runtime after updating tag
+                </Label>
+              </div>
+              {tagEditorError ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{tagEditorError}</AlertDescription>
+                </Alert>
+              ) : null}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeTagEditor} disabled={assignTagMutation.isPending}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleAssignTag()}
+              disabled={assignTagMutation.isPending}
+            >
+              {assignTagMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Assign tag
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={Boolean(tagDeleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTagDeleteTarget(null);
+            setTagDeleteAllowOrphan(false);
+          }
+        }}
+        title="Remove tag"
+        description={
+          tagDeleteTarget ? (
+            <span>
+              Remove tag <span className="font-semibold">{tagDeleteTarget.tag}</span> from{' '}
+              <span className="font-semibold">{tagDeleteTarget.module.name}</span>? The underlying hash remains available through other tags.
+            </span>
+          ) : undefined
+        }
+        body={
+          <div className="rounded-md border p-3">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="allow-orphan-toggle"
+                checked={tagDeleteAllowOrphan}
+                onChange={(event) => setTagDeleteAllowOrphan(event.target.checked)}
+              />
+              <Label htmlFor="allow-orphan-toggle" className="text-sm">
+                Allow orphaned hash
+              </Label>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Enable only when you intend to remove the final tag pointing to this revision.
+            </p>
+          </div>
+        }
+        confirmLabel="Remove"
+        confirmVariant="destructive"
+        loading={deleteTagMutation.isPending}
+        onConfirm={() => void handleDeleteTag()}
       />
     </div>
   );

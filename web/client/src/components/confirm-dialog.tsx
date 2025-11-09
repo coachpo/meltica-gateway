@@ -17,6 +17,7 @@ export interface ConfirmDialogProps {
   onOpenChange?: (open: boolean) => void;
   title: string;
   description?: ReactNode;
+  body?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   confirmVariant?: 'default' | 'destructive' | 'outline' | 'secondary';
@@ -37,6 +38,7 @@ export function ConfirmDialog({
   confirmDisabled = false,
   loading = false,
   errorMessage = null,
+  body = null,
   onConfirm,
 }: ConfirmDialogProps) {
   return (
@@ -46,6 +48,7 @@ export function ConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
+        {body ? <div className="space-y-3 text-sm">{body}</div> : null}
         {errorMessage ? (
           <Alert variant="destructive">
             <AlertDescription>{errorMessage}</AlertDescription>

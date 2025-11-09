@@ -3,8 +3,10 @@
 import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  assignStrategyTag,
   createStrategyModule,
   deleteStrategyModule,
+  deleteStrategyTag,
   exportStrategyRegistry,
   fetchStrategies,
   fetchStrategy,
@@ -27,6 +29,7 @@ import type {
   StrategyRefreshRequest,
   StrategyRefreshResponse,
   StrategyRegistryExport,
+  StrategyTagMutationResponse,
 } from '@/lib/types';
 import { StrategyValidationError } from '@/lib/api';
 import { queryKeys } from './query-keys';
@@ -243,6 +246,62 @@ export function useRefreshStrategiesMutation() {
         title: 'Refresh failed',
         error,
         fallbackMessage: 'Unable to refresh strategies.',
+      });
+    },
+  });
+}
+
+export function useAssignStrategyTagMutation() {
+  const queryClient = useQueryClient();
+  const { notifySuccess, notifyError } = useApiNotifications();
+
+  return useMutation<
+    StrategyTagMutationResponse,
+    unknown,
+    { strategy: string; tag: string; hash: string; refresh?: boolean }
+  >({
+    mutationFn: ({ strategy, tag, hash, refresh }) =>
+      assignStrategyTag(strategy, tag, { hash, refresh }),
+    onSuccess: (response) => {
+      notifySuccess({
+        title: 'Tag updated',
+        description: `${response.tag} now points to ${response.hash?.slice(0, 12) ?? 'the selected hash'}.`,
+      });
+      invalidateStrategyCaches(queryClient);
+    },
+    onError: (error) => {
+      notifyError({
+        title: 'Tag update failed',
+        error,
+        fallbackMessage: 'Unable to update tag.',
+      });
+    },
+  });
+}
+
+export function useDeleteStrategyTagMutation() {
+  const queryClient = useQueryClient();
+  const { notifySuccess, notifyError } = useApiNotifications();
+
+  return useMutation<
+    StrategyTagMutationResponse,
+    unknown,
+    { strategy: string; tag: string; allowOrphan?: boolean }
+  >({
+    mutationFn: ({ strategy, tag, allowOrphan }) =>
+      deleteStrategyTag(strategy, tag, allowOrphan ? { allowOrphan } : undefined),
+    onSuccess: (response) => {
+      notifySuccess({
+        title: 'Tag removed',
+        description: `Removed tag ${response.tag}.`,
+      });
+      invalidateStrategyCaches(queryClient);
+    },
+    onError: (error) => {
+      notifyError({
+        title: 'Tag removal failed',
+        error,
+        fallbackMessage: 'Unable to delete tag.',
       });
     },
   });
