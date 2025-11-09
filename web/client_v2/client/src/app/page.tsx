@@ -4,16 +4,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 export default function Home() {
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">
-          Manage your trading strategies and monitor system resources.
+      <div className="space-y-2">
+        <h1 className="bg-gradient-to-r from-sky-500 via-violet-500 to-fuchsia-500 bg-clip-text text-3xl font-extrabold tracking-tight text-transparent">
+          Dashboard
+        </h1>
+        <p className="max-w-2xl text-sm text-muted-foreground/80">
+          Manage your trading strategies and monitor system resources with the new Galaxy surface.
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Link href="/instances">
-          <Card className="hover:border-primary cursor-pointer transition-colors">
+      <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <Link href="/instances" className="group block">
+          <Card className="cursor-pointer transition-transform duration-300 group-hover:-translate-y-1">
             <CardHeader>
               <CardTitle>Strategy Instances</CardTitle>
               <CardDescription>
@@ -21,15 +23,15 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground/85">
                 Create, start, stop, and configure strategy instances
               </p>
             </CardContent>
           </Card>
         </Link>
 
-        <Link href="/strategies">
-          <Card className="hover:border-primary cursor-pointer transition-colors">
+        <Link href="/strategies" className="group block">
+          <Card className="cursor-pointer transition-transform duration-300 group-hover:-translate-y-1">
             <CardHeader>
               <CardTitle>Strategies</CardTitle>
               <CardDescription>
@@ -37,15 +39,15 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground/85">
                 View strategy definitions and configuration options
               </p>
             </CardContent>
           </Card>
         </Link>
 
-        <Link href="/strategies/modules">
-          <Card className="hover:border-primary cursor-pointer transition-colors">
+        <Link href="/strategies/modules" className="group block">
+          <Card className="cursor-pointer transition-transform duration-300 group-hover:-translate-y-1">
             <CardHeader>
               <CardTitle>Strategy Modules</CardTitle>
               <CardDescription>
@@ -53,15 +55,15 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground/85">
                 Upload, edit, and refresh runtime strategy modules
               </p>
             </CardContent>
           </Card>
         </Link>
 
-        <Link href="/providers">
-          <Card className="hover:border-primary cursor-pointer transition-colors">
+        <Link href="/providers" className="group block">
+          <Card className="cursor-pointer transition-transform duration-300 group-hover:-translate-y-1">
             <CardHeader>
               <CardTitle>Providers</CardTitle>
               <CardDescription>
@@ -69,15 +71,15 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground/85">
                 View provider metadata and instrument catalogs
               </p>
             </CardContent>
           </Card>
         </Link>
 
-        <Link href="/adapters">
-          <Card className="hover:border-primary cursor-pointer transition-colors">
+        <Link href="/adapters" className="group block">
+          <Card className="cursor-pointer transition-transform duration-300 group-hover:-translate-y-1">
             <CardHeader>
               <CardTitle>Adapters</CardTitle>
               <CardDescription>
@@ -85,15 +87,15 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground/85">
                 Explore adapter capabilities and configuration schemas
               </p>
             </CardContent>
           </Card>
         </Link>
 
-        <Link href="/risk">
-          <Card className="hover:border-primary cursor-pointer transition-colors">
+        <Link href="/risk" className="group block">
+          <Card className="cursor-pointer transition-transform duration-300 group-hover:-translate-y-1">
             <CardHeader>
               <CardTitle>Risk Limits</CardTitle>
               <CardDescription>
@@ -101,7 +103,7 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground/85">
                 Adjust position limits, order throttling, and circuit breakers
               </p>
             </CardContent>

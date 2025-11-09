@@ -5,28 +5,29 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
+  "relative inline-flex items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-xl text-sm font-semibold tracking-wide transition-all duration-300 disabled:pointer-events-none disabled:opacity-60 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-[radial-gradient(circle_at_top_left,theme(colors.sky.400/.55),transparent_55%)] before:opacity-0 before:transition-opacity before:duration-300 hover:before:opacity-100",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        default:
+          "border border-transparent bg-[linear-gradient(135deg,theme(colors.sky.500),theme(colors.violet.500),theme(colors.fuchsia.500))] text-primary-foreground shadow-[0_20px_45px_-25px_rgba(79,70,229,0.85)] hover:shadow-[0_28px_55px_-24px_rgba(79,70,229,0.9)]",
         destructive:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90 focus-visible:ring-destructive/30 dark:focus-visible:ring-destructive/40",
+          "border border-transparent bg-[linear-gradient(135deg,theme(colors.rose.600),theme(colors.orange.500))] text-destructive-foreground shadow-[0_16px_40px_-22px_rgba(225,29,72,0.75)] focus-visible:ring-destructive/40",
         outline:
-          "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50",
+          "border border-border/60 bg-transparent text-foreground hover:border-primary/70 hover:text-primary",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+          "border border-transparent bg-[linear-gradient(135deg,theme(colors.cyan.400),theme(colors.sky.500)/70)] text-secondary-foreground",
         ghost:
-          "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
-        link: "text-primary underline-offset-4 hover:underline",
+          "border border-transparent bg-transparent text-foreground hover:bg-primary/10 hover:text-primary",
+        link: "border border-transparent bg-transparent text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-9 px-4 py-2 has-[>svg]:px-3",
-        sm: "h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5",
-        lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
-        icon: "size-9",
-        "icon-sm": "size-8",
-        "icon-lg": "size-10",
+        default: "h-10 px-5 py-2",
+        sm: "h-9 rounded-lg gap-1.5 px-4 py-1.5 text-xs",
+        lg: "h-11 rounded-2xl px-7 py-2.5 text-base",
+        icon: "size-10",
+        "icon-sm": "size-9",
+        "icon-lg": "size-12",
       },
     },
     defaultVariants: {

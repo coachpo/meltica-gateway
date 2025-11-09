@@ -4,19 +4,19 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
-  "group/alert relative w-full rounded-lg border px-4 py-3 text-sm grid has-[>svg]:grid-cols-[calc(var(--spacing)*4)_1fr] grid-cols-[0_1fr] has-[>svg]:gap-x-3 gap-y-0.5 items-start [&>svg]:size-4 [&>svg]:translate-y-0.5 [&>svg]:text-current",
+  "group/alert relative grid w-full grid-cols-[0_1fr] items-start gap-y-1 rounded-2xl border px-5 py-4 text-sm shadow-[0_22px_45px_-38px_rgba(15,23,42,0.65)] backdrop-blur-xl transition-all has-[>svg]:grid-cols-[calc(var(--spacing)*4)_1fr] has-[>svg]:gap-x-3 [&>svg]:size-4 [&>svg]:translate-y-0.5 [&>svg]:text-current",
   {
     variants: {
       variant: {
-        default: "border-border bg-card text-card-foreground",
+        default: "border-border/60 bg-card/75 text-card-foreground",
         destructive:
-          "border-destructive/60 bg-destructive/10 text-destructive [&>svg]:text-destructive *:data-[slot=alert-title]:text-destructive *:data-[slot=alert-description]:text-destructive/90",
+          "border-destructive/60 bg-destructive/15 text-destructive-foreground [&>svg]:text-destructive",
         success:
-          "border-success/50 bg-success/10 text-success-foreground [&>svg]:text-success *:data-[slot=alert-title]:text-success-foreground *:data-[slot=alert-description]:text-success/90",
+          "border-success/60 bg-success/15 text-success-foreground [&>svg]:text-success",
         warning:
-          "border-warning/50 bg-warning/10 text-warning-foreground [&>svg]:text-warning *:data-[slot=alert-title]:text-warning-foreground *:data-[slot=alert-description]:text-warning-foreground/90",
+          "border-warning/60 bg-warning/15 text-warning-foreground [&>svg]:text-warning",
         info:
-          "border-info/50 bg-info/10 text-info-foreground [&>svg]:text-info *:data-[slot=alert-title]:text-info-foreground *:data-[slot=alert-description]:text-info-foreground/90",
+          "border-info/60 bg-info/15 text-info-foreground [&>svg]:text-info",
       },
     },
     defaultVariants: {

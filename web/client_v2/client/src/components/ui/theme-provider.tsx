@@ -30,8 +30,13 @@ function applyThemeClass(theme: Theme) {
     return;
   }
   const root = document.documentElement;
+  const body = document.body;
   root.classList.toggle('dark', theme === 'dark');
   root.dataset.theme = theme;
+  if (body) {
+    body.dataset.theme = theme;
+    body.style.colorScheme = theme;
+  }
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

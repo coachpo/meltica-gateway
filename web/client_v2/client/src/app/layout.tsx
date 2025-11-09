@@ -31,8 +31,10 @@ export default function RootLayout({
       >
         <ClientProviders>
           <Nav />
-          <main className="container mx-auto py-6 px-6">
-            {children}
+          <main className="relative mx-auto w-full max-w-7xl px-6 py-8 sm:px-8 lg:px-10">
+            <div className="space-y-8 rounded-[2.5rem] border border-border/30 bg-background/70 p-6 shadow-[0_60px_120px_-80px_rgba(15,23,42,0.8)] backdrop-blur-2xl sm:p-8 lg:p-10">
+              {children}
+            </div>
           </main>
         </ClientProviders>
       </body>
