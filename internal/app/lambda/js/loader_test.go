@@ -112,6 +112,31 @@ func TestLoaderRefreshAndList(t *testing.T) {
 	}
 }
 
+func TestLoaderRefreshOverridesMetadataTag(t *testing.T) {
+	dir := t.TempDir()
+	source := strings.Replace(sampleModule, "tag: \"v1.0.0\"", "tag: \"legacy\"", 1)
+	modulePath := writeVersionedModule(t, dir, "noop", "v2.0.0", []byte(source))
+	writeRegistry(t, dir, "noop", "v2.0.0", modulePath)
+
+	loader, err := NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	if err := loader.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	modules := loader.List()
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if modules[0].Tag != "v2.0.0" {
+		t.Fatalf("expected tag v2.0.0, got %s", modules[0].Tag)
+	}
+	if modules[0].Metadata.Tag != "v2.0.0" {
+		t.Fatalf("metadata tag not normalized, got %s", modules[0].Metadata.Tag)
+	}
+}
+
 func TestInstanceCall(t *testing.T) {
 	dir := t.TempDir()
 	modulePath := writeVersionedModule(t, dir, "noop", "v1.0.0", []byte(sampleModule))

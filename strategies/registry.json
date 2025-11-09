@@ -38,12 +38,13 @@
   "logging": {
     "tags": {
       "1.0.0": "sha256:be6d29bbd4e3c00b02fbeda27a4e7315f923d8b1428f663ac87cf050814f6299",
-      "latest": "sha256:be6d29bbd4e3c00b02fbeda27a4e7315f923d8b1428f663ac87cf050814f6299"
+      "latest": "sha256:be6d29bbd4e3c00b02fbeda27a4e7315f923d8b1428f663ac87cf050814f6299",
+      "v1.0.1": "sha256:be6d29bbd4e3c00b02fbeda27a4e7315f923d8b1428f663ac87cf050814f6299"
     },
     "hashes": {
       "sha256:be6d29bbd4e3c00b02fbeda27a4e7315f923d8b1428f663ac87cf050814f6299": {
-        "tag": "1.0.0",
-        "path": "logging/1.0.0/logging.js"
+        "tag": "v1.0.1",
+        "path": "logging/v1.0.1/logging.js"
       }
     }
   },

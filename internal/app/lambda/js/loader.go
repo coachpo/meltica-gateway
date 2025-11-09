@@ -244,10 +244,8 @@ func (l *Loader) refreshFromRegistry(ctx context.Context, reg registry) error {
 				return fmt.Errorf("strategy loader: module hash mismatch for %s (%s != %s)", modulePath, module.Hash, normalizedHash)
 			}
 			module.Tags = collectTagsForHash(entry.Tags, loc.Tag, normalizedHash)
-			if module.Metadata.Tag == "" {
-				module.Metadata.Tag = loc.Tag
-			}
-			module.Tag = module.Metadata.Tag
+			module.Metadata.Tag = loc.Tag
+			module.Tag = loc.Tag
 			hashToModule[normalizedHash] = module
 			nextFiles[module.Path] = module
 			nextByHash[normalizedHash] = module
