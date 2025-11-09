@@ -66,7 +66,6 @@ import {
   Loader2,
   Pencil,
   RefreshCw,
-  Tag,
   Trash2,
   UploadCloud,
   ListFilter,
@@ -2093,11 +2092,6 @@ sha256:def...`}
             setDetailModule(null);
             setRevisionToDelete(null);
             setPromoteTarget(null);
-            setAliasDialogTarget(null);
-            setAliasValue('');
-            setAliasError(null);
-            setAliasPromoteLatest(false);
-            setAliasProcessing(false);
           }
         }}
       >
@@ -2238,21 +2232,6 @@ sha256:def...`}
                                       <ArrowUpCircle className="mr-1 h-3 w-3" />
                                     )}
                                     Promote
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 px-2"
-                                    onClick={() => {
-                                      setAliasDialogTarget({ module: detailModule, revision });
-                                      setAliasValue('');
-                                      setAliasPromoteLatest(false);
-                                      setAliasError(null);
-                                    }}
-                                    disabled={deleteBusy}
-                                  >
-                                    <Tag className="mr-1 h-3 w-3" /> Alias
                                   </Button>
                                   <Button
                                     type="button"
