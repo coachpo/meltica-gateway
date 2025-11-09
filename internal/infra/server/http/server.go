@@ -463,13 +463,16 @@ func (s *httpServer) createStrategyModule(w http.ResponseWriter, r *http.Request
 }
 
 func (s *httpServer) handleStrategyModule(w http.ResponseWriter, r *http.Request) {
-	trimmed := strings.TrimPrefix(r.URL.Path, strategyModulePrefix)
-	trimmed = strings.Trim(trimmed, "/")
-	if trimmed == "" {
+	rawPath := strings.Trim(r.URL.Path, "/")
+	if rawPath == "" {
 		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 		return
 	}
-	segments := splitPathSegments(trimmed)
+	segments := stripModuleRoutePrefix(splitPathSegments(rawPath))
+	if len(segments) == 0 {
+		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
+		return
+	}
 	name := strings.TrimSpace(segments[0])
 	if name == "" {
 		writeError(w, http.StatusNotFound, "module identifier required")
@@ -538,6 +541,23 @@ func splitPathSegments(raw string) []string {
 		out = append(out, part)
 	}
 	return out
+}
+
+func stripModuleRoutePrefix(segments []string) []string {
+	if len(segments) == 0 {
+		return segments
+	}
+	idx := 0
+	if strings.EqualFold(segments[0], "strategies") {
+		idx++
+	}
+	if len(segments) > idx && strings.EqualFold(segments[idx], "modules") {
+		idx++
+	}
+	if idx > 0 && idx <= len(segments) {
+		return segments[idx:]
+	}
+	return segments
 }
 
 func (s *httpServer) getStrategyModule(w http.ResponseWriter, name string) {

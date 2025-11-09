@@ -1113,3 +1113,13 @@ func TestBuildUsageSelector(t *testing.T) {
 		t.Fatalf("unexpected usage URL %s", url)
 	}
 }
+
+func TestHandleStrategyModuleTagRoutes(t *testing.T) {
+	server := &httpServer{}
+	req := httptest.NewRequest(http.MethodDelete, "/strategies/modules/logging/tags/v1.0.1", nil)
+	rec := httptest.NewRecorder()
+	server.handleStrategyModule(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 due to nil manager, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
