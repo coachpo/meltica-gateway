@@ -14,6 +14,7 @@ interface ErrorOptions extends SuccessOptions {
   error?: unknown;
   fallbackMessage?: string;
   telemetryTag?: string;
+  suppressConsole?: boolean;
 }
 
 const DEFAULT_ERROR_TITLE = 'Request failed';
@@ -64,7 +65,7 @@ export function useApiNotifications() {
         options.fallbackMessage ??
         'Something went wrong. Please try again.';
 
-      if (options.error) {
+      if (options.error && !options.suppressConsole) {
         console.error(
           `[api-error${options.telemetryTag ? `:${options.telemetryTag}` : ''}]`,
           options.error,

@@ -204,6 +204,18 @@ export function useUpdateStrategyModuleMutation() {
   });
 }
 
+function isRevisionInUseError(error: unknown): boolean {
+  const message =
+    typeof error === 'string'
+      ? error
+      : error instanceof Error
+        ? error.message
+        : typeof (error as { message?: string })?.message === 'string'
+          ? (error as { message?: string }).message ?? ''
+          : '';
+  return typeof message === 'string' && message.toLowerCase().includes('is in use');
+}
+
 export function useDeleteStrategyModuleMutation() {
   const queryClient = useQueryClient();
   const { notifySuccess, notifyError } = useApiNotifications();
@@ -222,6 +234,7 @@ export function useDeleteStrategyModuleMutation() {
         title: 'Delete failed',
         error,
         fallbackMessage: 'Unable to delete strategy module.',
+        suppressConsole: isRevisionInUseError(error),
       });
     },
   });
