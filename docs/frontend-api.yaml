@@ -221,6 +221,58 @@ paths:
                 $ref: '#/components/schemas/StrategyModuleUsageResponse'
         default:
           $ref: '#/components/responses/Error'
+  /strategies/modules/{name}/tags/{tag}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema:
+          type: string
+        description: Strategy name
+      - in: path
+        name: tag
+        required: true
+        schema:
+          type: string
+        description: Tag alias to mutate
+    put:
+      tags: [Strategy Modules]
+      summary: Reassign a tag alias to a different hash
+      operationId: assignStrategyModuleTag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrategyTagAssignmentRequest'
+      responses:
+        '200':
+          description: Tag reassigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyTagMutationResponse'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Strategy Modules]
+      summary: Remove a tag alias from the registry
+      operationId: deleteStrategyModuleTag
+      parameters:
+        - in: query
+          name: allowOrphan
+          schema:
+            type: boolean
+          description: Force removal even if this is the last alias referencing the hash
+      responses:
+        '200':
+          description: Tag removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyTagMutationResponse'
+        default:
+          $ref: '#/components/responses/Error'
   /strategies/refresh:
     post:
       tags: [Strategies]
@@ -909,6 +961,10 @@ components:
           type: array
           items:
             type: string
+        reassignTags:
+          type: array
+          items:
+            type: string
         promoteLatest:
           type: boolean
         source:
@@ -942,6 +998,32 @@ components:
           $ref: '#/components/schemas/StrategyModuleResolution'
           nullable: true
       required: [status, strategyDirectory]
+    StrategyTagAssignmentRequest:
+      type: object
+      properties:
+        hash:
+          type: string
+        refresh:
+          type: boolean
+      required: [hash]
+    StrategyTagMutationResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        strategy:
+          type: string
+        tag:
+          type: string
+        hash:
+          type: string
+        previousHash:
+          type: string
+        allowOrphan:
+          type: boolean
+        refresh:
+          type: boolean
+      required: [status, strategy, tag]
     StrategyRefreshRequest:
       type: object
       properties:
