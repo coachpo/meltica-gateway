@@ -6,7 +6,7 @@ This manual explains how to onboard, run, and maintain JavaScript trading strate
 
 ## 1. Core Concepts
 
-- **Strategy home**: Every revision lives under `strategies/<name>/<hash>/<name>.js` (older releases may still sit under `strategies/<name>/<tag>/<name>.js`). `strategies/registry.json` is the source of truth linking tags/aliases to hashes and file paths.
+- **Strategy home**: Every revision lives under `strategies/<name>/<hash>/<name>.js` (hash = 64-character SHA-256 digest). `strategies/registry.json` is the source of truth linking tags/aliases to hashes and file paths, so tags never dictate the directory layout.
 - **Execution engine**: The gateway loads strategies through the Goja JavaScript runtime. Each module is wrapped in Go code (`internal/app/lambda/js/*`) that exposes helper functions for logging, timing, provider selection, market data, and order submission.
 - **Selectors**: Anywhere you reference a strategy you can use:
   - `name` → whatever hash the registry maps to `tags.latest`.

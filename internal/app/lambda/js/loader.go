@@ -234,6 +234,9 @@ func (l *Loader) refreshFromRegistry(ctx context.Context, reg registry) error {
 			if normalizedHash == "" {
 				return fmt.Errorf("strategy loader: registry[%s] hash key empty", rawName)
 			}
+			if err := validateRegistryLocation(name, normalizedHash, loc.Path); err != nil {
+				return err
+			}
 			modulePath := filepath.Join(l.root, filepath.Clean(loc.Path))
 			module, err := loadModule(modulePath)
 			if err != nil {
@@ -1381,6 +1384,31 @@ func hashDirectoryComponent(hash string) (string, error) {
 		return "", fmt.Errorf("strategy loader: unsupported hash digest %q", hash)
 	}
 	return digest, nil
+}
+
+func validateRegistryLocation(name, hash, relPath string) error {
+	if name == "" {
+		return fmt.Errorf("strategy loader: registry entry missing name for hash %s", hash)
+	}
+	digest, err := hashDirectoryComponent(hash)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(relPath) == "" {
+		return fmt.Errorf("strategy loader: registry path missing for %s@%s", name, hash)
+	}
+	normalized := filepath.ToSlash(filepath.Clean(relPath))
+	expected := filepath.ToSlash(filepath.Join(name, digest, fmt.Sprintf("%s.js", name)))
+	if normalized != expected {
+		return fmt.Errorf(
+			"strategy loader: registry path mismatch for %s@%s (expected %s, got %s)",
+			name,
+			hash,
+			expected,
+			relPath,
+		)
+	}
+	return nil
 }
 
 func (l *Loader) applyRegistryTagUpdate(name string, entry registryEntry) {
