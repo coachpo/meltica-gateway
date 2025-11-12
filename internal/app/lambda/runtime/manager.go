@@ -365,6 +365,8 @@ func NewManager(cfg config.AppConfig, bus eventbus.Bus, pools *pool.PoolManager,
 		revisionGauge:            nil,
 		revisionLifecycleMetric:  nil,
 		uploadValidationFailures: nil,
+		tagAssignmentCounter:     nil,
+		tagDeleteCounter:         nil,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -2057,7 +2059,7 @@ func (m *Manager) AssignStrategyTag(ctx context.Context, name, tag, hash string,
 		m.logger.Printf("strategy tag %s:%s moved from %s to %s", name, tag, previous, hash)
 	}
 	if refresh && !strings.EqualFold(previous, hash) {
-		_, refreshErr := m.RefreshJavaScriptStrategiesWithTargets(ctx, RefreshTargets{Strategies: []string{name}})
+		_, refreshErr := m.RefreshJavaScriptStrategiesWithTargets(ctx, RefreshTargets{Strategies: []string{name}, Hashes: nil})
 		if refreshErr != nil {
 			return previous, fmt.Errorf("refresh after tag move: %w", refreshErr)
 		}

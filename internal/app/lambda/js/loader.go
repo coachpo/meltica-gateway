@@ -754,7 +754,7 @@ func (l *Loader) Write(filename string, source []byte) error {
 		return fmt.Errorf("strategy loader: load registry: %w", err)
 	}
 	if reg != nil {
-		_, writeErr := l.writeModuleWithRegistry(source, ModuleWriteOptions{Filename: "", Tag: "", Aliases: nil, PromoteLatest: true}, reg)
+		_, writeErr := l.writeModuleWithRegistry(source, ModuleWriteOptions{Filename: "", Tag: "", Aliases: nil, ReassignTags: nil, PromoteLatest: true}, reg)
 		return writeErr
 	}
 
@@ -871,7 +871,7 @@ func (l *Loader) AssignTag(name, tag, hash string) (string, error) {
 
 // DeleteTag removes a tag alias without deleting the revision it referenced and returns the hash previously mapped to the tag.
 func (l *Loader) DeleteTag(name, tag string) (string, error) {
-	return l.deleteTag(name, tag, TagDeleteOptions{})
+	return l.deleteTag(name, tag, TagDeleteOptions{AllowOrphan: false})
 }
 
 // DeleteTagWithOptions removes a tag alias honoring the supplied guardrail options.
@@ -1281,9 +1281,8 @@ func (l *Loader) writeModuleWithRegistry(source []byte, opts ModuleWriteOptions,
 		_ = os.Remove(tempPath)
 		return empty, err
 	}
-	if !reused {
-		// temp file already moved inside persistRevisionFile
-	} else {
+	if reused {
+		// persistRevisionFile reused an existing revision file, so clean up the temp file.
 		_ = os.Remove(tempPath)
 	}
 

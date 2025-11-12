@@ -1,13 +1,15 @@
+// Package strategiestest provides helper utilities for tests that need stub strategy modules.
 package strategiestest
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	json "github.com/goccy/go-json"
 )
 
 const (
@@ -236,7 +238,7 @@ type moduleInfo struct {
 func writeStubModule(t testing.TB, root string, module stubModule) moduleInfo {
 	t.Helper()
 	moduleDir := filepath.Join(root, module.name, module.tag)
-	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+	if err := os.MkdirAll(moduleDir, 0o750); err != nil {
 		t.Fatalf("create module directory %s: %v", moduleDir, err)
 	}
 	filename := fmt.Sprintf("%s.js", module.name)
