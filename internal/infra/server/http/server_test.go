@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,6 +25,7 @@ import (
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
+	strategiestest "github.com/coachpo/meltica/internal/testutil/strategies"
 )
 
 func TestDecodeRiskConfig_NormalizesAllowedOrderTypes(t *testing.T) {
@@ -58,6 +58,7 @@ func TestDecodeRiskConfig_NormalizesAllowedOrderTypes(t *testing.T) {
 }
 
 func TestBuildContextBackup(t *testing.T) {
+	strategyDir := strategiestest.WriteStubStrategies(t)
 	appCfg := config.AppConfig{
 		Environment: config.EnvDev,
 		Eventbus: config.EventbusConfig{
@@ -99,9 +100,7 @@ func TestBuildContextBackup(t *testing.T) {
 			OTLPInsecure:  true,
 			EnableMetrics: true,
 		},
-		Strategies: config.StrategiesConfig{
-			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
-		},
+		Strategies: config.StrategiesConfig{Directory: strategyDir},
 	}
 
 	poolMgr := pool.NewPoolManager()
@@ -253,10 +252,9 @@ func TestWriteStrategyModuleErrorReturnsDiagnostics(t *testing.T) {
 }
 
 func TestApplyContextBackupRestoresState(t *testing.T) {
+	strategyDir := strategiestest.WriteStubStrategies(t)
 	appCfg := config.AppConfig{
-		Strategies: config.StrategiesConfig{
-			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
-		},
+		Strategies: config.StrategiesConfig{Directory: strategyDir},
 	}
 
 	poolMgr := pool.NewPoolManager()
@@ -437,10 +435,9 @@ func TestBuildProviderSpecFromPayload_OmitsEmptyConfig(t *testing.T) {
 }
 
 func TestHandleProviderDeleteBlockedWhenInUse(t *testing.T) {
+	strategyDir := strategiestest.WriteStubStrategies(t)
 	appCfg := config.AppConfig{
-		Strategies: config.StrategiesConfig{
-			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
-		},
+		Strategies: config.StrategiesConfig{Directory: strategyDir},
 	}
 
 	poolMgr := pool.NewPoolManager()
@@ -534,10 +531,9 @@ func TestHandleProviderDeleteBlockedWhenInUse(t *testing.T) {
 }
 
 func TestProviderUsageInfersProvidersFromScope(t *testing.T) {
+	strategyDir := strategiestest.WriteStubStrategies(t)
 	appCfg := config.AppConfig{
-		Strategies: config.StrategiesConfig{
-			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
-		},
+		Strategies: config.StrategiesConfig{Directory: strategyDir},
 	}
 
 	poolMgr := pool.NewPoolManager()

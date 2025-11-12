@@ -13,13 +13,15 @@ import (
 	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/domain/strategystore"
 	"github.com/coachpo/meltica/internal/infra/config"
+	strategiestest "github.com/coachpo/meltica/internal/testutil/strategies"
 )
 
 func newTestManager(t *testing.T, opts ...Option) *Manager {
 	t.Helper()
+	dir := strategiestest.WriteStubStrategies(t)
 	cfg := config.AppConfig{
 		Strategies: config.StrategiesConfig{
-			Directory: filepath.Join("..", "..", "..", "..", "strategies"),
+			Directory: dir,
 		},
 	}
 	manager, err := NewManager(cfg, nil, nil, nil, log.New(io.Discard, "", 0), nil, opts...)

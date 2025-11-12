@@ -4,17 +4,17 @@ import (
 	"context"
 	"io"
 	"log"
-	"path/filepath"
 	"testing"
 
 	"github.com/coachpo/meltica/internal/app/lambda/core"
 	"github.com/coachpo/meltica/internal/app/lambda/js"
+	strategiestest "github.com/coachpo/meltica/internal/testutil/strategies"
 )
 
 func loadTestStrategy(t *testing.T, name string) core.TradingStrategy {
 	t.Helper()
 
-	dir := filepath.Join("..", "..", "..", "strategies")
+	dir := strategiestest.WriteStubStrategies(t)
 	loader, err := js.NewLoader(dir)
 	if err != nil {
 		t.Fatalf("new loader: %v", err)
