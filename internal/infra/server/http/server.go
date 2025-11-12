@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	json "github.com/goccy/go-json"
 	"github.com/shopspring/decimal"
@@ -122,6 +123,49 @@ type instanceSummaryResponse struct {
 type instanceSnapshotResponse struct {
 	runtime.InstanceSnapshot
 	Links instanceLinks `json:"links"`
+}
+
+type outboxEventResponse struct {
+	ID            int64           `json:"id"`
+	AggregateType string          `json:"aggregateType"`
+	AggregateID   string          `json:"aggregateId"`
+	EventType     string          `json:"eventType"`
+	Payload       json.RawMessage `json:"payload"`
+	Headers       map[string]any  `json:"headers,omitempty"`
+	AvailableAt   time.Time       `json:"availableAt"`
+	PublishedAt   *time.Time      `json:"publishedAt,omitempty"`
+	Attempts      int             `json:"attempts"`
+	LastError     string          `json:"lastError,omitempty"`
+	Delivered     bool            `json:"delivered"`
+	CreatedAt     time.Time       `json:"createdAt"`
+}
+
+func newOutboxEventResponse(record outboxstore.EventRecord) outboxEventResponse {
+	return outboxEventResponse{
+		ID:            record.ID,
+		AggregateType: record.AggregateType,
+		AggregateID:   record.AggregateID,
+		EventType:     record.EventType,
+		Payload:       record.Payload,
+		Headers:       record.Headers,
+		AvailableAt:   record.AvailableAt,
+		PublishedAt:   record.PublishedAt,
+		Attempts:      record.Attempts,
+		LastError:     record.LastError,
+		Delivered:     record.Delivered,
+		CreatedAt:     record.CreatedAt,
+	}
+}
+
+func convertOutboxRecords(records []outboxstore.EventRecord) []outboxEventResponse {
+	if len(records) == 0 {
+		return nil
+	}
+	events := make([]outboxEventResponse, len(records))
+	for i, record := range records {
+		events[i] = newOutboxEventResponse(record)
+	}
+	return events
 }
 
 // NewHandler creates an HTTP handler for lambda management operations.
@@ -1450,9 +1494,10 @@ func (s *httpServer) listOutbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	events := convertOutboxRecords(records)
 	response := map[string]any{
-		"events": records,
-		"count":  len(records),
+		"events": events,
+		"count":  len(events),
 	}
 	writeJSON(w, http.StatusOK, response)
 }

@@ -911,8 +911,8 @@ func TestOutboxListReturnsRecords(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
 	}
 	var payload struct {
-		Events []outboxstore.EventRecord `json:"events"`
-		Count  int                       `json:"count"`
+		Events []outboxEventResponse `json:"events"`
+		Count  int                   `json:"count"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
