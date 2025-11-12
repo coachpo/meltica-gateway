@@ -1083,7 +1083,7 @@ func extractMetadata(program *goja.Program) (strategies.Metadata, error) {
 		return strategies.Metadata{}, err
 	}
 	raw := exports.Get("metadata")
-	if goja.IsUndefined(raw) || goja.IsNull(raw) {
+	if raw == nil || goja.IsUndefined(raw) || goja.IsNull(raw) {
 		diagErr := NewDiagnosticError(
 			"metadata export missing",
 			errors.New("metadata export missing"),

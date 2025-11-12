@@ -273,6 +273,39 @@ module.exports = {
 	}
 }
 
+func TestCompileModuleMissingMetadataProducesDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	source := `
+module.exports = {
+  create: function () {
+    return {};
+  }
+};
+`
+	path := filepath.Join(dir, "missing.js")
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatalf("write module: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat module: %v", err)
+	}
+	if _, err := compileModule(path, info); err == nil {
+		t.Fatalf("expected metadata error when metadata export missing")
+	} else {
+		diagErr, ok := AsDiagnosticError(err)
+		if !ok {
+			t.Fatalf("expected diagnostic error, got %v", err)
+		}
+		if diagErr.Error() != "metadata export missing" {
+			t.Fatalf("unexpected diagnostic message: %s", diagErr.Error())
+		}
+		if diags := diagErr.Diagnostics(); len(diags) == 0 {
+			t.Fatalf("expected diagnostics for missing metadata export")
+		}
+	}
+}
+
 func TestCompileModuleMetadataValidationDiagnostics(t *testing.T) {
 	dir := t.TempDir()
 	source := `
