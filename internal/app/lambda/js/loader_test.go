@@ -37,7 +37,9 @@ module.exports = {
 
 func writeVersionedModule(t *testing.T, dir, name, tag string, source []byte) string {
 	t.Helper()
-	moduleDir := filepath.Join(dir, name, tag)
+	sum := sha256.Sum256(source)
+	digest := hex.EncodeToString(sum[:])
+	moduleDir := filepath.Join(dir, name, digest)
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
 		t.Fatalf("mkdir module dir: %v", err)
 	}
@@ -70,7 +72,7 @@ func writeRegistry(t *testing.T, root, name, tag, path string) {
     }
   }
 }
-`, name, tag, hashHex, tag, filepath.ToSlash(filepath.Join(name, tag, fmt.Sprintf("%s.js", name))))
+`, name, tag, hashHex, tag, filepath.ToSlash(filepath.Join(name, hashHex, fmt.Sprintf("%s.js", name))))
 	if err := os.WriteFile(filepath.Join(root, "registry.json"), []byte(registry), 0o600); err != nil {
 		t.Fatalf("write registry: %v", err)
 	}
@@ -585,7 +587,9 @@ func TestDeleteWithRegistrySelector(t *testing.T) {
 		t.Fatalf("Delete by tag: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "noop", "v1.0.0", "noop.js")); !os.IsNotExist(err) {
+	digestDir := filepath.Base(filepath.Dir(modulePath))
+	expectedPath := filepath.Join(dir, "noop", digestDir, "noop.js")
+	if _, err := os.Stat(expectedPath); !os.IsNotExist(err) {
 		t.Fatalf("expected module file removed, got %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "registry.json"))

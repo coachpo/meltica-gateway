@@ -237,7 +237,9 @@ type moduleInfo struct {
 
 func writeStubModule(t testing.TB, root string, module stubModule) moduleInfo {
 	t.Helper()
-	moduleDir := filepath.Join(root, module.name, module.tag)
+	sum := sha256.Sum256([]byte(module.source))
+	digest := hex.EncodeToString(sum[:])
+	moduleDir := filepath.Join(root, module.name, digest)
 	if err := os.MkdirAll(moduleDir, 0o750); err != nil {
 		t.Fatalf("create module directory %s: %v", moduleDir, err)
 	}
@@ -246,9 +248,8 @@ func writeStubModule(t testing.TB, root string, module stubModule) moduleInfo {
 	if err := os.WriteFile(fullPath, []byte(module.source), 0o600); err != nil {
 		t.Fatalf("write strategy module %s: %v", fullPath, err)
 	}
-	sum := sha256.Sum256([]byte(module.source))
-	hash := "sha256:" + hex.EncodeToString(sum[:])
-	rel := filepath.ToSlash(filepath.Join(module.name, module.tag, filename))
+	hash := "sha256:" + digest
+	rel := filepath.ToSlash(filepath.Join(module.name, digest, filename))
 	return moduleInfo{name: module.name, tag: module.tag, hash: hash, relPath: rel}
 }
 
