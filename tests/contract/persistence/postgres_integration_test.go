@@ -201,6 +201,25 @@ func TestPostgresPersistenceStores(t *testing.T) {
 		t.Fatalf("save strategy: %v", err)
 	}
 
+	secondSnapshot := strategySnapshot
+	secondSnapshot.ID = "strat-" + uuid.NewString()
+	if err := strategyStore.Save(ctx, secondSnapshot); err != nil {
+		t.Fatalf("save duplicate strategy identifier: %v", err)
+	}
+	snapshots, err := strategyStore.Load(ctx)
+	if err != nil {
+		t.Fatalf("load strategy snapshots: %v", err)
+	}
+	var duplicateCount int
+	for _, snapshot := range snapshots {
+		if snapshot.Strategy.Identifier == strategySnapshot.Strategy.Identifier && snapshot.Strategy.Tag == strategySnapshot.Strategy.Tag {
+			duplicateCount++
+		}
+	}
+	if duplicateCount < 2 {
+		t.Fatalf("expected multiple snapshots for strategy %s tag %s, found %d", strategySnapshot.Strategy.Identifier, strategySnapshot.Strategy.Tag, duplicateCount)
+	}
+
 	orderID := uuid.NewString()
 	clientOrderID := "cli-" + uuid.NewString()
 	price := "27500.50"
@@ -212,7 +231,7 @@ func TestPostgresPersistenceStores(t *testing.T) {
 	secondClientID := "cli-" + uuid.NewString()
 	secondQuantity := "  2.5000  "
 
-	err := orderStore.WithTransaction(ctx, func(ctx context.Context, tx orderstore.Tx) error {
+	err = orderStore.WithTransaction(ctx, func(ctx context.Context, tx orderstore.Tx) error {
 		if err := tx.CreateOrder(ctx, orderstore.Order{
 			ID:                orderID,
 			Provider:          providerSnapshot.Name,
