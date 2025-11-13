@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	json "github.com/goccy/go-json"
 	"github.com/shopspring/decimal"
@@ -21,7 +20,6 @@ import (
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/app/risk"
 	"github.com/coachpo/meltica/internal/domain/orderstore"
-	"github.com/coachpo/meltica/internal/domain/outboxstore"
 	"github.com/coachpo/meltica/internal/infra/config"
 	"github.com/coachpo/meltica/internal/infra/pool"
 )
@@ -53,13 +51,10 @@ const (
 	instanceOrdersSuffix     = "orders"
 	instanceExecutionsSuffix = "executions"
 	providerBalancesSuffix   = "balances"
-	outboxPath               = "/outbox"
-	outboxDetailPrefix       = outboxPath + "/"
 
 	defaultOrdersLimit     = 50
 	defaultExecutionsLimit = 100
 	defaultBalancesLimit   = 100
-	defaultOutboxLimit     = 100
 	maxListLimit           = 500
 )
 
@@ -69,7 +64,6 @@ type httpServer struct {
 	manager       *runtime.Manager
 	providers     *provider.Manager
 	orderStore    orderstore.Store
-	outboxStore   outboxstore.Store
 	baseProviders map[string]struct{}
 }
 
@@ -125,51 +119,8 @@ type instanceSnapshotResponse struct {
 	Links instanceLinks `json:"links"`
 }
 
-type outboxEventResponse struct {
-	ID            int64           `json:"id"`
-	AggregateType string          `json:"aggregateType"`
-	AggregateID   string          `json:"aggregateId"`
-	EventType     string          `json:"eventType"`
-	Payload       json.RawMessage `json:"payload"`
-	Headers       map[string]any  `json:"headers,omitempty"`
-	AvailableAt   time.Time       `json:"availableAt"`
-	PublishedAt   *time.Time      `json:"publishedAt,omitempty"`
-	Attempts      int             `json:"attempts"`
-	LastError     string          `json:"lastError,omitempty"`
-	Delivered     bool            `json:"delivered"`
-	CreatedAt     time.Time       `json:"createdAt"`
-}
-
-func newOutboxEventResponse(record outboxstore.EventRecord) outboxEventResponse {
-	return outboxEventResponse{
-		ID:            record.ID,
-		AggregateType: record.AggregateType,
-		AggregateID:   record.AggregateID,
-		EventType:     record.EventType,
-		Payload:       record.Payload,
-		Headers:       record.Headers,
-		AvailableAt:   record.AvailableAt,
-		PublishedAt:   record.PublishedAt,
-		Attempts:      record.Attempts,
-		LastError:     record.LastError,
-		Delivered:     record.Delivered,
-		CreatedAt:     record.CreatedAt,
-	}
-}
-
-func convertOutboxRecords(records []outboxstore.EventRecord) []outboxEventResponse {
-	if len(records) == 0 {
-		return nil
-	}
-	events := make([]outboxEventResponse, len(records))
-	for i, record := range records {
-		events[i] = newOutboxEventResponse(record)
-	}
-	return events
-}
-
 // NewHandler creates an HTTP handler for lambda management operations.
-func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *provider.Manager, orders orderstore.Store, outbox outboxstore.Store) http.Handler {
+func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *provider.Manager, orders orderstore.Store) http.Handler {
 	baseProviders := make(map[string]struct{}, len(appCfg.Providers))
 	for name := range appCfg.Providers {
 		normalized := strings.ToLower(strings.TrimSpace(string(name)))
@@ -181,7 +132,6 @@ func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *pr
 		manager:       manager,
 		providers:     providers,
 		orderStore:    orders,
-		outboxStore:   outbox,
 		baseProviders: baseProviders,
 	}
 	mux := http.NewServeMux()
@@ -232,11 +182,6 @@ func NewHandler(appCfg config.AppConfig, manager *runtime.Manager, providers *pr
 		http.MethodGet:  server.handleContextBackupExport,
 		http.MethodPost: server.handleContextBackupRestore,
 	}))
-
-	mux.Handle(outboxPath, server.methodHandlers(map[string]handlerFunc{
-		http.MethodGet: server.listOutbox,
-	}))
-	mux.Handle(outboxDetailPrefix, http.HandlerFunc(server.handleOutboxEntry))
 
 	return withCORS(mux)
 }
@@ -1477,64 +1422,6 @@ func (s *httpServer) handleProviderBalances(w http.ResponseWriter, r *http.Reque
 		"count":    len(records),
 	}
 	writeJSON(w, http.StatusOK, response)
-}
-
-func (s *httpServer) listOutbox(w http.ResponseWriter, r *http.Request) {
-	if s.outboxStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "outbox store unavailable")
-		return
-	}
-	limit, err := parseLimitParam(r.URL.Query().Get("limit"), defaultOutboxLimit)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	records, err := s.outboxStore.ListPending(r.Context(), limit)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	events := convertOutboxRecords(records)
-	response := map[string]any{
-		"events": events,
-		"count":  len(events),
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-func (s *httpServer) handleOutboxEntry(w http.ResponseWriter, r *http.Request) {
-	idSegment := strings.TrimPrefix(r.URL.Path, outboxDetailPrefix)
-	idSegment = strings.Trim(idSegment, "/")
-	if idSegment == "" {
-		writeError(w, http.StatusNotFound, "outbox entry id required")
-		return
-	}
-	id, err := strconv.ParseInt(idSegment, 10, 64)
-	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid outbox entry id")
-		return
-	}
-	switch r.Method {
-	case http.MethodDelete:
-		s.deleteOutboxEntry(w, r, id)
-	default:
-		methodNotAllowed(w, http.MethodDelete)
-	}
-}
-
-func (s *httpServer) deleteOutboxEntry(w http.ResponseWriter, r *http.Request, id int64) {
-	if s.outboxStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "outbox store unavailable")
-		return
-	}
-	if err := s.outboxStore.Delete(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":     id,
-		"status": "deleted",
-	})
 }
 
 func parseLimitParam(raw string, fallback int) (int, error) {

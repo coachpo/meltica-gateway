@@ -20,7 +20,6 @@ import (
 	lambdaruntime "github.com/coachpo/meltica/internal/app/lambda/runtime"
 	"github.com/coachpo/meltica/internal/app/provider"
 	"github.com/coachpo/meltica/internal/domain/orderstore"
-	"github.com/coachpo/meltica/internal/domain/outboxstore"
 	"github.com/coachpo/meltica/internal/domain/schema"
 	"github.com/coachpo/meltica/internal/infra/bus/eventbus"
 	"github.com/coachpo/meltica/internal/infra/config"
@@ -795,7 +794,7 @@ func TestInstanceOrdersEndpointReturnsRecords(t *testing.T) {
 			},
 		},
 	}
-	handler := NewHandler(config.AppConfig{}, nil, nil, store, nil)
+	handler := NewHandler(config.AppConfig{}, nil, nil, store)
 
 	req := httptest.NewRequest(http.MethodGet, "/strategy/instances/demo/orders?limit=9999", nil)
 	res := httptest.NewRecorder()
@@ -822,7 +821,7 @@ func TestInstanceOrdersEndpointReturnsRecords(t *testing.T) {
 }
 
 func TestInstanceOrdersEndpointInvalidLimit(t *testing.T) {
-	handler := NewHandler(config.AppConfig{}, nil, nil, &stubOrderStore{}, nil)
+	handler := NewHandler(config.AppConfig{}, nil, nil, &stubOrderStore{})
 	req := httptest.NewRequest(http.MethodGet, "/strategy/instances/demo/orders?limit=bogus", nil)
 	res := httptest.NewRecorder()
 
@@ -850,7 +849,7 @@ func TestProviderBalancesEndpointReturnsRecords(t *testing.T) {
 			},
 		},
 	}
-	handler := NewHandler(config.AppConfig{}, nil, nil, store, nil)
+	handler := NewHandler(config.AppConfig{}, nil, nil, store)
 
 	req := httptest.NewRequest(http.MethodGet, "/providers/binance/balances", nil)
 	res := httptest.NewRecorder()
@@ -873,83 +872,6 @@ func TestProviderBalancesEndpointReturnsRecords(t *testing.T) {
 	}
 	if payload.Balances[0].BalanceSnapshot.Provider != "binance" {
 		t.Fatalf("unexpected provider in payload: %#v", payload.Balances[0])
-	}
-}
-
-func TestOutboxListRequiresStore(t *testing.T) {
-	handler := NewHandler(config.AppConfig{}, nil, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "/outbox", nil)
-	res := httptest.NewRecorder()
-
-	handler.ServeHTTP(res, req)
-
-	if res.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected status 503, got %d", res.Code)
-	}
-}
-
-func TestOutboxListReturnsRecords(t *testing.T) {
-	store := &stubOutboxStore{
-		records: []outboxstore.EventRecord{
-			{
-				ID:            1,
-				AggregateType: "provider",
-				AggregateID:   "binance",
-				EventType:     "Trade",
-				Payload:       json.RawMessage(`{"eventId":"evt-1"}`),
-			},
-		},
-	}
-	handler := NewHandler(config.AppConfig{}, nil, nil, nil, store)
-
-	req := httptest.NewRequest(http.MethodGet, "/outbox?limit=10", nil)
-	res := httptest.NewRecorder()
-
-	handler.ServeHTTP(res, req)
-
-	if res.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
-	}
-	var payload struct {
-		Events []outboxEventResponse `json:"events"`
-		Count  int                   `json:"count"`
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if payload.Count != 1 || len(payload.Events) != 1 || payload.Events[0].ID != 1 {
-		t.Fatalf("unexpected payload: %#v", payload)
-	}
-}
-
-func TestOutboxDeleteRemovesRecord(t *testing.T) {
-	store := &stubOutboxStore{}
-	handler := NewHandler(config.AppConfig{}, nil, nil, nil, store)
-
-	req := httptest.NewRequest(http.MethodDelete, "/outbox/42", nil)
-	res := httptest.NewRecorder()
-
-	handler.ServeHTTP(res, req)
-
-	if res.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
-	}
-	if len(store.deleted) != 1 || store.deleted[0] != 42 {
-		t.Fatalf("expected deleted id 42, got %v", store.deleted)
-	}
-}
-
-func TestOutboxDeleteInvalidID(t *testing.T) {
-	store := &stubOutboxStore{}
-	handler := NewHandler(config.AppConfig{}, nil, nil, nil, store)
-
-	req := httptest.NewRequest(http.MethodDelete, "/outbox/not-an-id", nil)
-	res := httptest.NewRecorder()
-
-	handler.ServeHTTP(res, req)
-
-	if res.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d", res.Code)
 	}
 }
 
@@ -985,28 +907,6 @@ func strPtr(value string) *string {
 
 func strInt64Ptr(value int64) *int64 {
 	return &value
-}
-
-type stubOutboxStore struct {
-	records []outboxstore.EventRecord
-	deleted []int64
-}
-
-func (s *stubOutboxStore) Enqueue(context.Context, outboxstore.Event) (outboxstore.EventRecord, error) {
-	return outboxstore.EventRecord{}, nil
-}
-
-func (s *stubOutboxStore) ListPending(context.Context, int) ([]outboxstore.EventRecord, error) {
-	return s.records, nil
-}
-
-func (s *stubOutboxStore) MarkDelivered(context.Context, int64) error { return nil }
-
-func (s *stubOutboxStore) MarkFailed(context.Context, int64, string) error { return nil }
-
-func (s *stubOutboxStore) Delete(_ context.Context, id int64) error {
-	s.deleted = append(s.deleted, id)
-	return nil
 }
 
 type ioDiscards struct{}

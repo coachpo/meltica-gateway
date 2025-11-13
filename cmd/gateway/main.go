@@ -109,7 +109,7 @@ func main() {
 	}
 	logger.Printf("strategy instances registered: %d", len(lambdaManager.Instances()))
 
-	apiServer := buildAPIServer(appCfg, lambdaManager, providerManager, orderStore, outboxStore)
+	apiServer := buildAPIServer(appCfg, lambdaManager, providerManager, orderStore)
 	startAPIServer(&lifecycle, logger, apiServer)
 	logger.Printf("control API listening on %s", apiServer.Addr)
 
@@ -333,8 +333,8 @@ func startLambdaManager(ctx context.Context, appCfg config.AppConfig, bus eventb
 	return manager, nil
 }
 
-func buildAPIServer(appCfg config.AppConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager, orderStore orderstore.Store, outboxStore outboxstore.Store) *http.Server {
-	handler := httpserver.NewHandler(appCfg, lambdaManager, providerManager, orderStore, outboxStore)
+func buildAPIServer(appCfg config.AppConfig, lambdaManager *lambdaruntime.Manager, providerManager *provider.Manager, orderStore orderstore.Store) *http.Server {
+	handler := httpserver.NewHandler(appCfg, lambdaManager, providerManager, orderStore)
 
 	return &http.Server{
 		Addr:                         appCfg.APIServer.Addr,
