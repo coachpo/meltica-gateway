@@ -69,6 +69,28 @@ This document consolidates the most frequently shared views across ANALYSIS_CODE
 
 - None
 
+## Proposed Upgrades
+
+Based on the analysis, here are a few potential upgrades that could enhance the Meltica platform:
+
+1.  **Web-based User Interface:** While the REST API is powerful for developers, a web-based UI would make the platform more accessible. The UI could provide:
+    *   A dashboard for monitoring the status of providers, lambdas, and orders.
+    *   A code editor for creating and editing lambdas directly in the browser.
+    *   Tools for visualizing backtest results.
+    *   A form-based interface for configuring providers.
+
+2.  **Enhanced Backtesting Engine:** The presence of a `backtest` executable suggests that backtesting is a feature. This could be enhanced by:
+    *   Providing more detailed performance metrics (e.g., Sharpe ratio, max drawdown).
+    *   Allowing for parameter optimization (e.g., running a backtest with a range of input parameters).
+    *   Visualizing backtest results with charts and graphs.
+
+3.  **Support for More Languages in Lambdas:** Currently, it seems that lambdas are written in JavaScript (via `goja`). Adding support for other popular languages for quantitative finance, such as Python, would broaden the appeal of the platform. This could be achieved by integrating a Python interpreter or by using a plugin-based architecture.
+
+4.  **Hot-Reloading of Configuration:** The application currently loads its configuration at startup. Implementing a mechanism to hot-reload the configuration without restarting the gateway would improve its usability and reduce downtime.
+
+5.  **Market Replay Functionality:** A feature to "replay" historical market data through the gateway would be invaluable for debugging and testing trading strategies. This would allow developers to test their lambdas against specific historical scenarios.
+
+
 ---
 
 Last updated: 2025-11-08
