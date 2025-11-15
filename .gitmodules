@@ -1,6 +1,0 @@
-[submodule "strategies"]
-	path = strategies
-	url = git@github.com:coachpo/meltica-strategy.git
-[submodule "prompt"]
-	path = prompt
-	url = git@github.com:coachpo/hypnotism.git
