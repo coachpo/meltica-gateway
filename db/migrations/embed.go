@@ -1,3 +1,4 @@
+// Package dbmigrations exposes embedded SQL migrations for Meltica binaries.
 package dbmigrations
 
 import "embed"

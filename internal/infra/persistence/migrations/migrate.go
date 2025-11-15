@@ -18,7 +18,7 @@ import (
 	pgxv5 "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file" // file:// migrations loader
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/jackc/pgx/v5/stdlib" // register pgx driver for database/sql
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -154,7 +154,7 @@ func prepareMigrator(ctx context.Context, dsn, migrationsDir string, logger *log
 			return nil, func() {}, "", fmt.Errorf("initialise embedded migrations: %w", err)
 		}
 		resolvedRef = embeddedMigrationsDescriptor
-		m, err = migrate.NewWithSourceInstance("iofs", sourceDriver, "pgx5", driver)
+		m, err = migrate.NewWithInstance("iofs", sourceDriver, "pgx5", driver)
 		if err != nil {
 			cleanup()
 			return nil, func() {}, "", fmt.Errorf("initialise migrate instance: %w", err)
