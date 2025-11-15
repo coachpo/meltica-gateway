@@ -1,0 +1,83 @@
+name: Cleanup
+
+on:
+  schedule:
+    # Run every day at 3:00 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+env:
+  CONTAINER_PACKAGE: meltica-gateway
+  WORKFLOW_RETENTION_DAYS: 7
+  MIN_WORKFLOW_RUNS: 5
+  ARTIFACT_RETENTION_DAYS: 14
+
+permissions:
+  contents: read
+  actions: write
+  packages: write
+
+jobs:
+  cleanup-workflow-runs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@v2.0.6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          retain_days: ${{ env.WORKFLOW_RETENTION_DAYS }}
+          keep_minimum_runs: ${{ env.MIN_WORKFLOW_RUNS }}
+
+  cleanup-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Remove stale workflow artifacts
+        uses: c-hive/gha-remove-artifacts@v1
+        with:
+          age: '${{ env.ARTIFACT_RETENTION_DAYS }} days'
+          skip-tags: true
+          skip-recent: 5
+
+  cleanup-untagged:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check Meltica container package
+        id: package
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pkg = process.env.CONTAINER_PACKAGE;
+            const owner = context.repo.owner;
+            const routes = [
+              { route: 'GET /orgs/{org}/packages/container/{package_name}', params: { org: owner, package_name: pkg } },
+              { route: 'GET /users/{username}/packages/container/{package_name}', params: { username: owner, package_name: pkg } },
+            ];
+            for (const { route, params } of routes) {
+              try {
+                await github.request(route, params);
+                core.info(`Found container package "${pkg}" for ${owner}.`);
+                core.setOutput('exists', 'true');
+                return;
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+              }
+            }
+            core.warning(`Container package "${pkg}" not found; skipping delete-package step.`);
+            core.setOutput('exists', 'false');
+
+      - name: Delete untagged Meltica Gateway images
+        if: steps.package.outputs.exists == 'true'
+        uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ github.repository_owner }}
+          package-type: container
+          package-name: ${{ env.CONTAINER_PACKAGE }}
+          delete-only-untagged-versions: true
+          token: ${{ secrets.GITHUB_TOKEN }}

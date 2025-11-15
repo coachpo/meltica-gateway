@@ -36,8 +36,7 @@ coverage/
 !*_snapshots.json
 
 # Github Actions
-!.github/workflows/ci.yml
-!.github/workflows/release.yml
+!.github/workflows/*
 
 # Ignore AI assistant and tooling directories
 .claude/
