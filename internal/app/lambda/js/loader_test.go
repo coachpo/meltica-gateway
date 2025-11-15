@@ -521,7 +521,7 @@ func TestWriteWithRegistryCreatesVersionedLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLoader: %v", err)
 	}
-	if err := loader.Write("noop.js", []byte(sampleModule)); err != nil {
+	if err := loader.Write([]byte(sampleModule)); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 

@@ -391,7 +391,13 @@ func (s *httpServer) createStrategyModule(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "source required")
 		return
 	}
-	opts := js.ModuleWriteOptions{PromoteLatest: true}
+	opts := js.ModuleWriteOptions{
+		Filename:      "",
+		Tag:           "",
+		Aliases:       nil,
+		ReassignTags:  nil,
+		PromoteLatest: true,
+	}
 	resolution, err := s.manager.UpsertStrategy([]byte(payload.Source), opts)
 	if err != nil {
 		s.writeStrategyModuleError(w, err)
@@ -626,7 +632,13 @@ func (s *httpServer) updateStrategyModule(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "source required")
 		return
 	}
-	opts := js.ModuleWriteOptions{PromoteLatest: true}
+	opts := js.ModuleWriteOptions{
+		Filename:      "",
+		Tag:           "",
+		Aliases:       nil,
+		ReassignTags:  nil,
+		PromoteLatest: true,
+	}
 	resolution, err := s.manager.UpsertStrategy([]byte(source), opts)
 	if err != nil {
 		s.writeStrategyModuleError(w, err)

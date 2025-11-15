@@ -2032,13 +2032,9 @@ func (m *Manager) UpsertStrategy(source []byte, opts js.ModuleWriteOptions) (js.
 	if !errors.Is(err, js.ErrRegistryUnavailable) {
 		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, fmt.Errorf("strategy upsert: %w", err)
 	}
-	filename := opts.Filename
-	if strings.TrimSpace(filename) == "" {
-		filename = "strategy.js"
-	}
-	if err := m.jsLoader.Write(filename, source); err != nil {
+	if err := m.jsLoader.Write(source); err != nil {
 		m.recordStrategyValidationFailure(err)
-		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, fmt.Errorf("strategy upsert %q: %w", filename, err)
+		return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, fmt.Errorf("strategy upsert: %w", err)
 	}
 	return js.ModuleResolution{Name: "", Hash: "", Tag: "", Alias: "", Module: nil}, nil
 }

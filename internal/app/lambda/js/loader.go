@@ -632,7 +632,7 @@ func (l *Loader) Delete(name string) error {
 
 // Write persists the provided JavaScript source to disk and validates compilation.
 // If a module with the same strategy name exists it will be replaced once Refresh is called.
-func (l *Loader) Write(filename string, source []byte) error {
+func (l *Loader) Write(source []byte) error {
 	if l == nil {
 		return fmt.Errorf("strategy loader: nil receiver")
 	}
@@ -909,11 +909,6 @@ func cloneTagsWithFallback(src []string, fallback string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func isJavaScriptFile(name string) bool {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	return strings.HasSuffix(lower, ".js") || strings.HasSuffix(lower, ".mjs")
 }
 
 func compileModule(fullPath string, info fs.FileInfo) (*Module, error) {
