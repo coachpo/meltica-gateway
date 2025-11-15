@@ -815,3 +815,41 @@ func TestLoaderRegistrySnapshot(t *testing.T) {
 		t.Fatalf("expected one hash in snapshot entry, got %d", len(entry.Hashes))
 	}
 }
+
+func TestCloneTagsWithFallback(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      []string
+		fallback string
+		want     []string
+	}{
+		{
+			name:     "inject fallback when tags empty",
+			fallback: "v1.0.0",
+			want:     []string{"v1.0.0"},
+		},
+		{
+			name:     "dedupe source and fallback",
+			src:      []string{"latest", "v1.0.0", "", "LATEST"},
+			fallback: "v1.0.0",
+			want:     []string{"latest", "v1.0.0"},
+		},
+		{
+			name: "no tags when both empty",
+			want: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cloneTagsWithFallback(tt.src, tt.fallback)
+			if len(got) != len(tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("expected %v, got %v", tt.want, got)
+				}
+			}
+		})
+	}
+}

@@ -115,8 +115,8 @@ type ModuleSummary struct {
 	Name       string              `json:"name"`
 	File       string              `json:"file"`
 	Path       string              `json:"path"`
-	Hash       string              `json:"hash"`
-	Tag        string              `json:"tag"`
+	Hash       string              `json:"selectedRevisionHash"`
+	Tag        string              `json:"selectedRevisionTag"`
 	Tags       []string            `json:"tags"`
 	TagAliases map[string]string   `json:"tagAliases,omitempty"`
 	Revisions  []ModuleRevision    `json:"revisions,omitempty"`
@@ -1023,13 +1023,39 @@ func (m *Module) toSummary(name string) ModuleSummary {
 		Path:       m.Path,
 		Hash:       m.Hash,
 		Tag:        m.Tag,
-		Tags:       append([]string(nil), m.Tags...),
+		Tags:       cloneTagsWithFallback(m.Tags, m.Tag),
 		TagAliases: nil,
 		Revisions:  nil,
 		Size:       m.Size,
 		Metadata:   clone,
 		Running:    nil,
 	}
+}
+
+func cloneTagsWithFallback(src []string, fallback string) []string {
+	seen := make(map[string]struct{}, len(src)+1)
+	out := make([]string, 0, len(src)+1)
+	record := func(tag string) {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" {
+			return
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	for _, tag := range src {
+		record(tag)
+	}
+	record(fallback)
+	if len(out) == 0 {
+		return []string{}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func isJavaScriptFile(name string) bool {

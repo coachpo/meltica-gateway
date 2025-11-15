@@ -20,6 +20,8 @@ permissions:
 
 jobs:
   cleanup-workflow-runs:
+    needs: cleanup-artifacts
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
