@@ -45,9 +45,6 @@ clean:
 run:
 	go run ./cmd/gateway/main.go -config $(CONFIG_FILE)
 
-backtest:
-	go run ./cmd/backtest/main.go --data=./data.csv --strategy=$(STRATEGY)
-
 migrate:
 	@if [ -z "$(DATABASE_URL)" ]; then \
 		echo "DATABASE_URL must be set (e.g. postgresql://localhost:5432/meltica?sslmode=disable)"; \

@@ -72,13 +72,12 @@ Running instances always pin a hash; they only restart when refresh detects that
    - Or drop the file into the directory and run `POST /strategies/refresh`.
    - Validation failures return HTTP `422` with a `diagnostics` array (stage, message, line/column, hint).
 
-3. **Launch or backtest**
+3. **Launch**
 
-   - Reference the strategy by name/tag/hash in lambda manifests, CLI invocations, or the backtest runner (`cmd/backtest -strategy name:tag`).
+   - Reference the strategy by name/tag/hash in lambda manifests or CLI invocations.
 
 4. **Validate**
    - Run `make test` to exercise the JS pipeline end-to-end.
-   - Optional: run `make backtest STRATEGY=name` for offline evaluation.
 
 ---
 
@@ -146,7 +145,6 @@ Running instances always pin a hash; they only restart when refresh detects that
 
 ## 6. Tooling & Tests
 
-- **Backtest CLI**: `make backtest STRATEGY=name[:tag]` runs strategies offline using CSV data via `backtest.NewEngine`.
 - **CI expectations**: `make lint`, `make test`, and `make coverage` (≥ 70%) must pass before merging strategy updates.
 
 ---

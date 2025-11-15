@@ -27,8 +27,7 @@ This prevents external projects from depending on internal implementation detail
   - `server/` – HTTP control-plane surface
   - `telemetry/` – OpenTelemetry wiring and semantic conventions
 
-- **`support/`** – Tooling and offline utilities
-  - `backtest/` – Historical backtesting engine and fixtures
+- **`support/`** – Tooling and offline utilities (currently reserved for future helpers)
 
 ## Design Principles
 
