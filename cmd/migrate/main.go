@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	defaultMigrationsPath = "db/migrations"
+	defaultMigrationsPath = ""
 	defaultTimeout        = 30 * time.Second
 )
 
@@ -30,7 +30,7 @@ func main() {
 func run() error {
 	var (
 		dsn     = flag.String("database", "", "PostgreSQL DSN (e.g. postgresql://user:pass@host:5432/db)")
-		dir     = flag.String("path", defaultMigrationsPath, "Directory containing SQL migrations")
+		dir     = flag.String("path", defaultMigrationsPath, "Override migrations directory (defaults to embedded copy)")
 		timeout = flag.Duration("timeout", defaultTimeout, "Maximum time to wait for database connectivity")
 		quiet   = flag.Bool("quiet", false, "Suppress informational logs")
 	)
@@ -39,9 +39,7 @@ func run() error {
 	if strings.TrimSpace(*dsn) == "" {
 		return errors.New("-database flag is required")
 	}
-	if strings.TrimSpace(*dir) == "" {
-		return errors.New("-path flag is required")
-	}
+	*dir = strings.TrimSpace(*dir)
 
 	args := flag.Args()
 	if len(args) == 0 {

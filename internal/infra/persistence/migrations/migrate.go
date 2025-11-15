@@ -17,12 +17,19 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	pgxv5 "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file" // file:// migrations loader
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	dbmigrations "github.com/coachpo/meltica/db/migrations"
 	"github.com/coachpo/meltica/internal/infra/telemetry"
+)
+
+const (
+	embeddedMigrationsRoot       = "."
+	embeddedMigrationsDescriptor = "embedded://db/migrations"
 )
 
 var (
@@ -102,9 +109,14 @@ func Rollback(ctx context.Context, dsn, migrationsDir string, steps int, logger 
 }
 
 func prepareMigrator(ctx context.Context, dsn, migrationsDir string, logger *log.Logger) (*migrate.Migrate, func(), string, error) {
-	resolvedDir, err := resolveDir(migrationsDir)
-	if err != nil {
-		return nil, func() {}, "", err
+	useEmbedded := strings.TrimSpace(migrationsDir) == ""
+	var resolvedDir string
+	if !useEmbedded {
+		var err error
+		resolvedDir, err = resolveDir(migrationsDir)
+		if err != nil {
+			return nil, func() {}, "", err
+		}
 	}
 
 	db, err := sql.Open("pgx", dsn)
@@ -130,11 +142,31 @@ func prepareMigrator(ctx context.Context, dsn, migrationsDir string, logger *log
 		return nil, func() {}, "", fmt.Errorf("initialise pgx v5 driver: %w", err)
 	}
 
-	sourceURL := fileURL(resolvedDir)
-	m, err := migrate.NewWithDatabaseInstance(sourceURL, "pgx5", driver)
-	if err != nil {
-		cleanup()
-		return nil, func() {}, "", fmt.Errorf("initialise migrate instance: %w", err)
+	var (
+		m           *migrate.Migrate
+		resolvedRef string
+	)
+
+	if useEmbedded {
+		sourceDriver, err := iofs.New(dbmigrations.Files, embeddedMigrationsRoot)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, "", fmt.Errorf("initialise embedded migrations: %w", err)
+		}
+		resolvedRef = embeddedMigrationsDescriptor
+		m, err = migrate.NewWithSourceInstance("iofs", sourceDriver, "pgx5", driver)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, "", fmt.Errorf("initialise migrate instance: %w", err)
+		}
+	} else {
+		sourceURL := fileURL(resolvedDir)
+		resolvedRef = resolvedDir
+		m, err = migrate.NewWithDatabaseInstance(sourceURL, "pgx5", driver)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, "", fmt.Errorf("initialise migrate instance: %w", err)
+		}
 	}
 
 	return m, func() {
@@ -148,7 +180,7 @@ func prepareMigrator(ctx context.Context, dsn, migrationsDir string, logger *log
 			}
 		}
 		cleanup()
-	}, resolvedDir, nil
+	}, resolvedRef, nil
 }
 
 func resolveDir(dir string) (string, error) {

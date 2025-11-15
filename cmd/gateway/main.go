@@ -37,7 +37,6 @@ import (
 const (
 	defaultConfigPath            = "config/app.yaml"
 	configPathEnvVar             = "MELTICA_CONFIG_PATH"
-	defaultMigrationsPath        = "db/migrations"
 	gatewayLoggerPrefix          = "gateway "
 	eventPoolName                = "Event"
 	orderRequestPoolName         = "OrderRequest"
@@ -467,13 +466,8 @@ func runDatabaseMigrations(ctx context.Context, logger *log.Logger, dbCfg config
 		return nil
 	}
 
-	path := resolveMigrationsPath()
-	if err := migrations.Apply(ctx, dbCfg.DSN, path, logger); err != nil {
+	if err := migrations.Apply(ctx, dbCfg.DSN, "", logger); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 	return nil
-}
-
-func resolveMigrationsPath() string {
-	return filepath.Clean(defaultMigrationsPath)
 }
