@@ -32,10 +32,10 @@ apiServer:
 
 # telemetry: OTLP exporter configuration
 telemetry:
-  otlpEndpoint: http://capy.lan:4318
+  otlpEndpoint: http://localhost:4318
   serviceName: meltica-gateway
   otlpInsecure: true
-  enableMetrics: true
+  enableMetrics: false
 
 strategies:
   directory: strategies

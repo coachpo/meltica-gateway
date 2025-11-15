@@ -15,6 +15,7 @@ database:
 eventbus:
   bufferSize: 8192
   fanoutWorkers: 8
+  extensionPayloadCapBytes: 102400
 
 # pools: object pool capacities
 pools:
