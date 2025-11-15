@@ -39,6 +39,7 @@ git submodule update --init --recursive
    cp config/app.example.yaml config/app.yaml
    # adjust providers, telemetry endpoints, pool sizing, strategy directory, etc.
    ```
+   If you downloaded a release artifact (e.g., `meltica-v0.1.1-linux-amd64.zip`), the bundle ships with `config/app.example.yaml` in the `config/` directory—rename it to `config/app.yaml` before running the gateway unless you plan to point `MELTICA_CONFIG_PATH` elsewhere.
 2. Provide secrets via env vars or `.env` (e.g., `DATABASE_URL`, OTLP exporter URLs, exchange keys).
 3. Choose the config file location:
    - Default: `config/app.yaml`.

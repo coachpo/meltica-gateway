@@ -54,17 +54,18 @@ jobs:
       - name: Package archive
         run: |
           target="${{ matrix.name }}"
+          tag="${{ github.ref_name }}"
           stage="dist/${target}"
           mkdir -p "${stage}/config"
           cp "build/${target}/meltica-gateway" "${stage}/"
           cp config/app.example.yaml "${stage}/config/app.example.yaml"
-          (cd "${stage}" && zip -r "../meltica-${target}.zip" .)
+          (cd "${stage}" && zip -r "../meltica-${tag}-${target}.zip" .)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: meltica-${{ matrix.name }}.zip
-          path: dist/meltica-${{ matrix.name }}.zip
+          name: meltica-${{ github.ref_name }}-${{ matrix.name }}.zip
+          path: dist/meltica-${{ github.ref_name }}-${{ matrix.name }}.zip
           if-no-files-found: error
 
   publish:
