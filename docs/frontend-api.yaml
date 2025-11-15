@@ -879,22 +879,6 @@ components:
     StrategyModulePayload:
       type: object
       properties:
-        filename:
-          type: string
-        name:
-          type: string
-        tag:
-          type: string
-        aliases:
-          type: array
-          items:
-            type: string
-        reassignTags:
-          type: array
-          items:
-            type: string
-        promoteLatest:
-          type: boolean
         source:
           type: string
       required: [source]
