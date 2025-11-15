@@ -10,6 +10,8 @@ env:
   WORKFLOW_RETENTION_DAYS: 7
   MIN_WORKFLOW_RUNS: 5
   ARTIFACT_RETENTION_DAYS: 14
+  RELEASE_KEEP_LATEST: 10
+  RELEASE_TAG_PATTERN: '^v.*'
 
 permissions:
   contents: read
@@ -39,3 +41,16 @@ jobs:
           age: '${{ env.ARTIFACT_RETENTION_DAYS }} days'
           skip-tags: true
           skip-recent: 5
+
+  cleanup-releases:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Remove old Releases
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        with:
+          keep_latest: ${{ env.RELEASE_KEEP_LATEST }}
+          delete_tags: true
+          delete_tag_pattern: ${{ env.RELEASE_TAG_PATTERN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
