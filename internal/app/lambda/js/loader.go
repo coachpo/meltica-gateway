@@ -1,6 +1,7 @@
 package js
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"crypto/sha256"
@@ -201,10 +202,10 @@ func (l *Loader) Refresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("strategy loader: load registry: %w", err)
 	}
-	if reg != nil {
-		return l.refreshFromRegistry(ctx, reg)
+	if reg == nil {
+		reg = make(registry)
 	}
-	return l.refreshLegacy(ctx)
+	return l.refreshFromRegistry(ctx, reg)
 }
 
 func (l *Loader) refreshFromRegistry(ctx context.Context, reg registry) error {
@@ -289,65 +290,6 @@ func (l *Loader) refreshFromRegistry(ctx context.Context, reg registry) error {
 	l.byHash = nextByHash
 	l.modulesByName = modulesByName
 	l.tags = tagsByName
-	l.clearResolutionCacheLocked()
-	l.mu.Unlock()
-	return nil
-}
-
-func (l *Loader) refreshLegacy(ctx context.Context) error {
-	entries, err := os.ReadDir(l.root)
-	if err != nil {
-		return fmt.Errorf("strategy loader: read directory %q: %w", l.root, err)
-	}
-	nextFiles := make(map[string]*Module)
-	nextByName := make(map[string]*Module)
-	nextByHash := make(map[string]*Module)
-	modulesByName := make(map[string]map[string]*Module)
-
-	for _, entry := range entries {
-		select {
-		case <-ctx.Done():
-			if err := ctx.Err(); err != nil {
-				return fmt.Errorf("strategy loader: refresh canceled: %w", err)
-			}
-			return fmt.Errorf("strategy loader: refresh canceled")
-		default:
-		}
-
-		if entry.IsDir() || !isJavaScriptFile(entry.Name()) {
-			continue
-		}
-		fullPath := filepath.Join(l.root, entry.Name())
-		module, err := loadModule(fullPath)
-		if err != nil {
-			return fmt.Errorf("strategy loader: load module %q: %w", fullPath, err)
-		}
-		if module.Metadata.Tag == "" {
-			module.Metadata.Tag = "0.0.0"
-		}
-		module.Tag = module.Metadata.Tag
-		module.Tags = nil
-
-		lowerName := strings.ToLower(module.Name)
-		if lowerName == "" {
-			return fmt.Errorf("strategy loader: module %q missing name", entry.Name())
-		}
-		if _, exists := nextByName[lowerName]; exists {
-			return fmt.Errorf("strategy loader: duplicate strategy name %q", module.Name)
-		}
-		nextFiles[module.Path] = module
-		nextByName[lowerName] = module
-		nextByHash[module.Hash] = module
-		modulesByName[lowerName] = map[string]*Module{module.Hash: module}
-	}
-
-	l.mu.Lock()
-	l.registry = nil
-	l.files = nextFiles
-	l.byName = nextByName
-	l.byHash = nextByHash
-	l.modulesByName = modulesByName
-	l.tags = make(map[string]map[string]string)
 	l.clearResolutionCacheLocked()
 	l.mu.Unlock()
 	return nil
@@ -672,28 +614,7 @@ func (l *Loader) Read(name string) ([]byte, error) {
 		}
 		return source, nil
 	}
-
-	filename := strings.TrimSpace(name)
-	if filename == "" {
-		return nil, err
-	}
-	base := filepath.Base(filename)
-	if !isJavaScriptFile(base) {
-		return nil, err
-	}
-	target := filepath.Join(l.root, base)
-	if !strings.HasPrefix(target, l.root+string(os.PathSeparator)) && target != l.root {
-		return nil, fmt.Errorf("strategy loader: read %q outside root", filename)
-	}
-	// #nosec G304
-	source, readErr := os.ReadFile(target)
-	if readErr != nil {
-		if errors.Is(readErr, fs.ErrNotExist) {
-			return nil, ErrModuleNotFound
-		}
-		return nil, fmt.Errorf("strategy loader: read %q: %w", target, readErr)
-	}
-	return source, nil
+	return nil, err
 }
 
 // Delete removes the JavaScript source for the named strategy.
@@ -706,43 +627,7 @@ func (l *Loader) Delete(name string) error {
 	if err != nil {
 		return fmt.Errorf("strategy loader: load registry: %w", err)
 	}
-	if reg != nil {
-		return l.deleteWithRegistry(name, reg)
-	}
-
-	lower := strings.ToLower(strings.TrimSpace(name))
-	if lower == "" {
-		return fmt.Errorf("strategy loader: strategy name required")
-	}
-	l.mu.RLock()
-	module, ok := l.byName[lower]
-	l.mu.RUnlock()
-	if ok {
-		if err := os.Remove(module.Path); err != nil {
-			return fmt.Errorf("strategy loader: delete %q: %w", module.Path, err)
-		}
-		return nil
-	}
-
-	filename := strings.TrimSpace(name)
-	if filename == "" {
-		return ErrModuleNotFound
-	}
-	base := filepath.Base(filename)
-	if !isJavaScriptFile(base) {
-		return ErrModuleNotFound
-	}
-	target := filepath.Join(l.root, base)
-	if !strings.HasPrefix(target, l.root+string(os.PathSeparator)) && target != l.root {
-		return fmt.Errorf("strategy loader: delete %q outside root", filename)
-	}
-	if err := os.Remove(target); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return ErrModuleNotFound
-		}
-		return fmt.Errorf("strategy loader: delete %q: %w", target, err)
-	}
-	return nil
+	return l.deleteWithRegistry(name, reg)
 }
 
 // Write persists the provided JavaScript source to disk and validates compilation.
@@ -756,50 +641,8 @@ func (l *Loader) Write(filename string, source []byte) error {
 	if err != nil {
 		return fmt.Errorf("strategy loader: load registry: %w", err)
 	}
-	if reg != nil {
-		_, writeErr := l.writeModuleWithRegistry(source, ModuleWriteOptions{Filename: "", Tag: "", Aliases: nil, ReassignTags: nil, PromoteLatest: true}, reg)
-		return writeErr
-	}
-
-	trimmed := strings.TrimSpace(filename)
-	if trimmed == "" {
-		return fmt.Errorf("strategy loader: filename required")
-	}
-	if !isJavaScriptFile(trimmed) {
-		return fmt.Errorf("strategy loader: file %q must use .js extension", trimmed)
-	}
-
-	tempFile, err := os.CreateTemp(l.root, "strategy-*.js")
-	if err != nil {
-		return fmt.Errorf("strategy loader: create temp file: %w", err)
-	}
-	tempPath := tempFile.Name()
-	if _, err := tempFile.Write(source); err != nil {
-		_ = tempFile.Close()
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("strategy loader: write temp file: %w", err)
-	}
-	if err := tempFile.Close(); err != nil {
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("strategy loader: close temp file: %w", err)
-	}
-
-	entry, err := os.Stat(tempPath)
-	if err != nil {
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("strategy loader: stat temp file: %w", err)
-	}
-	if _, err := compileModule(tempPath, entry); err != nil {
-		_ = os.Remove(tempPath)
-		return err
-	}
-
-	destPath := filepath.Join(l.root, filepath.Base(trimmed))
-	if err := os.Rename(tempPath, destPath); err != nil {
-		_ = os.Remove(tempPath)
-		return fmt.Errorf("strategy loader: persist %q: %w", destPath, err)
-	}
-	return nil
+	_, writeErr := l.writeModuleWithRegistry(source, ModuleWriteOptions{Filename: "", Tag: "", Aliases: nil, ReassignTags: nil, PromoteLatest: true}, reg)
+	return writeErr
 }
 
 // Store persists a module revision using registry semantics and returns the resulting resolution.
@@ -930,13 +773,23 @@ func loadRegistry(root string) (registry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
+			empty := make(registry)
+			if err := writeRegistryFile(root, empty); err != nil {
+				return nil, fmt.Errorf("strategy loader: init registry %q: %w", path, err)
+			}
+			return empty, nil
 		}
 		return nil, fmt.Errorf("strategy loader: read registry %q: %w", path, err)
 	}
 	var reg registry
+	if len(bytes.TrimSpace(data)) == 0 {
+		return make(registry), nil
+	}
 	if err := json.Unmarshal(data, &reg); err != nil {
 		return nil, fmt.Errorf("strategy loader: decode registry %q: %w", path, err)
+	}
+	if reg == nil {
+		return make(registry), nil
 	}
 	return reg, nil
 }

@@ -52,6 +52,7 @@ func TestManagerRefreshJavaScriptStrategies(t *testing.T) {
 	initialSource := `module.exports = {
 	  metadata: {
 	    name: "alpha",
+	    tag: "v1.0.0",
 	    displayName: "Alpha",
 	    description: "Alpha v1",
 	    config: [],
@@ -59,11 +60,15 @@ func TestManagerRefreshJavaScriptStrategies(t *testing.T) {
 	  },
 	  create: function () {
 	    return {};
-	  }
+  }
 };
 `
-	if err := os.WriteFile(filepath.Join(dir, "alpha.js"), []byte(initialSource), 0o600); err != nil {
-		t.Fatalf("write strategy: %v", err)
+	preloader, err := js.NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	if _, err := preloader.Store([]byte(initialSource), js.ModuleWriteOptions{Filename: "alpha.js", Tag: "v1.0.0", PromoteLatest: true}); err != nil {
+		t.Fatalf("store initial strategy: %v", err)
 	}
 
 	cfg := config.AppConfig{
@@ -101,7 +106,7 @@ func TestManagerRefreshJavaScriptStrategies(t *testing.T) {
 	}
 
 	updatedSource := strings.ReplaceAll(initialSource, "Alpha v1", "Alpha v2")
-	if _, err := mgr.UpsertStrategy([]byte(updatedSource), js.ModuleWriteOptions{Filename: "alpha.js"}); err != nil {
+	if _, err := mgr.UpsertStrategy([]byte(updatedSource), js.ModuleWriteOptions{Filename: "alpha.js", PromoteLatest: true}); err != nil {
 		t.Fatalf("UpsertStrategy: %v", err)
 	}
 
@@ -125,7 +130,7 @@ func TestManagerRefreshJavaScriptStrategies(t *testing.T) {
 		t.Fatalf("expected refreshed metadata, got %q", meta.Description)
 	}
 
-	source, err := mgr.StrategySource("alpha.js")
+	source, err := mgr.StrategySource("alpha")
 	if err != nil {
 		t.Fatalf("StrategySource: %v", err)
 	}

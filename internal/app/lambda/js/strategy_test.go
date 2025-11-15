@@ -4,8 +4,6 @@ import (
 	"context"
 	"io"
 	"log"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -39,10 +37,8 @@ module.exports = {
 
 func TestNewStrategyReceivesConfig(t *testing.T) {
 	dir := t.TempDir()
-	modulePath := filepath.Join(dir, "config_probe.js")
-	if err := os.WriteFile(modulePath, []byte(configAwareModule), 0o600); err != nil {
-		t.Fatalf("write module: %v", err)
-	}
+	modulePath := writeVersionedModule(t, dir, "config_probe", "v1.0.0", []byte(configAwareModule))
+	writeRegistry(t, dir, "config_probe", "v1.0.0", modulePath)
 
 	loader, err := NewLoader(dir)
 	if err != nil {

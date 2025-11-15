@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -174,35 +175,7 @@ func TestInstanceCall(t *testing.T) {
 	}
 }
 
-func TestWriteAndReadLegacyFallback(t *testing.T) {
-	dir := t.TempDir()
-	loader, err := NewLoader(dir)
-	if err != nil {
-		t.Fatalf("NewLoader: %v", err)
-	}
-	if err := loader.Write("noop.js", []byte(sampleModule)); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	if err := loader.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
-	data, err := loader.Read("noop")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if len(data) == 0 {
-		t.Fatalf("expected data from Read")
-	}
-	summary, err := loader.Module("noop")
-	if err != nil {
-		t.Fatalf("Module summary: %v", err)
-	}
-	if summary.Metadata.Name != "noop" {
-		t.Fatalf("unexpected metadata: %+v", summary.Metadata)
-	}
-}
-
-func TestDeleteLegacyFallback(t *testing.T) {
+func TestLoaderIgnoresUnregisteredFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "noop.js")
 	if err := os.WriteFile(path, []byte(sampleModule), 0o600); err != nil {
@@ -215,17 +188,35 @@ func TestDeleteLegacyFallback(t *testing.T) {
 	if err := loader.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
-	if err := loader.Delete("noop"); err != nil {
-		t.Fatalf("Delete: %v", err)
+	if modules := loader.List(); len(modules) != 0 {
+		t.Fatalf("expected zero modules for unregistered sources, got %d", len(modules))
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("expected file removed, got %v", err)
+	if _, err := loader.Module("noop"); err == nil {
+		t.Fatalf("expected module lookup to fail for unregistered file")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected unregistered file to remain on disk: %v", err)
+	}
+}
+
+func TestDeleteIgnoresUnregisteredFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "noop.js")
+	if err := os.WriteFile(path, []byte(sampleModule), 0o600); err != nil {
+		t.Fatalf("write sample module: %v", err)
+	}
+	loader, err := NewLoader(dir)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
 	}
 	if err := loader.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh after delete: %v", err)
+		t.Fatalf("Refresh: %v", err)
 	}
-	if modules := loader.List(); len(modules) != 0 {
-		t.Fatalf("expected empty list after delete, got %d", len(modules))
+	if err := loader.Delete("noop"); !errors.Is(err, ErrModuleNotFound) {
+		t.Fatalf("expected ErrModuleNotFound deleting unregistered file, got %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected unregistered file to remain on disk: %v", err)
 	}
 }
 
