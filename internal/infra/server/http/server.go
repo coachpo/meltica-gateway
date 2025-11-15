@@ -237,10 +237,18 @@ func (s *httpServer) listStrategyModules(w http.ResponseWriter, r *http.Request)
 	if s.manager != nil {
 		strategyDirectory = s.manager.StrategyDirectory()
 	}
-	filtered, total, offset, limit, err := filterModuleSummaries(modules, r.URL.Query())
+	values := r.URL.Query()
+	if raw := values.Get("runningOnly"); raw != "" {
+		writeError(w, http.StatusBadRequest, "runningOnly is no longer supported; use /strategies/modules/{selector}/usage")
+		return
+	}
+	filtered, total, offset, limit, err := filterModuleSummaries(modules, values)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	for i := range filtered {
+		filtered[i].Running = nil
 	}
 	response := map[string]any{
 		"modules":           filtered,
@@ -261,14 +269,6 @@ func filterModuleSummaries(modules []js.ModuleSummary, values url.Values) ([]js.
 
 	strategyFilter := strings.TrimSpace(values.Get("strategy"))
 	hashFilter := strings.TrimSpace(values.Get("hash"))
-	runningOnly := false
-	if raw := values.Get("runningOnly"); raw != "" {
-		val, err := strconv.ParseBool(raw)
-		if err != nil {
-			return nil, 0, 0, 0, fmt.Errorf("runningOnly must be a boolean")
-		}
-		runningOnly = val
-	}
 
 	limit := -1
 	if raw := values.Get("limit"); raw != "" {
@@ -292,7 +292,7 @@ func filterModuleSummaries(modules []js.ModuleSummary, values url.Values) ([]js.
 		if strategyFilter != "" && !strings.EqualFold(module.Name, strategyFilter) {
 			continue
 		}
-		if filteredModule, include := applyModuleFilters(module, hashFilter, runningOnly); include {
+		if filteredModule, include := applyModuleFilters(module, hashFilter); include {
 			filtered = append(filtered, filteredModule)
 		}
 	}
@@ -313,20 +313,15 @@ func filterModuleSummaries(modules []js.ModuleSummary, values url.Values) ([]js.
 	return paged, total, offset, limit, nil
 }
 
-func applyModuleFilters(module js.ModuleSummary, hashFilter string, runningOnly bool) (js.ModuleSummary, bool) {
+func applyModuleFilters(module js.ModuleSummary, hashFilter string) (js.ModuleSummary, bool) {
 	filtered := module
 	filtered.Revisions = filterModuleRevisions(module.Revisions, hashFilter)
-	filtered.Running = filterModuleRunning(module.Running, hashFilter)
 
 	if strings.TrimSpace(hashFilter) != "" {
-		if len(filtered.Revisions) == 0 && len(filtered.Running) == 0 {
+		if len(filtered.Revisions) == 0 {
 			var empty js.ModuleSummary
 			return empty, false
 		}
-	}
-	if runningOnly && len(filtered.Running) == 0 {
-		var empty js.ModuleSummary
-		return empty, false
 	}
 	return filtered, true
 }
@@ -343,26 +338,6 @@ func filterModuleRevisions(revisions []js.ModuleRevision, hashFilter string) []j
 		}
 		revCopy := revision
 		out = append(out, revCopy)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func filterModuleRunning(running []js.ModuleUsage, hashFilter string) []js.ModuleUsage {
-	if len(running) == 0 {
-		return nil
-	}
-	normalized := strings.TrimSpace(hashFilter)
-	out := make([]js.ModuleUsage, 0, len(running))
-	for _, usage := range running {
-		if normalized != "" && !strings.EqualFold(usage.Hash, normalized) {
-			continue
-		}
-		usageCopy := usage
-		usageCopy.Instances = append([]string(nil), usage.Instances...)
-		out = append(out, usageCopy)
 	}
 	if len(out) == 0 {
 		return nil
@@ -559,6 +534,7 @@ func (s *httpServer) getStrategyModule(w http.ResponseWriter, name string) {
 		s.writeStrategyModuleError(w, err)
 		return
 	}
+	summary.Running = nil
 	writeJSON(w, http.StatusOK, summary)
 }
 

@@ -935,7 +935,6 @@ func TestFilterModuleSummaries(t *testing.T) {
 		{
 			Name:      "alpha",
 			Revisions: []js.ModuleRevision{{Hash: "sha256:a"}},
-			Running:   []js.ModuleUsage{{Hash: "sha256:a", Count: 2, Instances: []string{"one"}}},
 		},
 		{
 			Name:      "beta",
@@ -944,24 +943,8 @@ func TestFilterModuleSummaries(t *testing.T) {
 	}
 
 	values := url.Values{}
-	values.Set("runningOnly", "true")
-	filtered, total, offset, limit, err := filterModuleSummaries(modules, values)
-	if err != nil {
-		t.Fatalf("runningOnly filter: %v", err)
-	}
-	if total != 1 || len(filtered) != 1 {
-		t.Fatalf("expected single running module, got total=%d filtered=%d", total, len(filtered))
-	}
-	if filtered[0].Name != "alpha" {
-		t.Fatalf("expected alpha module, got %s", filtered[0].Name)
-	}
-	if offset != 0 || limit != -1 {
-		t.Fatalf("unexpected pagination defaults offset=%d limit=%d", offset, limit)
-	}
-
-	values = url.Values{}
 	values.Set("hash", "sha256:b")
-	filtered, total, _, _, err = filterModuleSummaries(modules, values)
+	filtered, total, _, _, err := filterModuleSummaries(modules, values)
 	if err != nil {
 		t.Fatalf("hash filter: %v", err)
 	}
@@ -973,6 +956,7 @@ func TestFilterModuleSummaries(t *testing.T) {
 	}
 
 	values = url.Values{}
+	var offset, limit int
 	values.Set("strategy", "alpha")
 	values.Set("limit", "1")
 	values.Set("offset", "0")
@@ -991,6 +975,16 @@ func TestFilterModuleSummaries(t *testing.T) {
 	values.Set("limit", "-1")
 	if _, _, _, _, err := filterModuleSummaries(modules, values); err == nil {
 		t.Fatalf("expected error for negative limit")
+	}
+}
+
+func TestListStrategyModulesRejectsRunningOnly(t *testing.T) {
+	server := &httpServer{}
+	req := httptest.NewRequest(http.MethodGet, "/strategies/modules?runningOnly=true", nil)
+	rec := httptest.NewRecorder()
+	server.listStrategyModules(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for runningOnly, got %d (%s)", rec.Code, rec.Body.String())
 	}
 }
 
