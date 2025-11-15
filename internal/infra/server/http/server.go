@@ -85,13 +85,7 @@ type contextBackup struct {
 }
 
 type strategyModulePayload struct {
-	Filename      string   `json:"filename,omitempty"`
-	Name          string   `json:"name,omitempty"`
-	Tag           string   `json:"tag,omitempty"`
-	Aliases       []string `json:"aliases,omitempty"`
-	ReassignTags  []string `json:"reassignTags,omitempty"`
-	PromoteLatest *bool    `json:"promoteLatest,omitempty"`
-	Source        string   `json:"source"`
+	Source string `json:"source"`
 }
 
 type strategyTagPayload struct {
@@ -397,23 +391,7 @@ func (s *httpServer) createStrategyModule(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "source required")
 		return
 	}
-	aliases := sanitizeAliases(payload.Aliases)
-	reassign := sanitizeAliases(payload.ReassignTags)
-	promote := true
-	if payload.PromoteLatest != nil {
-		promote = *payload.PromoteLatest
-	}
-	nameHint := strings.TrimSpace(payload.Name)
-	opts := js.ModuleWriteOptions{
-		Filename:      strings.TrimSpace(payload.Filename),
-		Tag:           strings.TrimSpace(payload.Tag),
-		Aliases:       aliases,
-		ReassignTags:  reassign,
-		PromoteLatest: promote,
-	}
-	if opts.Filename == "" && nameHint != "" {
-		opts.Filename = fmt.Sprintf("%s.js", strings.ToLower(nameHint))
-	}
+	opts := js.ModuleWriteOptions{PromoteLatest: true}
 	resolution, err := s.manager.UpsertStrategy([]byte(payload.Source), opts)
 	if err != nil {
 		s.writeStrategyModuleError(w, err)
@@ -648,23 +626,7 @@ func (s *httpServer) updateStrategyModule(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "source required")
 		return
 	}
-	aliases := sanitizeAliases(payload.Aliases)
-	reassign := sanitizeAliases(payload.ReassignTags)
-	promote := true
-	if payload.PromoteLatest != nil {
-		promote = *payload.PromoteLatest
-	}
-	nameHint := strings.TrimSpace(payload.Name)
-	opts := js.ModuleWriteOptions{
-		Filename:      strings.TrimSpace(payload.Filename),
-		Tag:           strings.TrimSpace(payload.Tag),
-		Aliases:       aliases,
-		ReassignTags:  reassign,
-		PromoteLatest: promote,
-	}
-	if opts.Filename == "" && nameHint != "" {
-		opts.Filename = fmt.Sprintf("%s.js", strings.ToLower(nameHint))
-	}
+	opts := js.ModuleWriteOptions{PromoteLatest: true}
 	resolution, err := s.manager.UpsertStrategy([]byte(source), opts)
 	if err != nil {
 		s.writeStrategyModuleError(w, err)
@@ -809,30 +771,6 @@ func (s *httpServer) refreshStrategies(w http.ResponseWriter, r *http.Request) {
 		"status":  "partial_refresh",
 		"results": results,
 	})
-}
-
-func sanitizeAliases(aliases []string) []string {
-	if len(aliases) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(aliases))
-	out := make([]string, 0, len(aliases))
-	for _, alias := range aliases {
-		trimmed := strings.TrimSpace(alias)
-		if trimmed == "" {
-			continue
-		}
-		lower := strings.ToLower(trimmed)
-		if _, exists := seen[lower]; exists {
-			continue
-		}
-		seen[lower] = struct{}{}
-		out = append(out, lower)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func moduleResolutionPayload(res js.ModuleResolution) map[string]any {
