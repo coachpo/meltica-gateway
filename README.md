@@ -7,7 +7,7 @@ Meltica is a Go 1.25 trading gateway that ingests market data, routes determinis
 - `cmd/gateway`: main binary that loads configs from `config/app.yaml` (or `MELTICA_CONFIG_PATH`).
 - `internal/app|domain|infra|support`: composition roots, domain entities, persistence & telemetry adapters, and shared helpers.
 - `api/`, `docs/`, `deployments/telemetry/`: public contracts, lambda docs, and observability playbooks.
-- `strategies/`: JavaScript reference strategies (git submodule) consumed by the gateway.
+- `strategies/` (optional): drop JavaScript reference strategies here or point `strategies.directory` to another path.
 - `db/migrations` + `internal/infra/persistence/postgres/sqlc`: schema evolution plus generated repositories.
 
 ## Prerequisites
@@ -17,19 +17,19 @@ Meltica is a Go 1.25 trading gateway that ingests market data, routes determinis
 - `golangci-lint` (needed for `make lint`)
 - Optional: Docker/Prometheus if you plan to try telemetry flows
 
-## Clone With Strategy Submodule
+## Clone
 
-The gateway expects `strategies/` to be populated from `github.com/coachpo/meltica-strategy`. Clone Meltica with submodules so the JavaScript registry is available:
+This repository lives at `git@github.com:coachpo/meltica-gateway.git`:
 
 ```bash
-git clone --recurse-submodules git@github.com:coachpo/meltica.git
-cd meltica
+git clone git@github.com:coachpo/meltica-gateway.git
+cd meltica-gateway
 ```
 
-Already have the repo? Pull submodules with:
+Strategies are not bundled. If you want the reference set, clone the companion repo into `./strategies` (or anywhere and point `strategies.directory` to it):
 
 ```bash
-git submodule update --init --recursive
+git clone git@github.com:coachpo/meltica-strategy.git strategies
 ```
 
 ## Configure the Gateway
@@ -81,7 +81,6 @@ Key config sections (see `config/app.example.yaml`):
 | `make test`                | Run `go test ./... -race -count=1 -timeout=30s`.                   |
 | `make coverage`            | Run tests with coverage and enforce the ≥70% bar.                  |
 | `make bench`               | Execute benchmark suites for hot paths.                            |
-| `make contract-ws-routing` | Contract test for websocket routing.                              |
 | `make migrate`/`-down`     | Apply or roll back database migrations.                            |
 | `sqlc generate`            | Rebuild typed PostgreSQL repositories.                             |
 
