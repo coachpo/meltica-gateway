@@ -8,6 +8,7 @@ Meltica is a Go 1.25 trading gateway that ingests market data, routes determinis
 - **Persistence & schema**: Postgres migrations live in `db/migrations`; sqlc-generated repositories live in `internal/infra/persistence/postgres/sqlc`.
 - **Contracts & docs**: Public APIs in `api/`; operational docs and dashboards in `docs/` and `deployments/telemetry/`.
 - **Strategies**: Drop reference strategies in `strategies/` or point `strategies.directory` elsewhere. Experimental adapters live under `hypnotism/` and `strategies/` submodules when present.
+- **Ecosystem fit**: The Next.js **meltica-client** UI calls this gateway’s REST API (default `:8880`) to list/upload strategies, manage providers, and operate instances. Strategy bundles come from the **meltica-strategy** registry—`strategies.directory` should point at that repo (or a synced copy), and the loader reads `registry.json` exclusively.
 
 ## Project Layout
 - `cmd/gateway` — gateway binary and CLI flags (`-config`, env `MELTICA_CONFIG_PATH`).
